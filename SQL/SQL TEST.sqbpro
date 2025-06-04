@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?><sqlb_project><db path="SQL TEST.db" readonly="0" foreign_keys="1" case_sensitive_like="0" temp_store="0" wal_autocheckpoint="1000" synchronous="2"/><attached/><window><main_tabs open="structure browser pragmas query" current="0"/></window><tab_structure><column_width id="0" width="300"/><column_width id="1" width="0"/><column_width id="2" width="100"/><column_width id="3" width="1540"/><column_width id="4" width="0"/><expanded_item id="0" parent="1"/><expanded_item id="1" parent="1"/><expanded_item id="2" parent="1"/><expanded_item id="3" parent="1"/></tab_structure><tab_browse><table title=".Browsables" custom_title="0" dock_id="1" table="0,10:Browsables"/><dock_state state="000000ff00000000fd00000001000000020000079c00000214fc0100000001fb000000160064006f0063006b00420072006f007700730065003101000000000000079c0000011800ffffff000002580000000000000004000000040000000800000008fc00000000"/><default_encoding codec=""/><browse_table_settings/></tab_browse><tab_sql><sql name="SQL 1*">CREATE TABLE EventLog (
+    LogID INTEGER PRIMARY KEY AUTOINCREMENT,        -- Auto-incrementing ID in SQLite
+    LogTimestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Timestamp when record was inserted
+    EventType TEXT NULL,                           -- e.g., 'Log on', 'Custom Event 1', 'SVP'
+    EventText TEXT NULL,                           -- Specific message for the event
+
+    -- === TXT File Columns (Names must match settings) ===
+    TxtDate TEXT NULL,          -- Example: Match 'Date' field column name
+    TxtTime TEXT NULL,          -- Example: Match 'Time' field column name
+    KP TEXT NULL,               -- Example: Match 'KP' field column name
+    DCC TEXT NULL,              -- Example: Match 'DCC' field column name
+    LineName TEXT NULL,         -- Example: Match 'Line name' field column name
+    Latitude REAL NULL,         -- Use REAL for floating-point numbers in SQLite
+    Longitude REAL NULL,        -- Use REAL for floating-point numbers in SQLite
+    Easting REAL NULL,          -- Use REAL for floating-point numbers in SQLite
+    Northing REAL NULL,         -- Use REAL for floating-point numbers in SQLite
+
+    -- === Monitored Folder Columns (Names must match settings) ===
+    QinsyDbFile TEXT NULL,      -- Example: Match 'Qinsy DB' folder column name
+    NaviscanFile TEXT NULL,     -- Example: Match 'Naviscan' folder column name
+    SISFile TEXT NULL,          -- Example: Match 'SIS' folder column name
+    SSSFile TEXT NULL,          -- Example: Match 'SSS' folder column name
+    SBPFile TEXT NULL,          -- Example: Match 'SBP' folder column name
+    MagFile TEXT NULL,          -- Example: Match 'Mag' folder column name
+    GradFile TEXT NULL,         -- Example: Match 'Grad' folder column name
+    SVPFile TEXT NULL,          -- Example: Match 'SVP' folder column name
+    SpintINSFile TEXT NULL,     -- Example: Match 'SpintINS' folder column name
+    VideoFile TEXT NULL,        -- Example: Match 'Video' folder column name
+    CathxFile TEXT NULL         -- Example: Match 'Cathx' folder column name
+    -- Add more columns here if you add custom folders with specific column names
+);
+
+-- Optional: Create an index for faster querying by timestamp (same syntax works)
+CREATE INDEX IX_EventLog_Timestamp ON EventLog (LogTimestamp);</sql><current_tab id="0"/></tab_sql></sqlb_project>
