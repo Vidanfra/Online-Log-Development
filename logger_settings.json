@@ -25,20 +25,58 @@
         "Northing": false,
         "Event": false
     },
+    "num_custom_buttons": 1,
+    "custom_button_configs": [
+        {
+            "text": "Custom 1",
+            "event_text": "Custom 1 Event"
+        }
+    ],
+    "txt_folder_path_set2": "",
+    "txt_field_columns_set2": {
+        "Date": "Date",
+        "Time": "Time",
+        "KP": "KP",
+        "DCC": "DCC",
+        "Line name": "Line name",
+        "Latitude": "Latitude",
+        "Longitude": "Longitude",
+        "Easting": "Easting",
+        "Northing": "Northing",
+        "Event": "Event"
+    },
+    "txt_field_skips_set2": {
+        "Date": false,
+        "Time": false,
+        "KP": false,
+        "DCC": false,
+        "Line name": false,
+        "Latitude": false,
+        "Longitude": false,
+        "Easting": false,
+        "Northing": false,
+        "Event": false
+    },
+    "num_custom_buttons_set2": 1,
+    "custom_button_configs_set2": [
+        {
+            "text": "CustomS2 1",
+            "event_text": "CustomS2 1 Event"
+        }
+    ],
     "folder_paths": {},
     "folder_columns": {},
     "file_extensions": {},
     "folder_skips": {},
-    "num_custom_buttons": 1,
-    "custom_button_configs": [],
     "button_colors": {
         "Log on": "#90EE90",
         "Log off": "#FFB6C1",
         "Event": "#FFFFE0",
         "SVP": "#ADD8E6",
-        "New Day": "#FFFF99"
+        "New Day": "#FFFF99",
+        "CustomS2 1": "#BAFFC9"
     },
-    "sqlite_enabled": false,
-    "sqlite_db_path": "",
+    "sqlite_enabled": true,
+    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online Log Development/SQL/SQL TEST.db",
     "sqlite_table": "EventLog"
 }

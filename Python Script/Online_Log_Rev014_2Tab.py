@@ -325,6 +325,9 @@ class DataLoggerGUI:
         self.schedule_new_day()
         self.start_monitoring() 
 
+        # Open the settings window by default when the app starts
+        self.startup_settings()
+
     def init_styles(self):
         self.style = ttk.Style()
         try:
@@ -539,7 +542,7 @@ class DataLoggerGUI:
             self._button_editor_active.lift(); return
         editor_dialog = ButtonEditorDialog(self.master, self, config_index=config_index, config_set=config_set)
         self._button_editor_active = editor_dialog
-        self.master.wait_window(editor_dialog)
+        #self.master.wait_window(editor_dialog) #Where is this coming from??
         if hasattr(self, '_button_editor_active'): del self._button_editor_active
 
     def remove_custom_button_action(self, config_index, config_set):
@@ -1355,7 +1358,6 @@ class DataLoggerGUI:
         else: 
             messagebox.showerror("SQLite Operational Error", f"Error with database:\n{error_message}", parent=parent_window)
 
-
     def save_settings(self):
         colors_to_save = {}
         all_custom_configs = self.custom_button_configs + self.custom_button_configs_set2
@@ -1470,9 +1472,13 @@ class DataLoggerGUI:
             self.settings_window_instance = settings_top_level 
             settings_gui = SettingsWindow(settings_top_level, self) # Pass self (DataLoggerGUI instance)
             settings_gui.load_settings() # Load current parent_gui settings into dialog
-            self.master.wait_window(settings_top_level) 
+            #self.master.wait_window(settings_top_level) #Where is this coming from??
             try: del self.settings_window_instance
             except AttributeError: pass
+
+    def startup_settings(self):
+        "Open settings by default in the startup of the app"
+        self.open_settings()
 
     def update_custom_buttons(self): # This now redraws both sets based on current config
         if hasattr(self, 'button_frame') and self.button_frame:
