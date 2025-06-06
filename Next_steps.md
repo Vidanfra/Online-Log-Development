@@ -1,0 +1,11 @@
+| Date       | Feature                       | Description                                    | Status      |
+| :--------- | :---------------------------- | :--------------------------------------------- | :---------- |
+| 05/06/2025 | Hourly KP in Excel            |                                                | To Do       |
+| 05/06/2025 | Save Button Sets              | Load configuration                             | To Do       |
+| 05/06/2025 | TXT Files in Tabs             | One tab for each imported TXT file             | To Do       |
+| 05/06/2025 | Custom Vehicle Buttons        | Buttons organized in one tab for each vehicle  | To Do       |
+| 05/06/2025 | Data Headers                  | Show data from the loaded text file in headers | To Do       |
+| 05/06/2025 | Auto-Open Settings            | Settings window opens automatically on startup | To Do       |
+| 05/06/2025 | Reorder Fixed Buttons         |                                                | To Do       |
+| 05/06/2025 | Hotkeys                       | Keyboard shortcuts for various functions       | To Do       |
+| 05/06/2025 | Layout Shape                  | Long and thin to fit in the Excel top pane     | To Do       |
