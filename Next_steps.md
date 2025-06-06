@@ -9,3 +9,4 @@
 | 05/06/2025 | Reorder Fixed Buttons         |                                                | To Do       |
 | 05/06/2025 | Hotkeys                       | Keyboard shortcuts for various functions       | To Do       |
 | 05/06/2025 | Layout Shape                  | Long and thin to fit in the Excel top pane     | To Do       |
+| 06/06/2025 | Logger always over Excel      | Keep the logger menu always in th front        | To Do       |
