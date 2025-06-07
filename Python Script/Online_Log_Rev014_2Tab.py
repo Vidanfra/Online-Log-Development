@@ -923,24 +923,57 @@ class DataLoggerGUI:
                                  txt_source_set=1) # SVP uses primary TXT source
 
     def _perform_log_action(self, event_type, event_text_for_excel, skip_latest_files=False, svp_specific_handling=False, triggering_button=None, txt_source_set=1): # Added txt_source_set
+        '''This is the main entry point for handling an event (e.g., button press). 
+        It collects all necessary data (from TXT files and folder monitors), 
+        then logs the event to Excel and/or SQLite in a background thread.
+        
+        Arguments:
+        * event_type: The label of the event, e.g., "Log on", "Event", "Custom Event 1".
+        * event_text_for_excel: The actual text that goes into the "Event" column in Excel.
+        * skip_latest_files: Whether to skip checking monitored folders (used for basic events).
+        * svp_specific_handling: Enables special logic if the event is "SVP".
+        * triggering_button: The button that was pressed (used to temporarily disable it).
+        * txt_source_set: Specifies which TXT file set (1 or 2) to use for extracting data.
+
+        Workflow explanation:
+        When you click a button in the GUI:
+        * _perform_log_action() is triggered.
+        * It calls insert_txt_data() to extract latest TXT data.
+        * Then it appends other folder-monitor-based data.
+        * Then it logs everything to:
+        * Excel: with optional row color
+        * SQLite: if enabled
+        * Updates the GUI status with success/failure feedback.
+
+
+
+        '''
+        # Disables the button temporarily and updates status
         print(f"Queueing log action: Type='{event_type}', TXT Set='{txt_source_set}'")
         self.update_status(f"Processing '{event_type}' (TXT Set {txt_source_set})...")
         original_text = None
+        # Disable the button if it exists and is a ttk.Button
         if triggering_button and isinstance(triggering_button, ttk.Button):
             try:
                 if triggering_button.winfo_exists(): 
                     original_text = triggering_button['text']
-                    triggering_button.config(state=tk.DISABLED, text="Working...")
+                    triggering_button.config(state=tk.DISABLED, text="Working...") # Temporarily disable button
             except tk.TclError:
                 print("Warning: Could not disable button."); triggering_button = None
 
+        # Define a background thread to avoid blocking the GUI
         def _worker_thread_func():
             nonlocal original_text 
-            row_data = {}; excel_success = False; sqlite_logged = False
-            excel_save_exception = None; sqlite_save_exception_type = None
+            # Prepares an empty data row with a RecordID
+            row_data = {}
+            excel_success = False
+            sqlite_logged = False
+            excel_save_exception = None
+            sqlite_save_exception_type = None
             status_msg = f"'{event_type}' processed with errors."
             record_id = str(uuid.uuid4())
             row_data['RecordID'] = record_id
+            
             try:
                 # Determine which Event column name to use based on txt_source_set
                 current_txt_field_columns = self.txt_field_columns if txt_source_set == 1 else self.txt_field_columns_set2
@@ -951,12 +984,15 @@ class DataLoggerGUI:
                     row_data[event_col_name] = event_text_for_excel
                 
                 try:
+                    # Calls insert_txt_data() to extract data from the latest TXT file
                     txt_data = self.insert_txt_data(txt_source_set=txt_source_set) # Pass txt_source_set
-                    if txt_data: row_data.update(txt_data)
+                    if txt_data: 
+                        row_data.update(txt_data)
                 except Exception as e_txt:
                     print(f"Thread '{event_type}': Error fetching TXT (Set {txt_source_set}) data: {e_txt}")
                     self.master.after(0, lambda e=e_txt: messagebox.showerror("Error", f"Failed to read TXT (Set {txt_source_set}) data:\n{e}", parent=self.master))
-                
+
+                # Adds latest monitored file names (get_latest_files_data()) if applicable
                 if not skip_latest_files: # Folder monitors are global, not per-set
                     try:
                         latest_files_data = self.get_latest_files_data()
@@ -964,7 +1000,8 @@ class DataLoggerGUI:
                     except Exception as e_files:
                         print(f"Thread '{event_type}': Error fetching latest file data: {e_files}")
                         self.master.after(0, lambda e=e_files: messagebox.showerror("Error", f"Failed to get latest file data:\n{e}", parent=self.master))
-                
+
+                # Adds SVP file info if applicable
                 if svp_specific_handling: # SVP logic also global
                     svp_folder_path = self.folder_paths.get("SVP")
                     svp_col_name = self.folder_columns.get("SVP", "SVP")
@@ -975,6 +1012,7 @@ class DataLoggerGUI:
                         print("SVP folder not defined in settings.")
                         row_data[svp_col_name] = "Config Error"
                 
+                # If row_data has data, proceed to save to Excel and SQLite (save_to_excel()) and log_to_sqlite())
                 if row_data:
                     color_tuple = self.button_colors.get(event_type, (None, None))
                     row_color_for_excel = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
@@ -983,14 +1021,19 @@ class DataLoggerGUI:
                         if not self.log_file_path: excel_save_exception = ValueError("Excel path missing")
                         elif not os.path.exists(self.log_file_path): excel_save_exception = FileNotFoundError("Excel file missing")
                         else:
+                            # Save the data to Excel
                             self.save_to_excel(excel_data, row_color=row_color_for_excel)
                             excel_success = True
                     except Exception as e_excel:
                         excel_save_exception = e_excel
-                        print(f"Thread '{event_type}': Error saving to Excel: {e_excel}"); traceback.print_exc()
+                        print(f"Thread '{event_type}': Error saving to Excel: {e_excel}")
+                        traceback.print_exc()
                         self.master.after(0, lambda e=e_excel: messagebox.showerror("Excel Error", f"Failed to save to Excel:\n{e}", parent=self.master))
                     
+                    # If Excel save was successful, log to SQLite
                     sqlite_logged, sqlite_save_exception_type = self.log_to_sqlite(row_data)
+
+                    # Constructs a status message to show whether Excel and SQLite logging succeeded or failed.
                     status_parts = []
                     if excel_success: status_parts.append("Excel: OK")
                     elif excel_save_exception: status_parts.append(f"Excel: Fail ({type(excel_save_exception).__name__})")
@@ -1014,6 +1057,8 @@ class DataLoggerGUI:
             finally:
                 print(f"Thread '{event_type}': Action finished. Status: {status_msg}")
                 self.master.after(0, self.update_status, status_msg)
+
+            # Re-enables the button if it was disabled
                 if triggering_button and isinstance(triggering_button, ttk.Button):
                     def re_enable_button(btn=triggering_button, txt=original_text):
                         try:
@@ -1022,14 +1067,25 @@ class DataLoggerGUI:
                                 if txt: btn.config(text=txt)
                         except tk.TclError: print("Warn: Could not re-enable button.")
                     self.master.after(0, re_enable_button)
+        
+        # Start the worker thread to handle the logging action
         log_thread = threading.Thread(target=_worker_thread_func, daemon=True)
         log_thread.start()
 
     def insert_txt_data(self, txt_source_set=1): # Added txt_source_set
-        row_data = {}; current_dt = datetime.datetime.now(); current_timestamp = time.time()
-        use_pc_time = False; reason_for_pc_time = ""
+        '''Extracts structured data from the most recent TXT file in the specified folder (Set 1 or Set 2), 
+        or uses the PC's system time as fallback if the file is missing or outdated.
 
-        # Determine which set of TXT configs to use
+        Arguments:
+        * txt_source_set: 1 or 2, determines which TXT file set to use (Set 1 or Set 2).'''
+
+        row_data = {}
+        current_dt = datetime.datetime.now()
+        current_timestamp = time.time()
+        use_pc_time = False
+        reason_for_pc_time = ""
+
+        # Selects the appropriate config (self.txt_folder_path, column mappings, etc.) based on txt_source_set
         if txt_source_set == 1:
             current_txt_folder_path = self.txt_folder_path
             current_txt_file_path_attr = 'txt_file_path' # Attribute name to set on self
@@ -1046,56 +1102,95 @@ class DataLoggerGUI:
             print(f"Error: Invalid txt_source_set: {txt_source_set}")
             return {}
 
-
+        # Check if the folder path is set and exists
         if not current_txt_folder_path or not os.path.exists(current_txt_folder_path):
-            print(f"Warn: TXT folder path (Set {txt_source_set}) missing or invalid."); use_pc_time = True; reason_for_pc_time = f"TXT folder (Set {txt_source_set}) path missing"; setattr(self, current_txt_file_path_attr, None)
+            print(f"Warn: TXT folder path (Set {txt_source_set}) missing or invalid.")
+            use_pc_time = True # Used PC time because there isn't time from the TXT file available 
+            reason_for_pc_time = f"TXT folder (Set {txt_source_set}) path missing"
+            setattr(self, current_txt_file_path_attr, None)
         else:
             latest_file_for_set = self.find_latest_file_in_folder(current_txt_folder_path, ".txt")
             setattr(self, current_txt_file_path_attr, latest_file_for_set) # Store it on self
             if not latest_file_for_set:
-                print(f"Warn: No TXT file found (Set {txt_source_set})."); use_pc_time = True; reason_for_pc_time = f"No TXT file found (Set {txt_source_set})"
+                print(f"Warn: No TXT file found (Set {txt_source_set}).")
+                use_pc_time = True # Used PC time because there isn't time from the TXT file available 
+                reason_for_pc_time = f"No TXT file found (Set {txt_source_set})"
         
         current_txt_file_to_check = getattr(self, current_txt_file_path_attr) # Get the stored path
 
+        # Check if the file exists and the modification time is recent (within 1 second)
         if current_txt_file_to_check and not use_pc_time:
             try:
-                file_mod_timestamp = os.path.getmtime(current_txt_file_to_check); time_diff = current_timestamp - file_mod_timestamp
-                if time_diff > 1.0:
+                file_mod_timestamp = os.path.getmtime(current_txt_file_to_check) # Get the last modification time of the file
+                time_diff = current_timestamp - file_mod_timestamp
+                if time_diff > 1.0: # If the file was modified more than 1 second ago, use PC time
                     print(f"Info: TXT file (Set {txt_source_set}) '{os.path.basename(current_txt_file_to_check)}' modified {time_diff:.2f}s ago.")
-                    use_pc_time = True; reason_for_pc_time = f"file (Set {txt_source_set}) modified {time_diff:.2f}s ago"
+                    use_pc_time = True
+                    reason_for_pc_time = f"file (Set {txt_source_set}) modified {time_diff:.2f}s ago"
             except OSError as e_modtime:
                 print(f"Warn: Could not get mod time for TXT (Set {txt_source_set}) '{current_txt_file_to_check}': {e_modtime}.")
-                use_pc_time = True; reason_for_pc_time = f"failed to get mod time (Set {txt_source_set})"
+                use_pc_time = True
+                reason_for_pc_time = f"failed to get mod time (Set {txt_source_set})"
         
-        txt_data_found = False; parse_success = True; temp_txt_data = {}
+        txt_data_found = False
+        parse_success = True
+        temp_txt_data = {}
+
+        # If we are not using PC time, read the TXT file
         if not use_pc_time and current_txt_file_to_check:
             print(f"Info: Reading TXT (Set {txt_source_set}) file: {os.path.basename(current_txt_file_to_check)}")
             try:
-                lines = []; encodings_to_try = ['utf-8', 'latin-1', 'cp1252']; read_success = False; last_error = None
+                lines = []
+                encodings_to_try = ['utf-8', 'latin-1', 'cp1252']
+                read_success = False 
+                last_error = None
+
+                # Try reading the file with different encodings (utf-8, latin-1, cp1252)
                 for enc in encodings_to_try:
                     try:
                         for attempt in range(3):
                             try:
-                                with open(current_txt_file_to_check, "r", encoding=enc) as file: lines = file.readlines()
-                                read_success = True; break 
+                                with open(current_txt_file_to_check, "r", encoding=enc) as file: 
+                                    lines = file.readlines() # Read all lines from the file
+                                read_success = True
+                                break 
                             except IOError as e_io:
-                                if attempt < 2: time.sleep(0.1); continue
-                                else: raise e_io 
-                        if read_success: break 
-                    except UnicodeDecodeError: last_error = f"UnicodeDecodeError with {enc}"; continue
-                    except Exception as e_open: last_error = f"Error reading TXT (Set {txt_source_set}) file {os.path.basename(current_txt_file_to_check)} with {enc}: {e_open}"; print(last_error); lines = []; break
+                                if attempt < 2: 
+                                    time.sleep(0.1)
+                                    continue
+                                else:
+                                    raise e_io 
+                        if read_success:
+                            break 
+                    except UnicodeDecodeError: 
+                        last_error = f"UnicodeDecodeError with {enc}"
+                        continue
+                    except Exception as e_open: 
+                        last_error = f"Error reading TXT (Set {txt_source_set}) file {os.path.basename(current_txt_file_to_check)} with {enc}: {e_open}"
+                        print(last_error)
+                        lines = []
+                        break
+                # If we failed to read the file with all encodings, set use_pc_time
                 if not read_success and not lines:
                     print(f"Warn: Could not decode/read TXT (Set {txt_source_set}) file. Last error: {last_error}")
-                    use_pc_time = True; reason_for_pc_time = f"failed to read/decode TXT (Set {txt_source_set})"
+                    use_pc_time = True
+                    reason_for_pc_time = f"failed to read/decode TXT (Set {txt_source_set})"
                 if lines:
-                    latest_line_str = lines[-1].strip(); latest_line_parts = latest_line_str.split(",")
+                    latest_line_str = lines[-1].strip()
+                    latest_line_parts = latest_line_str.split(",") # Split by comma last line
+
                     field_keys = ["Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing"] # Standard field keys
+                    # Extracts fields like Date, Time, KP, DCC, etc., from the last line
                     for i, field_key in enumerate(field_keys):
-                        excel_col = current_txt_field_columns.get(field_key); skip_field = current_txt_field_skips.get(field_key, False)
+                        excel_col = current_txt_field_columns.get(field_key)
+                        skip_field = current_txt_field_skips.get(field_key, False)
                         if excel_col and not skip_field:
                             try:
-                                value = latest_line_parts[i].strip(); temp_txt_data[excel_col] = value
-                                if field_key in ["Date", "Time"]: txt_data_found = True 
+                                value = latest_line_parts[i].strip()
+                                # Get the value from the last line, strip whitespace
+                                temp_txt_data[excel_col] = value
+                                if field_key in ["Date", "Time"]: 
+                                    txt_data_found = True 
                             except IndexError:
                                 temp_txt_data[excel_col] = None; print(f"Warn: Field '{field_key}' missing in TXT (Set {txt_source_set}) for '{excel_col}'.")
                                 if field_key in ["Date", "Time"]: parse_success = False 
@@ -1108,20 +1203,27 @@ class DataLoggerGUI:
                     if not use_pc_time: print(f"Info: TXT (Set {txt_source_set}) file found but empty/unreadable."); use_pc_time = True; reason_for_pc_time = f"TXT (Set {txt_source_set}) file empty/unreadable"
             except Exception as e: 
                 print(f"Error processing TXT (Set {txt_source_set}) file: {e}"); traceback.print_exc()
-                if not use_pc_time: use_pc_time = True; reason_for_pc_time = f"unexpected error processing TXT (Set {txt_source_set}): {type(e).__name__}"
-        
+                if not use_pc_time: use_pc_time = True
+                reason_for_pc_time = f"unexpected error processing TXT (Set {txt_source_set}): {type(e).__name__}"
+        # If we are using PC time, set the Date and Time fields
         if use_pc_time:
             print(f"Info: Using PC Time/Date for {set_label_for_messages}. Reason: {reason_for_pc_time}.")
-            date_col = current_txt_field_columns.get("Date"); time_col = current_txt_field_columns.get("Time")
-            skip_date = current_txt_field_skips.get("Date", False); skip_time = current_txt_field_skips.get("Time", False)
+            date_col = current_txt_field_columns.get("Date")
+            time_col = current_txt_field_columns.get("Time")
+            skip_date = current_txt_field_skips.get("Date", False)
+            skip_time = current_txt_field_skips.get("Time", False)
             if date_col and not skip_date: row_data[date_col] = current_dt.strftime("%Y-%m-%d")
             if time_col and not skip_time: row_data[time_col] = current_dt.strftime("%H:%M:%S")
+            # If we are using PC time, fill in other fields from the TXT data if available
             for col, val in temp_txt_data.items():
                 if col != date_col and col != time_col: 
                     if col not in row_data: row_data[col] = val
         else:
             print(f"Info: Using Date and Time from recent TXT file (Set {txt_source_set}).")
+            # If we successfully parsed the TXT data, add it to row_data
             row_data.update(temp_txt_data)
+
+        # Returns a dictionary of column names and values (ready to be written to Excel/SQLite)
         return row_data
 
     def get_latest_files_data(self): # This is global for monitored folders
@@ -1477,7 +1579,8 @@ class DataLoggerGUI:
             except AttributeError: pass
 
     def startup_settings(self):
-        "Open settings by default in the startup of the app"
+        '''Open settings by default in the startup of the app'''
+
         self.open_settings()
 
     def update_custom_buttons(self): # This now redraws both sets based on current config
@@ -1488,26 +1591,33 @@ class DataLoggerGUI:
         else: print("Error: Button frame does not exist when trying to update buttons.")
 
     def start_monitoring(self):
-        # ... (Unchanged from previous version, monitoring is global)
+        '''Function to read the last version of a file in several folders'''
+
         print("Stopping existing monitors...")
         monitoring_was_active = False
         for name, monitor_observer in list(self.monitors.items()):
             try:
                 if monitor_observer.is_alive():
-                    monitor_observer.stop(); monitoring_was_active = True
-                print(f"Stopped monitor '{name}'.")
-            except Exception as e: print(f"Error stopping monitor '{name}': {e}")
-        self.monitors.clear(); folder_cache.clear()
+                    monitor_observer.stop()
+                    monitoring_was_active = True
+                    print(f"Stopped monitor '{name}'.")
+            except Exception as e: 
+                print(f"Error stopping monitor '{name}': {e}")
+        self.monitors.clear()
+        folder_cache.clear()
+
         if monitoring_was_active: print("All active monitors stopped.")
         else: print("No active monitors to stop.")
 
         print("Starting folder monitoring based on settings...")
-        count = 0; monitoring_active = False
+        count = 0
+        monitoring_active = False
         for folder_name, folder_path in self.folder_paths.items():
             if folder_path and os.path.isdir(folder_path) and not self.folder_skips.get(folder_name, False):
                 file_extension = self.file_extensions.get(folder_name, "")
                 success = self.start_folder_monitoring(folder_name, folder_path, file_extension)
-                if success: count += 1; monitoring_active = True
+                if success: count += 1
+                monitoring_active = True
             elif self.folder_skips.get(folder_name): pass
             elif folder_path: print(f"Skipping monitor for '{folder_name}': Path ('{folder_path}') invalid.")
         

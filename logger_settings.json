@@ -22,7 +22,7 @@
         "Latitude": false,
         "Longitude": false,
         "Easting": false,
-        "Northing": false,
+        "Northing": true,
         "Event": false
     },
     "num_custom_buttons": 1,
@@ -64,10 +64,18 @@
             "event_text": "CustomS2 1 Event"
         }
     ],
-    "folder_paths": {},
-    "folder_columns": {},
-    "file_extensions": {},
-    "folder_skips": {},
+    "folder_paths": {
+        "Qinsy DB": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online Log Development/CSV"
+    },
+    "folder_columns": {
+        "Qinsy DB": "Qinsy DB"
+    },
+    "file_extensions": {
+        "Qinsy DB": "KP"
+    },
+    "folder_skips": {
+        "Qinsy DB": false
+    },
     "button_colors": {
         "Log on": "#90EE90",
         "Log off": "#FFB6C1",
