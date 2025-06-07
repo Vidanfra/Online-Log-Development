@@ -65,3 +65,6 @@ It is especially useful for survey/data acquisition operations that require prec
 - All button presses log data from the latest `.txt` file and add it to the Excel log and/or SQLite.
 - Uses a JSON config file (`logger_settings.json`) to store settings persistently.
 - Designed for stability on field operations with auto-recovery for most common errors.
+
+## ✍🏻 Authors
+- Program developed by Pierre Lowe with contributions of Vicente Danvila
