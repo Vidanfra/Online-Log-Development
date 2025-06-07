@@ -1,88 +1,112 @@
 {
     "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online Log Development/Excel Template/Rheinemtall_SampleTestLog_v2.xlsx",
     "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online Log Development/CSV",
-    "txt_field_columns": {
-        "Date": "Date",
-        "Time": "Time",
-        "KP": "KP",
-        "DCC": "DCC",
-        "Line name": "Line name",
-        "Latitude": "Latitude",
-        "Longitude": "Longitude",
-        "Easting": "Easting",
-        "Northing": "Northing",
-        "Event": "Event"
-    },
-    "txt_field_skips": {
-        "Date": false,
-        "Time": false,
-        "KP": false,
-        "DCC": false,
-        "Line name": false,
-        "Latitude": false,
-        "Longitude": false,
-        "Easting": false,
-        "Northing": true,
-        "Event": false
-    },
-    "num_custom_buttons": 1,
-    "custom_button_configs": [
-        {
-            "text": "Custom 1",
-            "event_text": "Custom 1 Event"
-        }
-    ],
     "txt_folder_path_set2": "",
-    "txt_field_columns_set2": {
-        "Date": "Date",
-        "Time": "Time",
-        "KP": "KP",
-        "DCC": "DCC",
-        "Line name": "Line name",
-        "Latitude": "Latitude",
-        "Longitude": "Longitude",
-        "Easting": "Easting",
-        "Northing": "Northing",
-        "Event": "Event"
-    },
-    "txt_field_skips_set2": {
-        "Date": false,
-        "Time": false,
-        "KP": false,
-        "DCC": false,
-        "Line name": false,
-        "Latitude": false,
-        "Longitude": false,
-        "Easting": false,
-        "Northing": false,
-        "Event": false
-    },
-    "num_custom_buttons_set2": 1,
-    "custom_button_configs_set2": [
+    "txt_folder_path_set3": "",
+    "txt_field_columns_config": [
         {
-            "text": "CustomS2 1",
-            "event_text": "CustomS2 1 Event"
+            "field": "Date",
+            "column_name": "Date",
+            "skip": false
+        },
+        {
+            "field": "Time",
+            "column_name": "Time",
+            "skip": false
+        },
+        {
+            "field": "KP",
+            "column_name": "KP",
+            "skip": false
+        },
+        {
+            "field": "DCC",
+            "column_name": "DCC",
+            "skip": false
+        },
+        {
+            "field": "Line name",
+            "column_name": "Line name",
+            "skip": false
+        },
+        {
+            "field": "Latitude",
+            "column_name": "Latitude",
+            "skip": false
+        },
+        {
+            "field": "Longitude",
+            "column_name": "Longitude",
+            "skip": false
+        },
+        {
+            "field": "Easting",
+            "column_name": "Easting",
+            "skip": false
+        },
+        {
+            "field": "Northing",
+            "column_name": "Northing",
+            "skip": false
+        },
+        {
+            "field": "Event",
+            "column_name": "Event",
+            "skip": false
         }
     ],
     "folder_paths": {
-        "Qinsy DB": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online Log Development/CSV"
+        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online Log Development/CSV"
     },
     "folder_columns": {
-        "Qinsy DB": "Qinsy DB"
+        "Main TXT File": "Main_TXT_File_File"
     },
     "file_extensions": {
-        "Qinsy DB": "KP"
+        "Main TXT File": "txt"
     },
     "folder_skips": {
-        "Qinsy DB": false
+        "Main TXT File": false
     },
+    "num_custom_buttons": 6,
+    "custom_button_configs": [
+        {
+            "text": "Custom 1",
+            "event_text": "Custom 1 Event",
+            "txt_source_key": "Main TXT"
+        },
+        {
+            "text": "Custom 2",
+            "event_text": "Custom 2 Triggered",
+            "txt_source_key": "TXT Source 3"
+        },
+        {
+            "text": "Custom 3",
+            "event_text": "Custom 3 Event",
+            "txt_source_key": "TXT Source 2"
+        },
+        {
+            "text": "Custom 4",
+            "event_text": "Custom 4 Event",
+            "txt_source_key": "Main TXT"
+        },
+        {
+            "text": "Custom 5",
+            "event_text": "Custom 5 Event",
+            "txt_source_key": "TXT Source 2"
+        },
+        {
+            "text": "Custom 6",
+            "event_text": "Custom 6 Event",
+            "txt_source_key": "TXT Source 3"
+        }
+    ],
     "button_colors": {
         "Log on": "#90EE90",
         "Log off": "#FFB6C1",
         "Event": "#FFFFE0",
         "SVP": "#ADD8E6",
         "New Day": "#FFFF99",
-        "CustomS2 1": "#BAFFC9"
+        "Custom 2": "#FFB3BA"
     },
     "sqlite_enabled": true,
     "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online Log Development/SQL/SQL TEST.db",
