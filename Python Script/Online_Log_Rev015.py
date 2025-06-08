@@ -170,8 +170,8 @@ class FolderMonitor(FileSystemEventHandler):
                     if folder_cache.get(self.folder_name) != file_name:
                         folder_cache[self.folder_name] = file_name
                         # Update status via GUI thread safely
-                        if self.gui_instance and hasattr(self.gui_instance, 'master') and self.gui_instance.master.winfo_exists():
-                           self.gui_instance.master.after(0, self.gui_instance.update_status, f"Latest {self.folder_name} file: {file_name}")
+                        #if self.gui_instance and hasattr(self.gui_instance, 'master') and self.gui_instance.master.winfo_exists():
+                        #   self.gui_instance.master.after(0, self.gui_instance.update_status, f"Latest {self.folder_name} file: {file_name}")
         except Exception as e:
             print(f"Error updating cache for {self.folder_name}: {e}")
             traceback.print_exc()
@@ -873,7 +873,7 @@ class DataLoggerGUI:
         except Exception as e:
             traceback.print_exc()
             if conn_sqlite:
-                try: conn.rollback()
+                try: conn_sqlite.rollback()
                 except Exception: pass
                 conn_sqlite.close()
             return False, f"Sync Error: Unexpected error updating SQLite - {type(e).__name__}"
@@ -921,27 +921,28 @@ class DataLoggerGUI:
         This method checks if SQLite logging is enabled, verifies the database file path, and updates the label text and color accordingly.
         It also handles cases where the database file is missing or the path is not set.
         '''
-        if not hasattr(self, 'db_status_label') or not self.db_status_label: 
+        if not hasattr(self, 'db_status_label') or not self.db_status_label:
             return
-        if not self.master.winfo_exists(): 
-            return 
+        if not self.master.winfo_exists():
+            return
 
-            status_text = "Disabled"
-            status_color = "gray"
-            if self.sqlite_enabled:
-                if self.sqlite_db_path and os.path.exists(self.sqlite_db_path):
-                    status_text = "Enabled"
-                    status_color = "green"
-                elif self.sqlite_db_path:
-                    status_text = "File Missing"
-                    status_color = "#E65C00"
-                else:
-                    status_text = "Path Missing"
-                    status_color = "#E65C00"
-            try:
-                self.db_status_label.config(text=status_text, foreground=status_color)
-            except tk.TclError:
-                pass # Widget might be destroyed
+        # Corrected indentation for the following block
+        status_text = "Disabled"
+        status_color = "gray"
+        if self.sqlite_enabled:
+            if self.sqlite_db_path and os.path.exists(self.sqlite_db_path):
+                status_text = "Enabled"
+                status_color = "green"
+            elif self.sqlite_db_path:
+                status_text = "File Missing"
+                status_color = "#E65C00"
+            else:
+                status_text = "Path Missing"
+                status_color = "#E65C00"
+        try:
+            self.db_status_label.config(text=status_text, foreground=status_color)
+        except tk.TclError:
+            pass # Widget might be destroyed
 
 
     # --- Logging Actions (using threading) ---
@@ -1182,44 +1183,27 @@ class DataLoggerGUI:
 
     # --- Data Fetching Methods (Refactored to support multiple TXT sources) ---
     def _get_txt_data_from_source(self, folder_path):
-        '''Extracts structured data from the most recent TXT file in the specified folder (Set 1 or Set 2), 
-        or uses the PC's system time as fallback if the file is missing or outdated.
-
-        Arguments:
-        * txt_source_set: 1 or 2, determines which TXT file set to use (Set 1 or Set 2).'''
-
+        """
+        Reads and parses data from the latest TXT file in the specified folder.
+        Uses global self.txt_field_columns and self.txt_field_skips for mapping.
+        Returns a dictionary of parsed data or empty dict if no data/errors.
+        """
         row_data = {}
         current_dt = datetime.datetime.now()
-        current_timestamp = time.time()
-        use_pc_time = False
-        reason_for_pc_time = ""
 
-        if not folder_path or not os.path.exists(folder_path):
-            use_pc_time = True
-            reason_for_pc_time = f"TXT folder path '{folder_path}' missing or invalid"
-            latest_txt_file_path = None
-        else:
+        # Always use PC time, overriding any file-based time logic
+        use_pc_time = True
+        reason_for_pc_time = "Code configured to always use PC time."
+
+        latest_txt_file_path = None
+        if folder_path and os.path.exists(folder_path):
             latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".txt")
-            if not latest_txt_file_path:
-                use_pc_time = True
-                reason_for_pc_time = "No TXT file found in folder"
-
-        if latest_txt_file_path and not use_pc_time:
-            try:
-                file_mod_timestamp = os.path.getmtime(latest_txt_file_path)
-                time_diff = current_timestamp - file_mod_timestamp
-                if time_diff > 1.0:
-                    use_pc_time = True
-                    reason_for_pc_time = f"file modified {time_diff:.2f}s ago"
-            except OSError:
-                use_pc_time = True
-                reason_for_pc_time = "failed to get file modification time"
-
-        txt_data_found = False
-        parse_success = True
+        
         temp_txt_data = {}
 
-        if not use_pc_time and latest_txt_file_path:
+        # Even though we're using PC time for Date/Time, we still attempt to
+        # read other data from the TXT file if it exists and is readable.
+        if latest_txt_file_path:
             try:
                 lines = []
                 encodings_to_try = ['utf-8', 'latin-1', 'cp1252']
@@ -1228,20 +1212,23 @@ class DataLoggerGUI:
                     try:
                         for attempt in range(3):
                             try:
-                                with open(latest_txt_file_path, "r", encoding=enc) as file: lines = file.readlines()
-                                read_success = True; break
+                                with open(latest_txt_file_path, "r", encoding=enc) as file:
+                                    lines = file.readlines()
+                                read_success = True
+                                break
                             except IOError:
-                                if attempt < 2: time.sleep(0.1); continue
-                                else: raise
-                        if read_success: break
+                                if attempt < 2:
+                                    time.sleep(0.1)
+                                    continue
+                                else:
+                                    raise
+                        if read_success:
+                            break
                     except UnicodeDecodeError:
                         continue
                     except Exception:
-                        lines = []; break
-
-                if not read_success and not lines:
-                    use_pc_time = True
-                    reason_for_pc_time = "could not decode or read TXT file"
+                        lines = []
+                        break
 
                 if lines:
                     latest_line_str = lines[-1].strip()
@@ -1254,82 +1241,59 @@ class DataLoggerGUI:
                         skip_field = field_config["skip"]
 
                         if excel_col and not skip_field:
+                            # If it's a Date or Time field, we will override it with PC time later,
+                            # so we can skip reading it from the file here.
+                            if field_key in ["Date", "Time"]:
+                                continue
+
                             # The 'Event' field is typically for event descriptions triggered by buttons,
                             # not usually directly parsed from TXT data in a specific position.
-                            # If it's explicitly configured, we include it, but it might be left blank here.
-                            # If a custom field is named "Event" by the user and *is* expected from TXT,
-                            # then this logic might need further refinement based on use case.
                             if field_key == "Event" and (field_key not in ["Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing"]):
-                                # This handles the case where "Event" is a *custom* field,
-                                # meaning its position in the TXT is user-defined.
-                                # Otherwise, the default "Event" is special.
-                                # For simplicity, if it's the "Event" field, we won't try to read its value from TXT parts.
-                                # Its value comes from the button's event_text.
                                 continue
 
                             try:
-                                # For custom fields, use the index from the ordered config.
-                                # For standard fields, assume their original index if they match.
                                 if i < len(latest_line_parts):
                                     value = latest_line_parts[i].strip()
                                     temp_txt_data[excel_col] = value
-                                    if field_key in ["Date", "Time"]: # Ensure Date/Time are marked as found
-                                        txt_data_found = True
                                 else:
                                     temp_txt_data[excel_col] = None # Field not found at expected index
-                                    if field_key in ["Date", "Time"]: parse_success = False
-
                             except Exception:
                                 temp_txt_data[excel_col] = None
-                                if field_key in ["Date", "Time"]: parse_success = False
-
-                    if not txt_data_found:
-                        use_pc_time = True
-                        reason_for_pc_time = "Date/Time not found or mapped reliably in TXT"
-                    elif not parse_success:
-                        use_pc_time = True
-                        reason_for_pc_time = "Date/Time parsing failed in TXT"
-                else:
-                    if not use_pc_time:
-                        use_pc_time = True
-                        reason_for_pc_time = "TXT file found but empty or could not be read"
 
             except Exception as e:
-                if not use_pc_time:
-                    use_pc_time = True
-                    reason_for_pc_time = f"unexpected error processing TXT: {type(e).__name__}"
+                # Log or handle unexpected errors during file processing, but still use PC time
+                print(f"Warning: Error reading TXT file for other data: {e}. Still using PC time for Date/Time.")
 
-        if use_pc_time:
-            # When using PC time, populate configured Date/Time columns
-            date_col = None
-            time_col = None
-            skip_date = False
-            skip_time = False
 
-            # Find configured Date/Time columns and skip status
-            for cfg in self.txt_field_columns_config:
-                if cfg["field"] == "Date":
-                    date_col = cfg["column_name"]
-                    skip_date = cfg["skip"]
-                elif cfg["field"] == "Time":
-                    time_col = cfg["column_name"]
-                    skip_time = cfg["skip"]
+        # When using PC time, populate configured Date/Time columns
+        date_col = None
+        time_col = None
+        skip_date = False
+        skip_time = False
 
-            if date_col and not skip_date:
-                row_data[date_col] = current_dt.strftime("%Y-%m-%d")
-            if time_col and not skip_time:
-                row_data[time_col] = current_dt.strftime("%H:%M:%S")
+        # Find configured Date/Time columns and skip status
+        for cfg in self.txt_field_columns_config:
+            if cfg["field"] == "Date":
+                date_col = cfg["column_name"]
+                skip_date = cfg["skip"]
+            elif cfg["field"] == "Time":
+                time_col = cfg["column_name"]
+                skip_time = cfg["skip"]
 
-            # Add other data that might have been partially parsed or defaulted
-            for col, val in temp_txt_data.items():
-                if col not in row_data: # Don't overwrite PC date/time if already set
-                    row_data[col] = val
-        else:
-            row_data.update(temp_txt_data)
+        if date_col and not skip_date:
+            row_data[date_col] = current_dt.strftime("%Y-%m-%d")
+        if time_col and not skip_time:
+            row_data[time_col] = current_dt.strftime("%H:%M:%S")
 
-        # Returns a dictionary of column names and values (ready to be written to Excel/SQLite)
+        # Add other data that might have been partially parsed from the file
+        for col, val in temp_txt_data.items():
+            if col not in row_data: # Don't overwrite PC date/time if already set
+                row_data[col] = val
+        
+        # You might want to log the reason for using PC time for debugging
+        # print(f"Using PC time: {reason_for_pc_time}")
+
         return row_data
-
     def get_latest_files_data(self): # This is global for monitored folders
         '''Collects the latest files from all monitored folders and returns a dictionary of column names to file paths.
         Returns:
