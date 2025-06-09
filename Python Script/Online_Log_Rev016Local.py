@@ -281,13 +281,7 @@ class DataLoggerGUI:
         It also handles theme availability and sets default styles.
         '''
         self.style = ttk.Style()
-        try:
-            available_themes = self.style.theme_names()
-            if 'vista' in available_themes: self.style.theme_use('vista')
-            elif 'aqua' in available_themes: self.style.theme_use('aqua')
-            else: self.style.theme_use("clam")
-        except tk.TclError:
-            self.style.theme_use("clam")
+        self.style.theme_use("clam")
 
         self.style.configure("TFrame", background="#f0f0f0")
         self.style.configure("TLabel", background="#f0f0f0", font=("Arial", 10))
@@ -1846,10 +1840,12 @@ class DataLoggerGUI:
     def update_custom_buttons(self):
         '''Update the custom buttons in the main GUI based on current settings.'''
 
-        if hasattr(self, 'button_frame') and self.button_frame:
-            self.create_main_buttons(self.button_frame)
+        # Check for one of the new main frames to ensure the UI has been initialized.
+        if hasattr(self, 'custom_buttons_frame'):
+            # Call create_main_buttons without arguments, as it now handles all frames.
+            self.create_main_buttons()
+            self.create_status_indicators()
             self.master.update_idletasks()
-        else: pass
 
     # --- Monitoring ---
     def start_monitoring(self):
