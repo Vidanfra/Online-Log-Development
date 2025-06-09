@@ -234,7 +234,8 @@ class DataLoggerGUI:
         self.main_frame = ttk.Frame(self.master, padding="5") # Reduced padding
         self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.master.columnconfigure(0, weight=1)
-        self.master.rowconfigure(0, weight=1) 
+        self.master.rowconfigure(0, weight=1)
+        self.master.wm_attributes("-topmost", self.always_on_top_var.get()) # Put the GUI window in the front
 
         # Changed to prioritize buttons and status indicators above a potentially large log/text area
         self.main_frame.columnconfigure(0, weight=1) # Buttons area
@@ -252,8 +253,9 @@ class DataLoggerGUI:
         self.create_status_indicators(self.main_frame) # Status Indicators
         self.create_status_bar(self.main_frame)        # Status Bar
 
-        # --- Final Setup ---
-        self.schedule_new_day()
+        # Scheduled tasks
+        self.schedule_new_day() # Start the midnight log schedule
+        self.schedule_hourly_log() # Start the hourly log schedule
         self.start_monitoring()  # Initial monitor start & status update
 
         # Open the settings window by default when the app starts
@@ -359,7 +361,7 @@ class DataLoggerGUI:
         self.button_colors = {
             "Log on": (None, "#90EE90"), "Log off": (None, "#FFB6C1"),
             "Event": (None, "#FFFFE0"), "SVP": (None, "#ADD8E6"),
-            "New Day": (None, "#FFFF99")
+            "New Day": (None, "#FFFF99"), "Hourly KP Log": (None, "#FFFF99")
         }
         # Initialize custom button colors to None
         for i in range(self.MAX_CUSTOM_BUTTONS): self.button_colors[f"Custom {i+1}"] = (None, None)
@@ -372,6 +374,10 @@ class DataLoggerGUI:
         self.sqlite_enabled = False
         self.sqlite_db_path = None
         self.sqlite_table = "EventLog"
+
+        # Variables to control the automatic, timed events
+        self.new_day_event_enabled_var = tk.BooleanVar(value=True)
+        self.hourly_event_enabled_var = tk.BooleanVar(value=True)
 
         self.always_on_top_var = tk.BooleanVar(value=False)
         self.settings_window_instance = None # Track settings window
@@ -1514,14 +1520,14 @@ class DataLoggerGUI:
 
             # Check if the workbook has at least one sheet
             sheet = workbook.sheets[0]
-            print(f"Working on sheet: {sheet.name}") # DIAGNOSTIC
+            #print(f"Working on sheet: {sheet.name}") # DIAGNOSTIC # Comment to improve readibility of the terminal
             # Get the header row (A1)
             header_range_obj = sheet.range("A1").expand("right")
             header_values = header_range_obj.value
             if not header_values or not any(h is not None for h in header_values):
                 print("Excel header row is missing or empty.") # DIAGNOSTIC
                 raise ValueError("Excel header row is missing or empty.")
-            print(f"Excel Header: {header_values}") # DIAGNOSTIC
+            #print(f"Excel Header: {header_values}") # DIAGNOSTIC # Comment to improve readibility of the terminal
             
             record_id_col_name = "RecordID"
             if record_id_col_name not in header_values:
@@ -1769,7 +1775,9 @@ class DataLoggerGUI:
             "custom_button_tab_groups": self.custom_button_tab_groups, # NEW: Save tab groups
             "button_colors": colors_to_save, "sqlite_enabled": self.sqlite_enabled,
             "sqlite_db_path": self.sqlite_db_path, "sqlite_table": self.sqlite_table,
-            "always_on_top": self.always_on_top_var.get()
+            "always_on_top": self.always_on_top_var.get(),
+            "new_day_event_enabled": self.new_day_event_enabled_var.get(),
+            "hourly_event_enabled": self.hourly_event_enabled_var.get()
         }
         try:
             with open(self.settings_file, 'w') as f: 
@@ -1879,6 +1887,9 @@ class DataLoggerGUI:
                 self.always_on_top_var.set(always_on_top_setting)
                 self.master.wm_attributes("-topmost", always_on_top_setting)
                 self.sqlite_table = settings.get("sqlite_table", "EventLog")
+                self.always_on_top_var.set(settings.get("always_on_top", True))
+                self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
+                self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
                 
                 self.update_status("Settings loaded.")
             else:
@@ -2043,16 +2054,49 @@ class DataLoggerGUI:
         time_until_midnight_ms = int((midnight - now).total_seconds() * 1000)
         trigger_delay_ms = time_until_midnight_ms + 1000
 
-        self._new_day_timer_id = self.master.after(trigger_delay_ms, self.trigger_new_day)
+        self._new_day_timer_id = self.master.after(trigger_delay_ms, self.trigger_new_day) # Set the timer to trigger at midnight - .after(delay in ms, callback function)
         print(f"Next 'New Day' event scheduled for {midnight} (in {time_until_midnight_ms/1000:.1f} seconds).") # DIAGNOSTIC
 
 
     def trigger_new_day(self):
         '''Trigger the "New Day" log manually. This can be called automatically at midnight.'''
         print("\n--- 'New Day' event triggered ---") # DIAGNOSTIC
-        self.log_new_day(button_widget=None, txt_source_key="Main TXT")
+        if self.new_day_event_enabled_var.get():
+            self.log_new_day(button_widget=None, txt_source_key="Main TXT")
+        else:
+            print("'New Day' event is disabled, skipping log.")
         # After logging the new day, reschedule the next trigger
         self.schedule_new_day()
+
+    def schedule_hourly_log(self):
+        """Schedules the next hourly KP log to trigger on the hour."""
+        now = datetime.datetime.now()
+        next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        #next_hour = (now + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0) # Delta time modified to 1 minute for debugging
+        time_until_next_hour_ms = int((next_hour - now).total_seconds() * 1000)
+
+        # Add a small buffer (e.g., 1 second) to ensure it triggers after the hour
+        trigger_delay_ms = time_until_next_hour_ms + 1000
+
+        self._hourly_log_timer_id = self.master.after(trigger_delay_ms, self.trigger_hourly_log)
+        print(f"Next 'Hourly KP Log' scheduled for {next_hour} (in {time_until_next_hour_ms/1000:.1f} seconds).")
+
+    def trigger_hourly_log(self):
+        """Triggers the hourly log and reschedules the next one."""
+        print("\n--- 'Hourly KP Log' event triggered ---")
+        if self.hourly_event_enabled_var.get():
+            self.log_hourly_kp_event()
+        else:
+            print("'Hourly KP Log' event is disabled, skipping log.")
+        # Reschedule for the following hour
+        self.schedule_hourly_log()
+
+    def log_hourly_kp_event(self):
+        """Logs an automatic hourly event to record the current KP."""
+        self._perform_log_action(event_type="Hourly KP Log",
+                                 event_text_for_excel="Hourly KP Log",
+                                 triggering_button=None,  # No button is associated
+                                 txt_source_key="Main TXT") # Use the primary TXT source for KP data
 
     # --- Inline Custom Button Editor ---
     def _show_custom_button_context_menu(self, event, button_index):
@@ -2509,12 +2553,13 @@ class SettingsWindow:
 
 
         # Create tabs
-        self.create_file_paths_tab() # Renamed and reorganized
+        self.create_file_paths_tab() 
         self.create_txt_column_mapping_tab()
-        self.create_button_configuration_tab() # New tab
-        self.create_monitored_folders_tab() # Renamed
-        self.create_button_colors_tab() # New tab
+        self.create_button_configuration_tab() 
+        self.create_monitored_folders_tab() 
+        self.create_button_colors_tab() 
         self.create_sqlite_tab()
+        self.create_auto_events_tab()
 
         # Bottom Buttons
         button_frame = ttk.Frame(self.main_frame)
@@ -3299,6 +3344,85 @@ class SettingsWindow:
             self.test_result_label.config(text=result_text, foreground=result_color)
             self.master.after(15000, lambda: self.test_result_label.config(text=""))
 
+    def create_auto_events_tab(self):
+            """Creates the tab for configuring automatic timed events."""
+            tab = ttk.Frame(self.notebook, padding=20)
+            self.notebook.add(tab, text="Programmed Events")
+
+            # --- "New Day" Event Configuration ---
+            new_day_frame = ttk.LabelFrame(tab, text="Midnight 'New Day' Event", padding=15)
+            new_day_frame.pack(fill='x', pady=(0, 15))
+            new_day_frame.columnconfigure(1, weight=1)
+
+            new_day_check = ttk.Checkbutton(
+                new_day_frame,
+                text="Enable this automatic event",
+                variable=self.parent_gui.new_day_event_enabled_var,
+                style="Large.TCheckbutton"
+            )
+            new_day_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+            ToolTip(new_day_check, "If checked, an event will be logged automatically at midnight.")
+
+            # Color picker for New Day event
+            self.new_day_color_var, self.new_day_color_label = self._create_color_picker_row(
+                new_day_frame, 1, "Excel Row Color:", "New Day"
+            )
+
+            # --- "Hourly KP Log" Event Configuration ---
+            hourly_frame = ttk.LabelFrame(tab, text="Hourly KP Log Event", padding=15)
+            hourly_frame.pack(fill='x', pady=5)
+            hourly_frame.columnconfigure(1, weight=1)
+
+            hourly_check = ttk.Checkbutton(
+                hourly_frame,
+                text="Enable this automatic event",
+                variable=self.parent_gui.hourly_event_enabled_var,
+                style="Large.TCheckbutton"
+            )
+            hourly_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+            ToolTip(hourly_check, "If checked, the current KP will be logged automatically every hour.")
+
+            # Color picker for Hourly event
+            self.hourly_color_var, self.hourly_color_label = self._create_color_picker_row(
+                hourly_frame, 1, "Excel Row Color:", "Hourly KP Log"
+            )
+
+    def _create_color_picker_row(self, parent_frame, row, label_text, event_name):
+        """Helper to create a color picker widget row for the Auto Events tab."""
+        ttk.Label(parent_frame, text=label_text).grid(row=row, column=0, sticky='w', padx=5)
+
+        color_widget_frame = ttk.Frame(parent_frame)
+        color_widget_frame.grid(row=row, column=1, sticky='w', padx=5)
+
+        # Get the initial color from the master button_colors dictionary
+        initial_color = self.parent_gui.button_colors.get(event_name, (None, None))[1]
+        color_var = tk.StringVar(value=initial_color if initial_color else "")
+
+        display_label = tk.Label(color_widget_frame, width=4, relief="solid", borderwidth=1)
+        display_label.pack(side="left", padx=(0, 5))
+        try:
+            display_label.config(background=initial_color if initial_color else 'SystemButtonFace')
+        except tk.TclError:
+            display_label.config(background='SystemButtonFace')
+
+        # Close the color dialog
+        clear_btn = ttk.Button(
+            color_widget_frame, text="X", width=2, style="Toolbutton",
+            command=lambda: self.parent_gui._set_color_on_widget(color_var, display_label, None, self.master)
+        )
+        clear_btn.pack(side="left", padx=1)
+        ToolTip(clear_btn, f"Clear color for {event_name}.")
+
+        # Open the color dialog
+        choose_btn = ttk.Button(
+            color_widget_frame, text="...", width=3, style="Toolbutton",
+            command=lambda: self.parent_gui._choose_color_dialog(color_var, display_label, self.master, event_name)
+        )
+        choose_btn.pack(side="left", padx=1)
+        ToolTip(choose_btn, f"Choose a custom color for {event_name}.")
+        
+        return color_var, display_label  
+
     # --- Settings Save/Load Logic ---
     def save_settings(self):
         self.parent_gui.log_file_path = self.log_file_entry.get().strip()
@@ -3398,20 +3522,33 @@ class SettingsWindow:
             color_hex = color_var.get()
             new_button_colors[btn_name] = (None, color_hex if color_hex else None)
         self.parent_gui.button_colors = new_button_colors
+        # Get the colors from the new Auto Events tab and update the main colors dictionary
+        new_day_color_hex = self.new_day_color_var.get()
+        self.parent_gui.button_colors["New Day"] = (None, new_day_color_hex if new_day_color_hex else None)
 
-        self.parent_gui.sqlite_enabled = self.sqlite_enabled_var.get(); self.parent_gui.sqlite_db_path = self.sqlite_db_path_entry.get().strip(); self.parent_gui.sqlite_table = self.sqlite_table_entry.get().strip() or "EventLog"
+        hourly_color_hex = self.hourly_color_var.get()
+        self.parent_gui.button_colors["Hourly KP Log"] = (None, hourly_color_hex if hourly_color_hex else None)
+        
 
-        self.parent_gui.save_settings();
-        self.parent_gui.update_custom_buttons();
-        self.parent_gui.start_monitoring();
+        self.parent_gui.sqlite_enabled = self.sqlite_enabled_var.get()
+        self.parent_gui.sqlite_db_path = self.sqlite_db_path_entry.get().strip()
+        self.parent_gui.sqlite_table = self.sqlite_table_entry.get().strip() or "EventLog"
+
+        self.parent_gui.save_settings()
+        self.parent_gui.update_custom_buttons()
+        self.parent_gui.start_monitoring()
         self.parent_gui.update_db_indicator()
 
     def load_settings(self):
-        self.log_file_entry.delete(0, tk.END); self.log_file_entry.insert(0, self.parent_gui.log_file_path or "")
+        self.log_file_entry.delete(0, tk.END)
+        self.log_file_entry.insert(0, self.parent_gui.log_file_path or "")
         
-        self.txt_folder_entry_main.delete(0, tk.END); self.txt_folder_entry_main.insert(0, self.parent_gui.txt_folder_path or "")
-        self.txt_folder_entry_set2.delete(0, tk.END); self.txt_folder_entry_set2.insert(0, self.parent_gui.txt_folder_path_set2 or "")
-        self.txt_folder_entry_set3.delete(0, tk.END); self.txt_folder_entry_set3.insert(0, self.parent_gui.txt_folder_path_set3 or "")
+        self.txt_folder_entry_main.delete(0, tk.END)
+        self.txt_folder_entry_main.insert(0, self.parent_gui.txt_folder_path or "")
+        self.txt_folder_entry_set2.delete(0, tk.END)
+        self.txt_folder_entry_set2.insert(0, self.parent_gui.txt_folder_path_set2 or "")
+        self.txt_folder_entry_set3.delete(0, tk.END)
+        self.txt_folder_entry_set3.insert(0, self.parent_gui.txt_folder_path_set3 or "")
 
         # Reload TXT field rows based on the (potentially newly loaded) config
         self.recreate_txt_field_rows()
@@ -3420,19 +3557,38 @@ class SettingsWindow:
 
         for name, frame in list(self.folder_row_widgets.items()):
             if frame and frame.winfo_exists(): frame.destroy()
-        self.folder_row_widgets.clear(); self.folder_entries.clear(); self.folder_column_entries.clear(); self.file_extension_entries.clear(); self.folder_skip_vars.clear()
-        self.add_initial_folder_rows(); self.master.after_idle(self.update_scroll_region)
+        self.folder_row_widgets.clear()
+        self.folder_entries.clear()
+        self.folder_column_entries.clear()
+        self.file_extension_entries.clear()
+        self.folder_skip_vars.clear()
 
-        self.num_buttons_entry.delete(0, tk.END); self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
+        self.add_initial_folder_rows()
+        self.master.after_idle(self.update_scroll_region)
+
+        self.num_buttons_entry.delete(0, tk.END)
+        self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
         self.recreate_custom_button_settings()
 
         for btn_name, (color_var, display_label) in self.all_button_color_widgets.items():
             loaded_color_hex = self.parent_gui.button_colors.get(btn_name, (None, None))[1]
             self.parent_gui._set_color_on_widget(color_var, display_label, loaded_color_hex, self.master)
+        
+        # Load colors for the new Auto Events tab
+        new_day_color = self.parent_gui.button_colors.get("New Day", (None, None))[1]
+        self.parent_gui._set_color_on_widget(self.new_day_color_var, self.new_day_color_label, new_day_color, self.master)
 
-        self.sqlite_enabled_var.set(self.parent_gui.sqlite_enabled); self.sqlite_db_path_entry.delete(0, tk.END); self.sqlite_db_path_entry.insert(0, self.parent_gui.sqlite_db_path or "")
-        self.sqlite_table_entry.delete(0, tk.END); self.sqlite_table_entry.insert(0, self.parent_gui.sqlite_table or "EventLog")
+        hourly_color = self.parent_gui.button_colors.get("Hourly KP Log", (None, None))[1]
+        self.parent_gui._set_color_on_widget(self.hourly_color_var, self.hourly_color_label, hourly_color, self.master)
+        
+
+        self.sqlite_enabled_var.set(self.parent_gui.sqlite_enabled)
+        self.sqlite_db_path_entry.delete(0, tk.END)
+        self.sqlite_db_path_entry.insert(0, self.parent_gui.sqlite_db_path or "")
+        self.sqlite_table_entry.delete(0, tk.END)
+        self.sqlite_table_entry.insert(0, self.parent_gui.sqlite_table or "EventLog")
         if hasattr(self, 'test_result_label'): self.test_result_label.config(text="")
+    
 # --- Main Execution ---
 if __name__ == "__main__":
     root = tk.Tk()
