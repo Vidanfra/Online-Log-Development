@@ -3463,12 +3463,6 @@ class SettingsWindow:
         # Save the updated, sorted list
         self.parent_gui.custom_button_tab_groups = sorted(list(final_tab_groups))
 
-
-        new_button_colors = {}
-        for btn_name, (color_var, _) in self.all_button_color_widgets.items():
-            color_hex = color_var.get()
-            new_button_colors[btn_name] = (None, color_hex if color_hex else None)
-        self.parent_gui.button_colors = new_button_colors
         # Get the colors from the new Auto Events tab and update the main colors dictionary
         new_day_color_hex = self.new_day_color_var.get()
         self.parent_gui.button_colors["New Day"] = (None, new_day_color_hex if new_day_color_hex else None)
