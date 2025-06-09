@@ -223,7 +223,7 @@ class DataLoggerGUI:
         self.master = master
         master.title("Data Acquisition Logger (SQLite Mode)")
         master.geometry("450x250")  # Much smaller default size to fit at the top of Excel
-        master.minsize(400, 200) # Slightly smaller min size
+        master.minsize(600, 300) # Slightly smaller min size
         self.settings_file = "logger_settings.json"
         self.init_styles()
         self.init_variables()
@@ -352,7 +352,7 @@ class DataLoggerGUI:
         self.custom_button_configs = [
             {"text": "Custom Event 1", "event_text": "Custom Event 1 Triggered", "txt_source_key": "Main TXT", "tab_group": "Main"},
             {"text": "Custom Event 2", "event_text": "Custom Event 2 Triggered", "txt_source_key": "None", "tab_group": "Main"},
-            {"text": "Custom Event 3", "event_text": "Custom Event 3 Triggered", "txt_source_key": "None", "tab_group": "Group 2"},
+            {"text": "Custom Event 3", "event_text": "Custom Event 3 Triggered", "txt_source_key": "None", "tab_group": "Main"},
         ]
         self.custom_buttons = []
         self.button_colors = {
@@ -364,7 +364,7 @@ class DataLoggerGUI:
         for i in range(self.MAX_CUSTOM_BUTTONS): self.button_colors[f"Custom {i+1}"] = (None, None)
         
         # Define the three tab groups explicitly
-        self.custom_button_tab_groups = ["Main", "Group 2", "Group 3"]
+        self.custom_button_tab_groups = ["Main"]
         self.custom_button_tab_frames = {}
 
 
@@ -395,17 +395,18 @@ class DataLoggerGUI:
         self.custom_buttons_notebook = ttk.Notebook(parent_frame)
         self.custom_buttons_notebook.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
         
+        # --- CHANGE STARTS HERE ---
+        # Bind a right-click event to the notebook for renaming tabs
+        self.custom_buttons_notebook.bind("<Button-3>", self._show_tab_context_menu)
+        # --- CHANGE ENDS HERE ---
+
         # Initialize tab frames
         self.custom_button_tab_frames = {} # Reset tab frames
 
-        # **MODIFIED:** Start with the three fixed tab groups
-        fixed_tab_groups = ["Main", "Group 2", "Group 3"]
-        all_defined_tab_groups = set(fixed_tab_groups)
-
-        # Add any additional tab groups from saved settings or custom button configs
-        all_defined_tab_groups.update(self.custom_button_tab_groups) # From loaded settings
-        for config in self.custom_button_configs:
-            all_defined_tab_groups.add(config.get("tab_group", "Main")) # Default to "Main" if not specified
+    
+        # The master list of tab groups is the single source of truth.
+        # We ensure all defined tabs and any tabs assigned to buttons are created.
+        all_defined_tab_groups = set(self.custom_button_tab_groups)
 
         # Sort tab groups for consistent order
         sorted_tab_groups = sorted(list(all_defined_tab_groups))
@@ -497,7 +498,7 @@ class DataLoggerGUI:
         # Then, create custom buttons within their respective tabs
         for tab_group, buttons_list in custom_buttons_by_tab.items():
             tab_frame = self.custom_button_tab_frames[tab_group]
-            num_custom_cols = 3 # Can be adjusted or made dynamic later
+            num_custom_cols = 5 # Can be adjusted or made dynamic later
             
             for i, button_config_data in enumerate(buttons_list):
                 button_text = button_config_data["text"]
@@ -520,7 +521,7 @@ class DataLoggerGUI:
                 button.config(command=lambda cfg=config_object, btn=button: self.log_custom_event(cfg, btn))
                 buttons_dict[button_text] = {"widget": button, "data": button_config_data}
                 self.custom_buttons.append(button) # Track all custom button widgets
-                        
+                            
                 config_object = button_config_data.get("config")
                 if config_object:
                     try:
@@ -1834,7 +1835,7 @@ class DataLoggerGUI:
 
                 # **MODIFIED:** Load custom button tab groups
                 # Start with the fixed groups and add any others found in settings
-                self.custom_button_tab_groups = sorted(list(set(["Main", "Group 2", "Group 3"] + settings.get("custom_button_tab_groups", []))))
+                self.custom_button_tab_groups = sorted(list(set(["Main"] + settings.get("custom_button_tab_groups", []))))
                 # Filter out empty string, if any might appear
                 self.custom_button_tab_groups = [g for g in self.custom_button_tab_groups if g]
                 print(f"Loaded custom_button_tab_groups: {self.custom_button_tab_groups}") # DIAGNOSTIC
@@ -2078,6 +2079,144 @@ class DataLoggerGUI:
         else:
             messagebox.showinfo("Limit Reached", f"You have reached the maximum number of {self.MAX_CUSTOM_BUTTONS} custom buttons.", parent=self.master)
 
+    def _show_tab_context_menu(self, event):
+        """Shows a context menu for adding, renaming, or deleting notebook tabs."""
+        context_menu = tk.Menu(self.master, tearoff=0)
+        
+        # Add the "Add New Tab" command, which is always available
+        context_menu.add_command(label="Add New Tab...", command=self._add_new_tab_dialog)
+        
+        try:
+            # Check if the click was on an existing tab label
+            tab_index = self.custom_buttons_notebook.index(f"@{event.x},{event.y}")
+            tab_name = self.custom_buttons_notebook.tab(tab_index, "text")
+            
+            # If so, add commands for renaming and deleting that specific tab
+            context_menu.add_separator()
+            context_menu.add_command(
+                label=f"Rename '{tab_name}' Tab...",
+                command=lambda: self._rename_tab_dialog(tab_name)
+            )
+            context_menu.add_command(
+                label=f"Delete '{tab_name}' Tab",
+                command=lambda: self._delete_tab(tab_name)
+            )
+            
+            # Protect the "Main" tab from being renamed or deleted
+            if tab_name == "Main":
+                context_menu.entryconfigure(f"Rename '{tab_name}' Tab...", state=tk.DISABLED)
+                context_menu.entryconfigure(f"Delete '{tab_name}' Tab", state=tk.DISABLED)
+
+        except tk.TclError:
+            # This error means the click was not on a tab label, so we just show the "Add" menu.
+            pass
+
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
+    def _rename_tab_dialog(self, old_name):
+        """Opens a dialog to get the new name for a tab."""
+        from tkinter import simpledialog
+
+        new_name = simpledialog.askstring(
+            "Rename Tab",
+            f"Enter the new name for the '{old_name}' tab:",
+            parent=self.master,
+            initialvalue=old_name
+        )
+
+        if new_name and new_name.strip() and new_name != old_name:
+            self.rename_tab_group(old_name, new_name.strip())
+        elif new_name and new_name == old_name:
+            self.update_status("Tab rename cancelled (name is the same).")
+        else:
+            self.update_status("Tab rename cancelled.")
+
+    def rename_tab_group(self, old_name, new_name):
+        """Renames a tab group and updates all related configurations."""
+        if new_name in self.custom_button_tab_groups:
+            messagebox.showerror("Rename Error", f"The tab name '{new_name}' already exists.", parent=self.master)
+            return
+
+        # Update the master list of tab groups
+        try:
+            # Find and replace the old name with the new name
+            index = self.custom_button_tab_groups.index(old_name)
+            self.custom_button_tab_groups[index] = new_name
+        except ValueError:
+            # If not found (shouldn't happen with this workflow), just add the new one
+            self.custom_button_tab_groups.append(new_name)
+
+        # Update all custom button configurations that use the old tab name
+        for config in self.custom_button_configs:
+            if config.get("tab_group") == old_name:
+                config["tab_group"] = new_name
+        
+        self.update_status(f"Renamed tab '{old_name}' to '{new_name}'.")
+
+        # Save the settings to persist the change
+        self.save_settings()
+
+        # Re-render the main buttons to show the change immediately
+        self.update_custom_buttons() 
+
+    def _add_new_tab_dialog(self):
+        """Opens a dialog to get the name for a new tab."""
+        from tkinter import simpledialog
+        new_name = simpledialog.askstring(
+            "Add New Tab",
+            "Enter the name for the new tab:",
+            parent=self.master
+        )
+
+        if not new_name or not new_name.strip():
+            self.update_status("Add tab cancelled.")
+            return
+
+        new_name = new_name.strip()
+        
+        # Check for duplicates
+        existing_groups = [group.lower() for group in self.custom_button_tab_groups]
+        if new_name.lower() in existing_groups:
+            messagebox.showerror("Creation Error", f"The tab name '{new_name}' already exists.", parent=self.master)
+            return
+
+        # Add the new tab, save, and refresh
+        self.custom_button_tab_groups.append(new_name)
+        self.update_status(f"Added new tab: '{new_name}'.")
+        self.save_settings()
+        self.update_custom_buttons()
+
+    def _delete_tab(self, tab_name):
+        """Deletes a tab and moves its buttons to the 'Main' tab."""
+        if tab_name == "Main":
+            messagebox.showerror("Delete Error", "The 'Main' tab cannot be deleted.", parent=self.master)
+            return
+
+        # Confirm deletion with the user
+        if not messagebox.askyesno(
+            "Confirm Deletion",
+            f"Are you sure you want to delete the '{tab_name}' tab?\n\n"
+            f"All buttons in this tab will be moved to the 'Main' tab.",
+            parent=self.master):
+            self.update_status("Delete tab cancelled.")
+            return
+
+        # Move all buttons from the deleted tab to the 'Main' tab
+        for config in self.custom_button_configs:
+            if config.get("tab_group") == tab_name:
+                config["tab_group"] = "Main"
+        
+        # Remove the tab from the master list
+        if tab_name in self.custom_button_tab_groups:
+            self.custom_button_tab_groups.remove(tab_name)
+
+        self.update_status(f"Deleted tab '{tab_name}'.")
+        self.save_settings()
+        self.update_custom_buttons()           
+
 
     def _edit_custom_button_inline(self, button_index):
         """
@@ -2117,7 +2256,7 @@ class DataLoggerGUI:
         button_text_var = tk.StringVar(value=button_config.get("text", f"Custom {button_index+1}"))
         event_text_var = tk.StringVar(value=button_config.get("event_text", f"{button_config.get('text', f'Custom {button_index+1}')} Triggered"))
         txt_source_var = tk.StringVar(value=button_config.get("txt_source_key", "None"))
-        tab_group_var = tk.StringVar(value=button_config.get("tab_group", "Main")) # **MODIFIED:** Default to "Main"
+        tab_group_var = tk.StringVar(value=button_config.get("tab_group", "Main"))
         current_color = self.button_colors.get(button_config.get("text"), (None, None))[1]
         button_color_var = tk.StringVar(value=current_color if current_color else "")
         
@@ -2141,13 +2280,13 @@ class DataLoggerGUI:
         source_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(source_combobox, "Select which TXT file source this button should read data from. 'None' means no TXT data will be logged by this button.")
 
-        # NEW: Tab Group selection
+        # Tab Group selection
         row_idx += 1
         ttk.Label(frame, text="Tab Group:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        # **MODIFIED:** Combine fixed and existing tab groups
-        all_tab_groups = sorted(list(set(["Main", "Group 2", "Group 3"] + self.custom_button_tab_groups + [cfg.get('tab_group', 'Main') for cfg in self.custom_button_configs])))
-        # Filter out empty string, if any might appear
-        all_tab_groups = [g for g in all_tab_groups if g]
+        
+        # Use the master list of tab groups as the source of truth.
+        all_tab_groups = sorted(self.custom_button_tab_groups[:])
+        
         tab_group_combobox = ttk.Combobox(frame, textvariable=tab_group_var,
                                           values=all_tab_groups, width=27) # Not readonly, allows user to type new group
         tab_group_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
@@ -2158,14 +2297,14 @@ class DataLoggerGUI:
         ttk.Label(frame, text="Button Color:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         
         color_display_label = tk.Label(frame, width=4, relief="solid", borderwidth=1,
-                                         background=button_color_var.get() if button_color_var.get() else 'SystemButtonFace')
+                                       background=button_color_var.get() if button_color_var.get() else 'SystemButtonFace')
         color_display_label.grid(row=row_idx, column=1, sticky="w", pady=2, padx=5)
 
         color_buttons_frame = ttk.Frame(frame)
         color_buttons_frame.grid(row=row_idx, column=2, sticky="e", pady=2, padx=5)
 
         clear_btn = ttk.Button(color_buttons_frame, text="X", width=2, style="Toolbutton",
-                                 command=lambda: self._set_color_on_widget(button_color_var, color_display_label, None, editor_window))
+                               command=lambda: self._set_color_on_widget(button_color_var, color_display_label, None, editor_window))
         clear_btn.pack(side="left", padx=1)
         ToolTip(clear_btn, "Clear button/row color (use default appearance).")
 
@@ -2178,7 +2317,7 @@ class DataLoggerGUI:
             except tk.TclError: pass
 
         choose_btn = ttk.Button(color_buttons_frame, text="...", width=3, style="Toolbutton",
-                                      command=lambda v=button_color_var, l=color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n))
+                                        command=lambda v=button_color_var, l=color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n))
         choose_btn.pack(side="left", padx=1)
         ToolTip(choose_btn, "Choose a custom color.")
 
@@ -2186,13 +2325,15 @@ class DataLoggerGUI:
         button_controls_frame = ttk.Frame(frame)
         button_controls_frame.grid(row=row_idx, column=0, columnspan=3, pady=(15,0), sticky="e")
 
+        # This is the inner function that was corrected in the previous step.
+        # It is now placed correctly inside the full method.
         def save_changes():
             old_button_text = button_config.get("text")
             
             button_config["text"] = button_text_var.get().strip() or f"Custom {button_index+1}"
             button_config["event_text"] = event_text_var.get().strip() or f"{button_config['text']} Triggered"
             button_config["txt_source_key"] = txt_source_var.get()
-            button_config["tab_group"] = tab_group_var.get().strip() or "Main" # **MODIFIED:** Save tab group
+            button_config["tab_group"] = tab_group_var.get().strip() or "Main"
 
             new_color_hex = button_color_var.get() if button_color_var.get() else None
             
@@ -2201,15 +2342,19 @@ class DataLoggerGUI:
             
             self.button_colors[button_config["text"]] = (None, new_color_hex)
 
-            # Update the list of all available tab groups (combining fixed and new)
-            current_tab_groups = set(["Main", "Group 2", "Group 3"]) # Start with fixed
-            current_tab_groups.update(self.custom_button_tab_groups) # Add existing from settings
-            current_tab_groups.add(button_config["tab_group"]) # Add the newly selected/typed one
-            self.custom_button_tab_groups = sorted(list(current_tab_groups))
+            # Tab Saving Logic 
+            # If the user typed a new tab group name, add it to the master list.
+            # Do NOT rebuild the entire list from a hardcoded default.
+            new_group = button_config["tab_group"]
+            if new_group not in self.custom_button_tab_groups:
+                self.custom_button_tab_groups.append(new_group)
+                self.custom_button_tab_groups.sort()
+            # --- END OF CORRECTION ---
 
             self.save_settings()
             self.update_custom_buttons()
             editor_window.destroy()
+
 
         ttk.Button(button_controls_frame, text="Save", command=save_changes, style="Accent.TButton").pack(side="right", padx=5)
         ttk.Button(button_controls_frame, text="Cancel", command=editor_window.destroy).pack(side="right")
@@ -2217,6 +2362,36 @@ class DataLoggerGUI:
         editor_window.protocol("WM_DELETE_WINDOW", editor_window.destroy)
         editor_window.wait_window(editor_window)
         self.custom_inline_editor_window = None
+        
+
+        
+        def save_changes():
+            old_button_text = button_config.get("text")
+            
+            button_config["text"] = button_text_var.get().strip() or f"Custom {button_index+1}"
+            button_config["event_text"] = event_text_var.get().strip() or f"{button_config['text']} Triggered"
+            button_config["txt_source_key"] = txt_source_var.get()
+            button_config["tab_group"] = tab_group_var.get().strip() or "Main"
+
+            new_color_hex = button_color_var.get() if button_color_var.get() else None
+            
+            if old_button_text in self.button_colors and old_button_text != button_config["text"]:
+                del self.button_colors[old_button_text]
+            
+            self.button_colors[button_config["text"]] = (None, new_color_hex)
+
+            # --- CORRECTED TAB LOGIC ---
+            # If the user typed a new tab group name, add it to the master list.
+            # Do NOT rebuild the entire list.
+            new_group = button_config["tab_group"]
+            if new_group not in self.custom_button_tab_groups:
+                self.custom_button_tab_groups.append(new_group)
+                self.custom_button_tab_groups.sort()
+            # --- END OF CORRECTION ---
+
+            self.save_settings()
+            self.update_custom_buttons()
+            editor_window.destroy()
 
     def _set_color_on_widget(self, color_str_var, display_label, color_hex, parent_toplevel):
         """Internal helper to validate and set the color for a color picker widget."""
@@ -2737,11 +2912,8 @@ class SettingsWindow:
         configs = self.parent_gui.custom_button_configs
         txt_source_options = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"]
         
-        # **MODIFIED:** Collect all unique tab groups for the combobox values
-        # Start with the fixed groups, then add any existing ones from parent_gui, then from current configs
-        all_tab_groups = sorted(list(set(["Main", "Group 2", "Group 3"] + self.parent_gui.custom_button_tab_groups + [cfg.get('tab_group', 'Main') for cfg in configs])))
-        # Filter out empty string, if any might appear
-        all_tab_groups = [g for g in all_tab_groups if g]
+                # Use the parent GUI's master list of tab groups as the single source of truth.
+        all_tab_groups = sorted(self.parent_gui.custom_button_tab_groups[:])
 
 
         for i in range(num_buttons):
@@ -3157,7 +3329,12 @@ class SettingsWindow:
 
         self.parent_gui.num_custom_buttons = len(parent_custom_configs)
         self.parent_gui.custom_button_configs = parent_custom_configs
-        self.parent_gui.custom_button_tab_groups = sorted(list(all_new_tab_groups)) # Update main GUI's tab groups
+        # Get the set of all existing tab groups
+        final_tab_groups = set(self.parent_gui.custom_button_tab_groups)
+        # Add any new groups defined in the UI to the set
+        final_tab_groups.update(all_new_tab_groups)
+        # Save the updated, sorted list
+        self.parent_gui.custom_button_tab_groups = sorted(list(final_tab_groups))
 
 
         new_button_colors = {}

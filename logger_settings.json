@@ -67,49 +67,80 @@
     "folder_skips": {
         "Main TXT File": false
     },
-    "num_custom_buttons": 6,
+    "num_custom_buttons": 11,
     "custom_button_configs": [
         {
             "text": "Custom 1",
             "event_text": "Custom 1 Event",
             "txt_source_key": "Main TXT",
-            "tab_group": "Group 2"
+            "tab_group": "Crane"
         },
         {
             "text": "Custom 2",
             "event_text": "Custom 2 Triggered",
             "txt_source_key": "Main TXT",
-            "tab_group": "Group 2"
+            "tab_group": "Crane"
         },
         {
             "text": "Custom 3",
             "event_text": "Custom 3 Event",
             "txt_source_key": "TXT Source 2",
-            "tab_group": "Main"
+            "tab_group": "Crane"
         },
         {
             "text": "Custom 4",
             "event_text": "Custom 4 Event",
             "txt_source_key": "Main TXT",
-            "tab_group": "Group 3"
+            "tab_group": "Crane"
         },
         {
             "text": "Custom 5",
             "event_text": "Custom 5 Event",
             "txt_source_key": "TXT Source 2",
-            "tab_group": "Group 3"
+            "tab_group": "Crane"
         },
         {
             "text": "Custom 6",
             "event_text": "Custom 6 Event",
             "txt_source_key": "TXT Source 3",
-            "tab_group": "Main"
+            "tab_group": "Crane"
+        },
+        {
+            "text": "Custom 7",
+            "event_text": "Custom 7 Event",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Crane"
+        },
+        {
+            "text": "Custom 8",
+            "event_text": "Custom 8 Event",
+            "txt_source_key": "None",
+            "tab_group": "Crane"
+        },
+        {
+            "text": "Custom 9",
+            "event_text": "Custom 9 Event",
+            "txt_source_key": "None",
+            "tab_group": "Crane"
+        },
+        {
+            "text": "Custom 10",
+            "event_text": "Custom 10 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 11",
+            "event_text": "Custom 11 Event",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Crane"
         }
     ],
     "custom_button_tab_groups": [
-        "Group 2",
-        "Group 3",
-        "Main"
+        "Crane",
+        "Main",
+        "ROV",
+        "Vessel"
     ],
     "button_colors": {
         "Log on": "#90EE90",
