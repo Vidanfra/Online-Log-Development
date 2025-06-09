@@ -135,8 +135,9 @@ class FolderMonitor(FileSystemEventHandler):
         self.update_latest_file() # Initial scan
 
     def on_modified(self, event):
-        if not event.is_directory and event.src_path.lower().endswith(self.extension):
-            self._update_if_newer(event.src_path)
+        if not event.is_directory:
+            if not self.file_extension or event.src_path.lower().endswith(self.file_extension.lower()):
+                self.update_latest_file()
 
     def on_created(self, event):
         if not event.is_directory and event.src_path.lower().endswith(self.extension):
@@ -255,7 +256,7 @@ class DataLoggerGUI:
         self.start_monitoring()  # Initial monitor start & status update
 
         # Open the settings window by default when the app starts
-        #self.startup_settings()
+        self.startup_settings()
 
     def init_styles(self):
         ''' 
@@ -342,7 +343,12 @@ class DataLoggerGUI:
         self.num_custom_buttons = 3
         self.MAX_CUSTOM_BUTTONS = 20 # Define the maximum number of custom buttons
         
-        # Each custom button config now includes a 'txt_source_key' and 'tab_group'
+        # Each custom button config now includes a 'txt_source_key'
+        # This key maps to a folder path variable in the GUI instance
+        # 'None' means no TXT data is read for this button
+        # 'Main TXT' maps to self.txt_folder_path
+        # 'TXT Source 2' maps to self.txt_folder_path_set2
+        # 'TXT Source 3' maps to self.txt_folder_path_set3
         self.custom_button_configs = [
             {"text": "Custom Event 1", "event_text": "Custom Event 1 Triggered", "txt_source_key": "Main TXT", "tab_group": "Main"},
             {"text": "Custom Event 2", "event_text": "Custom Event 2 Triggered", "txt_source_key": "None", "tab_group": "Main"},
@@ -357,7 +363,7 @@ class DataLoggerGUI:
         # Initialize custom button colors to None
         for i in range(self.MAX_CUSTOM_BUTTONS): self.button_colors[f"Custom {i+1}"] = (None, None)
         
-        # **MODIFIED:** Define the three tab groups explicitly
+        # Define the three tab groups explicitly
         self.custom_button_tab_groups = ["Main", "Group 2", "Group 3"]
         self.custom_button_tab_frames = {}
 
@@ -632,7 +638,7 @@ class DataLoggerGUI:
             return
 
         sync_button = None
-        target_button_text = "Sync DB" # Changed text
+        target_button_text = "Sync Excel->DB"
         try:
             # Searches the GUI for the button labeled "Sync DB"
             if hasattr(self, 'button_frame') and self.button_frame:
@@ -922,7 +928,7 @@ class DataLoggerGUI:
         except Exception as e:
             traceback.print_exc()
             if conn_sqlite:
-                try: conn.rollback()
+                try: conn_sqlite.rollback()
                 except Exception: pass
                 conn_sqlite.close()
             return False, f"Sync Error: Unexpected error updating SQLite - {type(e).__name__}"
@@ -1079,6 +1085,27 @@ class DataLoggerGUI:
         '''This is the main entry point for handling an event (e.g., button press). 
         It collects all necessary data (from TXT files and folder monitors), 
         then logs the event to Excel and/or SQLite in a background thread.
+        
+        Arguments:
+        * event_type: The label of the event, e.g., "Log on", "Event", "Custom Event 1".
+        * event_text_for_excel: The actual text that goes into the "Event" column in Excel.
+        * skip_latest_files: Whether to skip checking monitored folders (used for basic events).
+        * svp_specific_handling: Enables special logic if the event is "SVP".
+        * triggering_button: The button that was pressed (used to temporarily disable it).
+        * txt_source_set: Specifies which TXT file set (1 or 2) to use for extracting data.
+
+        Workflow explanation:
+        When you click a button in the GUI:
+        * _perform_log_action() is triggered.
+        * It calls insert_txt_data() to extract latest TXT data.
+        * Then it appends other folder-monitor-based data.
+        * Then it logs everything to:
+        * Excel: with optional row color
+        * SQLite: if enabled
+        * Updates the GUI status with success/failure feedback.
+
+
+
         '''
         self.update_status(f"Processing '{event_type}'...")
         print(f"\n--- Log Action Initiated for '{event_type}' ---") # DIAGNOSTIC
@@ -1094,8 +1121,11 @@ class DataLoggerGUI:
             except tk.TclError:
                 triggering_button = None
 
+        # Define a background thread to avoid blocking the GUI
         def _worker_thread_func():
             nonlocal original_text 
+            # Prepares an empty data row with a RecordID
+            row_data = {}
             excel_success = False
             sqlite_logged = False
             excel_save_exception = None
@@ -1154,6 +1184,7 @@ class DataLoggerGUI:
                         print(f"Error getting latest file data (monitored folders): {e_files}") # DIAGNOSTIC
                         self.master.after(0, lambda e=e_files: messagebox.showerror("Error", f"Failed to get latest file data:\n{e}", parent=self.master))
 
+                # Adds SVP file info if applicable
                 if svp_specific_handling: # SVP logic also global
                     svp_folder_path = self.folder_paths.get("SVP")
                     svp_col_name = self.folder_columns.get("SVP", "SVP")
@@ -1191,6 +1222,7 @@ class DataLoggerGUI:
                         if not self.log_file_path: excel_save_exception = ValueError("Excel path missing")
                         elif not os.path.exists(self.log_file_path): excel_save_exception = FileNotFoundError("Excel file missing")
                         else:
+                            # Save the data to Excel
                             self.save_to_excel(excel_data, row_color=row_color_for_excel)
                             excel_success = True
                             print("Excel save: SUCCESS") # DIAGNOSTIC
@@ -1200,10 +1232,11 @@ class DataLoggerGUI:
                         print(f"Excel save: FAILED with error: {e_excel}") # DIAGNOSTIC
                         self.master.after(0, lambda e=e_excel: messagebox.showerror("Excel Error", f"Failed to save to Excel:\n{e}", parent=self.master))
                     
+                    # If Excel save was successful, log to SQLite
                     sqlite_logged, sqlite_save_exception_type = self.log_to_sqlite(row_data)
                     print(f"SQLite log result: Success={sqlite_logged}, Error={sqlite_save_exception_type}") # DIAGNOSTIC
 
-
+                    # Constructs a status message to show whether Excel and SQLite logging succeeded or failed.
                     status_parts = []
                     if excel_success: status_parts.append("Excel: OK")
                     elif excel_save_exception: status_parts.append(f"Excel: Fail ({type(excel_save_exception).__name__})")
@@ -1232,6 +1265,7 @@ class DataLoggerGUI:
             finally:
                 self.master.after(0, self.update_status, status_msg)
 
+            # Re-enables the button if it was disabled
                 if triggering_button and isinstance(triggering_button, ttk.Button):
                     def re_enable_button(btn=triggering_button, txt=original_text):
                         try:
@@ -1266,6 +1300,8 @@ class DataLoggerGUI:
 
         temp_txt_data = {}
 
+        # Even though we're using PC time for Date/Time, we still attempt to
+        # read other data from the TXT file if it exists and is readable.
         if latest_txt_file_path:
             try:
                 lines = []
@@ -1334,6 +1370,7 @@ class DataLoggerGUI:
         skip_date = False
         skip_time = False
 
+        # Find configured Date/Time columns and skip status
         for cfg in self.txt_field_columns_config:
             if cfg["field"] == "Date":
                 date_col = cfg["column_name"]
@@ -1347,8 +1384,9 @@ class DataLoggerGUI:
         if time_col and not skip_time:
             row_data[time_col] = current_dt.strftime("%H:%M:%S")
 
+        # Add other data that might have been partially parsed from the file
         for col, val in temp_txt_data.items():
-            if col not in row_data:
+            if col not in row_data: # Don't overwrite PC date/time if already set
                 row_data[col] = val
         
         print(f"Final row_data from _get_txt_data_from_source: {row_data}") # DIAGNOSTIC
@@ -1856,10 +1894,10 @@ class DataLoggerGUI:
                 del self.settings_window_instance
             except AttributeError: pass
 
-    #def startup_settings(self):
+    def startup_settings(self):
         '''Open settings by default in the startup of the app'''
 
-        #self.open_settings()
+        self.open_settings()
 
     def update_custom_buttons(self):
         '''Update the custom buttons in the main GUI based on current settings.'''
@@ -2403,7 +2441,7 @@ class SettingsWindow:
                     break
                 except UnicodeDecodeError:
                     continue
-                
+            
             if not read_success or not lines:
                 messagebox.showinfo("File Empty", f"The latest file is empty or could not be read:\n{os.path.basename(latest_file)}", parent=self.master)
                 return
