@@ -7,7 +7,7 @@
 | 05/06/2025 | Data Headers                  | Show data from the loaded text file in headers | DONE       |
 | 05/06/2025 | Auto-Open Settings            | Settings window opens automatically on startup | DONE       |
 | 05/06/2025 | Hotkeys                       | Keyboard shortcuts for various functions       | **To Do**       |
-| 05/06/2025 | Layout Shape                  | Long and thin to fit in the Excel top pane     | **Slightly done - could be better**      |
+| 05/06/2025 | Layout Shape                  | Long and thin to fit in the Excel top pane     | **DONE (needs to be reviewed)**      |
 | 06/06/2025 | Logger always over Excel      | Keep the logger menu always in th front        | DONE        |
 | 07/06/2025 | Solve time mismatch      | Use always PC time        | DONE       |
 |09/06/2025 | Colours of buttons | Should match colour set for excel row highlight | **To Do** |

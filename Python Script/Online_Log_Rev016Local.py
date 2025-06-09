@@ -12,6 +12,7 @@ import traceback
 import sqlite3 # Use Python's built-in SQLite module
 import uuid
 import pandas as pd
+import openpyxl
 
 # Global cache
 folder_cache = {}
@@ -1813,7 +1814,6 @@ class DataLoggerGUI:
             if hasattr(self, 'db_status_label') and self.db_status_label: self.update_db_indicator()
             print("--- End Loading Settings ---") # DIAGNOSTIC
 
-
     # --- Settings Window Interaction ---
     def open_settings(self):
         '''Open the settings window. If it already exists, bring it to the front.'''
@@ -1975,8 +1975,8 @@ class DataLoggerGUI:
     def schedule_hourly_log(self):
         """Schedules the next hourly KP log to trigger on the hour."""
         now = datetime.datetime.now()
-        next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-        #next_hour = (now + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0) # Delta time modified to 1 minute for debugging
+        #next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        next_hour = (now + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0) # Delta time modified to 1 minute for debugging
         time_until_next_hour_ms = int((next_hour - now).total_seconds() * 1000)
 
         # Add a small buffer (e.g., 1 second) to ensure it triggers after the hour
@@ -1989,16 +1989,63 @@ class DataLoggerGUI:
         """Triggers the hourly log and reschedules the next one."""
         print("\n--- 'Hourly KP Log' event triggered ---")
         if self.hourly_event_enabled_var.get():
-            self.log_hourly_kp_event()
+            # Get column names from settings
+            kp_col_name = self.txt_field_columns.get("KP")
+            event_col_name = self.txt_field_columns.get("Event")
+
+            if not kp_col_name or not event_col_name:
+                print("Error: 'KP' column not configured in TXT Data Columns settings.")
+                self.schedule_hourly_log()
+                return
+            
+            # 1. Get current KP value
+            current_kp = None
+            try:
+                txt_data = self._get_txt_data_from_source(self.txt_folder_path)
+                current_kp_str = txt_data.get(kp_col_name)
+                if current_kp_str is not None:
+                    current_kp = float(current_kp_str)
+            except (ValueError, TypeError, AttributeError) as e:
+                print(f"Could not parse current KP value: {e}")
+
+            if current_kp is None:
+                print("Could not retrieve a valid current KP. Skipping hourly log.")
+                self.schedule_hourly_log()
+                return
+
+            # 2. Find the last hourly KP log from the Excel file
+            last_kp = None
+            try:
+                df = pd.read_excel(self.log_file_path)
+                # Filter for previous hourly logs, ensuring the KP column is numeric
+                hourly_logs_df = df[df[event_col_name].str.startswith("Current KP:", na=False)].copy()
+                print(f"Found {len(hourly_logs_df)} previous hourly logs in Excel file.") # DIAGNOSTIC
+                hourly_logs_df[kp_col_name] = pd.to_numeric(hourly_logs_df[kp_col_name], errors='coerce')
+                hourly_logs_df.dropna(subset=[kp_col_name], inplace=True)
+
+                if not hourly_logs_df.empty:
+                    last_kp = current_kp # Get the current KP value
+            except Exception as e:
+                print(f"Could not read or find last KP from Excel file: {e}")
+
+            # 3. Format the event text string
+            if last_kp is not None:
+                progress = current_kp - last_kp
+                event_text = f"Current KP: {current_kp:.3f} | Progress last hour: {progress:+.3f} km"
+            else:
+                event_text = f"Current KP: {current_kp:.3f} | First hourly log"
+
+            # 4. Call the logging function with the generated text
+            self.log_hourly_kp_event(event_text)
         else:
             print("'Hourly KP Log' event is disabled, skipping log.")
         # Reschedule for the following hour
         self.schedule_hourly_log()
 
-    def log_hourly_kp_event(self):
+    def log_hourly_kp_event(self, event_text):
         """Logs an automatic hourly event to record the current KP."""
         self._perform_log_action(event_type="Hourly KP Log",
-                                 event_text_for_excel="Hourly KP Log",
+                                 event_text_for_excel=event_text,
                                  triggering_button=None,  # No button is associated
                                  txt_source_key="Main TXT") # Use the primary TXT source for KP data
 
