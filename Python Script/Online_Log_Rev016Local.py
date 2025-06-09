@@ -510,6 +510,8 @@ class DataLoggerGUI:
                         print(f"Warning: Could not apply style color '{bg_color}' for button '{button_text}'. Error: {e_style}")
 
                 button = ttk.Button(tab_frame, text=button_text, style=final_style)
+                config_object = button_config_data.get("config")
+                button.config(command=lambda cfg=config_object, btn=button: self.log_custom_event(cfg, btn))
                 buttons_dict[button_text] = {"widget": button, "data": button_config_data}
                 self.custom_buttons.append(button) # Track all custom button widgets
                         
@@ -1094,21 +1096,16 @@ class DataLoggerGUI:
 
         def _worker_thread_func():
             nonlocal original_text 
-            row_data = {}
             excel_success = False
             sqlite_logged = False
             excel_save_exception = None
             sqlite_save_exception_type = None
             status_msg = f"'{event_type}' processed with errors."
 
-            record_id = str(uuid.uuid4())
-            row_data['RecordID'] = record_id
-
             try:
-                event_col_name = self.txt_field_columns.get("Event", "Event")
-                row_data["EventType"] = event_type
-                if event_text_for_excel is not None:
-                    row_data[event_col_name] = event_text_for_excel
+                # --- STEP 1: Initialize and collect all data from file sources FIRST ---
+                row_data = {}
+                record_id = str(uuid.uuid4())
 
                 # --- TXT Data Collection ---
                 if txt_source_key and txt_source_key != "None":
@@ -1120,7 +1117,14 @@ class DataLoggerGUI:
                     elif txt_source_key == "TXT Source 3":
                         source_folder_path = self.txt_folder_path_set3
                     
-                    print(f"Inside _perform_log_action: source_folder_path for {txt_source_key}: {source_folder_path}") # DIAGNOSTIC
+                    if source_folder_path and os.path.isdir(source_folder_path): 
+                        try:
+                            txt_data = self._get_txt_data_from_source(source_folder_path)
+                            if txt_data:
+                                row_data.update(txt_data)
+                        except Exception as e_txt:
+                            print(f"Error getting TXT data from source '{txt_source_key}': {e_txt}")
+                            self.master.after(0, lambda e=e_txt: messagebox.showerror("Error", f"Failed to read TXT data from {txt_source_key}:\n{e}", parent=self.master))
                     
                     # Ensure path exists and is a directory before attempting to read
                     if source_folder_path and os.path.isdir(source_folder_path): 
@@ -1162,6 +1166,18 @@ class DataLoggerGUI:
                         print(f"SVP column config error: {svp_col_name}") # DIAGNOSTIC
                 
                 print(f"Final row_data before Excel/SQLite save: {row_data}") # DIAGNOSTIC
+
+                 # -----------------------------------------------------------------
+                # --- FIX: ADD THE EVENT TEXT TO THE ROW DATA DICTIONARY ---
+                # Find the column name configured for the "Event" data.
+                event_column_name = self.txt_field_columns.get("Event")
+                
+                # If the event column is defined and text is provided, add it.
+                # This will correctly place text like "Custom Event 1 Triggered".
+                if event_column_name and event_text_for_excel is not None:
+                    row_data[event_column_name] = event_text_for_excel
+                # --- END FIX ---
+                # -----------------------------------------------------------------
 
                 if row_data:
                     # Get the color for the row based on the event type

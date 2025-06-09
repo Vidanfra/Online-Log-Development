@@ -78,7 +78,7 @@
         {
             "text": "Custom 2",
             "event_text": "Custom 2 Triggered",
-            "txt_source_key": "TXT Source 3",
+            "txt_source_key": "Main TXT",
             "tab_group": "Group 2"
         },
         {
