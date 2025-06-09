@@ -222,8 +222,8 @@ class DataLoggerGUI:
         '''
         self.master = master
         master.title("Data Acquisition Logger (SQLite Mode)")
-        master.geometry("450x250")  # Much smaller default size to fit at the top of Excel
-        master.minsize(600, 300) # Slightly smaller min size
+        master.geometry("450x300")  # Much smaller default size to fit at the top of Excel
+        master.minsize(600, 350) # Slightly smaller min size
         self.settings_file = "logger_settings.json"
         self.init_styles()
         self.init_variables()
@@ -371,6 +371,10 @@ class DataLoggerGUI:
         self.sqlite_enabled = False
         self.sqlite_db_path = None
         self.sqlite_table = "EventLog"
+
+        self.always_on_top_var = tk.BooleanVar(value=False)
+        self.settings_window_instance = None # Track settings window
+        self.custom_inline_editor_window = None # To track the open inline editor
 
         self.status_var = tk.StringVar()
         self.monitor_status_label = None
@@ -596,7 +600,9 @@ class DataLoggerGUI:
         indicator_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(3, 0)) # Reduced pady
         indicator_frame.columnconfigure(1, weight=0)
         indicator_frame.columnconfigure(3, weight=0)
-        indicator_frame.columnconfigure(4, weight=1) # Spacer
+        # Auto New Day activator button
+        indicator_frame.columnconfigure(4, weight=0) # Column for checkbox
+        indicator_frame.columnconfigure(5, weight=1) # Spacer column
 
         # Create labels for monitoring status
         ttk.Label(indicator_frame, text="Monitoring:", font=("Arial", 8, "bold")).grid(row=0, column=0, sticky=tk.W, padx=(0, 2)) # Smaller font
@@ -607,9 +613,25 @@ class DataLoggerGUI:
         ttk.Label(indicator_frame, text="SQLite:", font=("Arial", 8, "bold")).grid(row=0, column=2, sticky=tk.W, padx=(10, 2)) # Smaller font, reduced padx
         self.db_status_label = ttk.Label(indicator_frame, text="Initializing...", foreground="orange", font=("Arial", 8)) # Smaller font
         self.db_status_label.grid(row=0, column=3, sticky=tk.W)
+        # Always on top checkbox
+        always_on_top_check = ttk.Checkbutton(
+            indicator_frame,
+            text="Always on Top",
+            variable=self.always_on_top_var,
+            command=self.toggle_always_on_top,
+            style="Large.TCheckbutton"
+        )
+        always_on_top_check.grid(row=0, column=4, sticky=tk.W, padx=(15, 0))
+        ToolTip(always_on_top_check, "If checked, this window will always stay on top of other applications.")
         ttk.Frame(indicator_frame).grid(row=0, column=4) # Spacer
 
         self.update_db_indicator()
+
+    # Function for always on top
+    def toggle_always_on_top(self):
+        """Toggles the 'always on top' state of the main window based on the checkbox."""
+        is_on_top = self.always_on_top_var.get()
+        self.master.wm_attributes("-topmost", is_on_top)
 
     def sync_excel_to_sqlite_triggered(self):
         '''
@@ -1746,6 +1768,7 @@ class DataLoggerGUI:
             "custom_button_tab_groups": self.custom_button_tab_groups, # NEW: Save tab groups
             "button_colors": colors_to_save, "sqlite_enabled": self.sqlite_enabled,
             "sqlite_db_path": self.sqlite_db_path, "sqlite_table": self.sqlite_table,
+            "always_on_top": self.always_on_top_var.get()
         }
         try:
             with open(self.settings_file, 'w') as f: 
@@ -1833,7 +1856,7 @@ class DataLoggerGUI:
                 self.custom_button_configs = updated_custom_configs
                 print(f"Loaded custom_button_configs: {self.custom_button_configs}") # DIAGNOSTIC
 
-                # **MODIFIED:** Load custom button tab groups
+                # Load custom button tab groups
                 # Start with the fixed groups and add any others found in settings
                 self.custom_button_tab_groups = sorted(list(set(["Main"] + settings.get("custom_button_tab_groups", []))))
                 # Filter out empty string, if any might appear
@@ -1851,7 +1874,11 @@ class DataLoggerGUI:
                     if color_hex: self.button_colors[key] = (None, color_hex)
                 self.sqlite_enabled = settings.get("sqlite_enabled", False)
                 self.sqlite_db_path = settings.get("sqlite_db_path")
+                always_on_top_setting = settings.get("always_on_top", False)
+                self.always_on_top_var.set(always_on_top_setting)
+                self.master.wm_attributes("-topmost", always_on_top_setting)
                 self.sqlite_table = settings.get("sqlite_table", "EventLog")
+                
                 self.update_status("Settings loaded.")
             else:
                 self.update_status("Settings file not found. Using defaults.")

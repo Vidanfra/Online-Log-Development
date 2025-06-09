@@ -152,5 +152,6 @@
     },
     "sqlite_enabled": true,
     "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL/SQL TEST.db",
-    "sqlite_table": "EventLog"
+    "sqlite_table": "EventLog",
+    "always_on_top": false
 }
