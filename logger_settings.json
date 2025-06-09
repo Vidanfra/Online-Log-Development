@@ -67,88 +67,67 @@
     "folder_skips": {
         "Main TXT File": false
     },
-    "num_custom_buttons": 11,
+    "num_custom_buttons": 8,
     "custom_button_configs": [
         {
             "text": "Custom 1",
             "event_text": "Custom 1 Event",
             "txt_source_key": "Main TXT",
-            "tab_group": "Crane"
+            "tab_group": "Main"
         },
         {
             "text": "Custom 2",
             "event_text": "Custom 2 Triggered",
             "txt_source_key": "Main TXT",
-            "tab_group": "Crane"
+            "tab_group": "Main"
         },
         {
             "text": "Custom 3",
             "event_text": "Custom 3 Event",
             "txt_source_key": "TXT Source 2",
-            "tab_group": "Crane"
+            "tab_group": "Main"
         },
         {
             "text": "Custom 4",
             "event_text": "Custom 4 Event",
             "txt_source_key": "Main TXT",
-            "tab_group": "Crane"
+            "tab_group": "Main"
         },
         {
             "text": "Custom 5",
             "event_text": "Custom 5 Event",
             "txt_source_key": "TXT Source 2",
-            "tab_group": "Crane"
+            "tab_group": "Main"
         },
         {
             "text": "Custom 6",
             "event_text": "Custom 6 Event",
             "txt_source_key": "TXT Source 3",
-            "tab_group": "Crane"
-        },
-        {
-            "text": "Custom 7",
-            "event_text": "Custom 7 Event",
-            "txt_source_key": "Main TXT",
-            "tab_group": "Crane"
-        },
-        {
-            "text": "Custom 8",
-            "event_text": "Custom 8 Event",
-            "txt_source_key": "None",
-            "tab_group": "Crane"
+            "tab_group": "Main"
         },
         {
             "text": "Custom 9",
             "event_text": "Custom 9 Event",
             "txt_source_key": "None",
-            "tab_group": "Crane"
-        },
-        {
-            "text": "Custom 10",
-            "event_text": "Custom 10 Event",
-            "txt_source_key": "None",
-            "tab_group": "ROV"
+            "tab_group": "Main"
         },
         {
             "text": "Custom 11",
             "event_text": "Custom 11 Event",
             "txt_source_key": "Main TXT",
-            "tab_group": "Crane"
+            "tab_group": "Main"
         }
     ],
     "custom_button_tab_groups": [
-        "Crane",
         "Main",
-        "ROV",
-        "Vessel"
+        "ROV"
     ],
     "button_colors": {
         "Log on": "#90EE90",
         "Log off": "#FFB6C1",
         "Event": "#FFFFE0",
         "SVP": "#ADD8E6",
-        "New Day": "#FFFF99",
-        "Custom 2": "#FFB3BA"
+        "New Day": "#FFFF99"
     },
     "sqlite_enabled": true,
     "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL/SQL TEST.db",

@@ -2058,9 +2058,14 @@ class DataLoggerGUI:
 
         context_menu = tk.Menu(self.master, tearoff=0)
         current_button_text = self.custom_button_configs[button_index].get("text", f"Custom {button_index+1}")
+        # Right Click edit button command
         context_menu.add_command(label=f"Edit \"{current_button_text}\" Settings...",
-                                 command=lambda: self._edit_custom_button_inline(button_index))
-        
+                              command=lambda: self._edit_custom_button_inline(button_index))
+    # Add a separator for visual clarity
+        context_menu.add_separator()
+    # Add the new "Delete" command
+        context_menu.add_command(label=f"Delete \"{current_button_text}\"",
+                              command=lambda: self._delete_custom_button(button_index))
         try:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -2105,6 +2110,49 @@ class DataLoggerGUI:
             self._edit_custom_button_inline(self.num_custom_buttons - 1)
         else:
             messagebox.showinfo("Limit Reached", f"You have reached the maximum number of {self.MAX_CUSTOM_BUTTONS} custom buttons.", parent=self.master)
+  
+    # Right Click delete custom button function
+    def _delete_custom_button(self, button_index):
+        """Deletes a custom button after confirmation."""
+        
+        # Safely get the button text for the confirmation message
+        try:
+            button_text = self.custom_button_configs[button_index].get("text", f"Custom {button_index + 1}")
+        except IndexError:
+            messagebox.showerror("Error", "Cannot delete button. Index is out of range.", parent=self.master)
+            return
+
+        # Ask for user confirmation before deleting
+        if not messagebox.askyesno(
+            "Confirm Deletion",
+            f"Are you sure you want to permanently delete the button '{button_text}'?",
+            parent=self.master):
+            self.update_status(f"Deletion of '{button_text}' cancelled.")
+            return
+
+        # --- Deletion Logic ---
+        # 1. Remove the button's configuration from the list
+        if button_index < len(self.custom_button_configs):
+            # Also remove any associated color from the button_colors dictionary
+            if button_text in self.button_colors:
+                del self.button_colors[button_text]
+            
+            del self.custom_button_configs[button_index]
+            
+            # 2. Decrement the total number of custom buttons
+            self.num_custom_buttons -= 1
+
+            # 3. Save the updated settings to the JSON file
+            self.save_settings()
+
+            # 4. Refresh the buttons on the main UI
+            self.update_custom_buttons()
+            
+            self.update_status(f"Button '{button_text}' was deleted.")
+        else:
+            self.update_status("Error: Could not delete button (invalid index).")
+    
+
 
     def _show_tab_context_menu(self, event):
         """Shows a context menu for adding, renaming, or deleting notebook tabs."""
@@ -3158,12 +3206,7 @@ class SettingsWindow:
         for i, btn_name in enumerate(standard_buttons_to_color):
             self._add_color_row(self.color_scrollable_frame, i + 1, btn_name, is_custom=False)
         
-        # Add custom button color rows (up to max possible, even if not all are currently configured)
-        for i in range(self.parent_gui.MAX_CUSTOM_BUTTONS): # Max 10 custom buttons
-            btn_name = f"Custom {i+1}"
-            self._add_color_row(self.color_scrollable_frame, len(standard_buttons_to_color) + i + 1, btn_name, is_custom=True)
-
-        self.master.after_idle(lambda: canvas.config(scrollregion=canvas.bbox("all")))
+        
 
     def _add_color_row(self, parent_frame, row_index, btn_name, is_custom=False):
         """Helper to create a single row for color setting."""
