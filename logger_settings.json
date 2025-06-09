@@ -67,7 +67,7 @@
     "folder_skips": {
         "Main TXT File": false
     },
-    "num_custom_buttons": 4,
+    "num_custom_buttons": 20,
     "custom_button_configs": [
         {
             "text": "Custom Event 1",
@@ -91,6 +91,102 @@
             "text": "ROV Off Deck",
             "event_text": "ROV Off Deck",
             "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "sdvgdfvdsfc",
+            "event_text": "cdfffsdf",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 6",
+            "event_text": "Custom 6 Event",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 7",
+            "event_text": "Custom 7 Event",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 8",
+            "event_text": "Custom 8 Event",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 9",
+            "event_text": "Custom 9 Event",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 10",
+            "event_text": "Custom 10 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 11",
+            "event_text": "Custom 11 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 12",
+            "event_text": "Custom 12 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 13",
+            "event_text": "Custom 13 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 14",
+            "event_text": "Custom 14 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 15",
+            "event_text": "Custom 15 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 16",
+            "event_text": "Custom 16 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 17",
+            "event_text": "Custom 17 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 18",
+            "event_text": "Custom 18 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 19",
+            "event_text": "Custom 19 Event",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 20",
+            "event_text": "Custom 20 Event",
+            "txt_source_key": "None",
             "tab_group": "ROV"
         }
     ],
@@ -104,7 +200,7 @@
         "Event": "#FFFFE0",
         "SVP": "#ADD8E6",
         "New Day": "#80ffff",
-        "Hourly KP Log": "#80ffff"
+        "Hourly KP Log": "#00ffff"
     },
     "sqlite_enabled": true,
     "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/SQL/SQL TEST.db",

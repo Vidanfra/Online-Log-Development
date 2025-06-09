@@ -222,36 +222,48 @@ class DataLoggerGUI:
         * master: The root Tkinter window or parent widget.
         '''
         self.master = master
-        master.title("Data Acquisition Logger (SQLite Mode)")
-        master.geometry("450x300")  # Much smaller default size to fit at the top of Excel
-        master.minsize(600, 350) # Slightly smaller min size
+        master.title("Online Logger")
+        master.geometry("1000x250")
+        master.minsize(800, 200)
         self.settings_file = "logger_settings.json"
         self.init_styles()
         self.init_variables()
         self.load_settings()
 
         # --- Main Layout ---
-        self.main_frame = ttk.Frame(self.master, padding="5") # Reduced padding
-        self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.main_frame = ttk.Frame(self.master, padding="5")
+        self.main_frame.grid(row=0, column=0, sticky="nsew")
         self.master.columnconfigure(0, weight=1)
         self.master.rowconfigure(0, weight=1)
-        self.master.wm_attributes("-topmost", self.always_on_top_var.get()) # Put the GUI window in the front
 
-        # Changed to prioritize buttons and status indicators above a potentially large log/text area
-        self.main_frame.columnconfigure(0, weight=1) # Buttons area
-        self.main_frame.rowconfigure(0, weight=1) # Button frame row
-        self.main_frame.rowconfigure(1, weight=0) # Indicator row
-        self.main_frame.rowconfigure(2, weight=0) # Status bar row
+        # Configure the main 3-column layout for the application
+        self.main_frame.columnconfigure(0, weight=4) # Custom Buttons area (largest)
+        self.main_frame.columnconfigure(1, weight=1) # General Buttons area
+        self.main_frame.columnconfigure(2, weight=1) # Configuration area
+        self.main_frame.rowconfigure(0, weight=1)    # Main content row
+        self.main_frame.rowconfigure(1, weight=0)    # Status bar row
 
-        # Create button frame FIRST
-        self.button_frame = ttk.Frame(self.main_frame, padding="5") # Reduced padding
-        self.button_frame.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E, tk.S))
-        # Create buttons inside the frame (now happens in two stages)
-        self.create_main_buttons(self.button_frame)
+        # Create container frames for each section
+        self.custom_buttons_frame = ttk.Frame(self.main_frame)
+        self.custom_buttons_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
 
-        # Create indicators and status bar AFTER button frame
-        self.create_status_indicators(self.main_frame) # Status Indicators
-        self.create_status_bar(self.main_frame)        # Status Bar
+        self.general_buttons_frame = ttk.Frame(self.main_frame)
+        self.general_buttons_frame.grid(row=0, column=1, sticky="nsew", padx=5)
+
+        self.config_frame = ttk.Frame(self.main_frame)
+        self.config_frame.grid(row=0, column=2, sticky="nsew", padx=(5, 0))
+        # Configure the config frame to place status indicators at the bottom
+        self.config_frame.rowconfigure(0, weight=1) # Buttons will be at the top
+        self.config_frame.rowconfigure(1, weight=0) # Indicators will be at the bottom
+
+        # Create all buttons and place them in the correct frames
+        self.create_main_buttons()
+
+        # Create status indicators and place them in the config frame
+        self.create_status_indicators()
+
+        # Create status bar at the very bottom, spanning all columns
+        self.create_status_bar()
 
         # Scheduled tasks
         self.schedule_new_day() # Start the midnight log schedule
@@ -289,7 +301,7 @@ class DataLoggerGUI:
         self.style.configure("TLabelframe", background="#f0f0f0", padding=3, relief="flat") # Flat relief for compact
         self.style.configure("TLabelframe.Label", background="#f0f0f0", font=("Arial", 9, "bold")) # Smaller font
         self.style.configure("Large.TCheckbutton", font=("Arial", 10)) # For settings checkbox
-        self.style.configure("Toolbutton", padding=1) # For settings color picker buttons
+        self.style.configure("Small.TButton", font=("Arial", 8), padding=3) # Define a new custom style for smaller buttons that keeps the standard border.
         self.style.configure("Accent.TButton", font=("Arial", 9, "bold"), foreground="white", background="#0078D4") # For settings save
 
         self.style.map("TButton",
@@ -389,248 +401,142 @@ class DataLoggerGUI:
         self.settings_window_instance = None # Track settings window
         self.custom_inline_editor_window = None # To track the open inline editor
 
-    def create_main_buttons(self, parent_frame):
+    def create_main_buttons(self):
         '''
         Builds and renders all the buttons in the GUI dynamically, grouped for better intuitiveness.
         Custom buttons are now organized into tabs within a ttk.Notebook.
         '''
-        # Clear existing buttons in the parent frame
-        for widget in parent_frame.winfo_children(): widget.destroy()
-        self.custom_buttons = [] # List to hold custom button widgets for reference
+        # Clear existing widgets from all three frames
+        for frame in [self.custom_buttons_frame, self.general_buttons_frame, self.config_frame]:
+            for widget in frame.winfo_children():
+                widget.destroy()
+        self.custom_buttons = []
 
-        # Create distinct frames for grouping
-        logging_actions_frame = ttk.Frame(parent_frame, padding=(5,5,5,0))
-        logging_actions_frame.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
-
-        # NEW: Create a Notebook for custom buttons
-        self.custom_buttons_notebook = ttk.Notebook(parent_frame)
-        self.custom_buttons_notebook.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
-        
-        # --- CHANGE STARTS HERE ---
-        # Bind a right-click event to the notebook for renaming tabs
+        # --- Section 1: Custom Buttons (Left Side) ---
+        custom_lf = ttk.LabelFrame(self.custom_buttons_frame, text="Custom Events")
+        custom_lf.pack(fill="both", expand=True)
+        self.custom_buttons_notebook = ttk.Notebook(custom_lf)
+        self.custom_buttons_notebook.pack(fill="both", expand=True, padx=5, pady=5)
         self.custom_buttons_notebook.bind("<Button-3>", self._show_tab_context_menu)
-        # --- CHANGE ENDS HERE ---
+        self.custom_button_tab_frames = {}
 
-        # Initialize tab frames
-        self.custom_button_tab_frames = {} # Reset tab frames
-
-    
-        # The master list of tab groups is the single source of truth.
-        # We ensure all defined tabs and any tabs assigned to buttons are created.
-        all_defined_tab_groups = set(self.custom_button_tab_groups)
-
-        # Sort tab groups for consistent order
-        sorted_tab_groups = sorted(list(all_defined_tab_groups))
-
-        for tab_group_name in sorted_tab_groups:
-            if tab_group_name: # Ensure no empty string tabs
-                # Create a frame for each tab
-                tab_frame = ttk.Frame(self.custom_buttons_notebook, padding=(5,5,5,0))
+        all_tab_groups = sorted(list(set(self.custom_button_tab_groups)))
+        for tab_group_name in all_tab_groups:
+            if tab_group_name:
+                tab_frame = ttk.Frame(self.custom_buttons_notebook, padding=5)
                 self.custom_buttons_notebook.add(tab_frame, text=tab_group_name)
-                tab_frame.columnconfigure(0, weight=1) # Allow buttons to expand
                 self.custom_button_tab_frames[tab_group_name] = tab_frame
-                # Bind right-click to the tab frame to allow adding buttons
                 tab_frame.bind("<Button-3>", self._show_add_button_context_menu)
 
-
-        other_actions_frame = ttk.Frame(parent_frame, padding=(5,5,5,0))
-        other_actions_frame.grid(row=2, column=0, sticky="nsew", padx=2, pady=2)
-
-        # Configure row weights for the parent_frame (which is self.button_frame)
-        parent_frame.columnconfigure(0, weight=1)
-        parent_frame.rowconfigure(0, weight=1) # Logging actions
-        parent_frame.rowconfigure(1, weight=3) # NEW: Custom events (give more space)
-        parent_frame.rowconfigure(2, weight=0) # Other actions (less growth)
-
-
-        # --- Define Button Data with target frames ---
-        all_buttons_data = {
-            "Log on":  {"command_ref": self.log_event, "frame": logging_actions_frame, "tooltip": "Record a 'Log on' marker with current data.", "txt_source_key": "Main TXT"},
-            "Log off": {"command_ref": self.log_event, "frame": logging_actions_frame, "tooltip": "Record a 'Log off' marker with current data.", "txt_source_key": "Main TXT"},
-            "Event":   {"command_ref": self.log_event, "frame": logging_actions_frame, "tooltip": "Record data from the Main TXT source. Text field is left blank in log.", "txt_source_key": "Main TXT"},
-            "SVP":     {"command_ref": self.apply_svp, "frame": logging_actions_frame, "tooltip": "Record data and insert latest SVP filename.", "txt_source_key": "Main TXT"},
-            "New Day": {"command_ref": self.log_new_day, "frame": other_actions_frame, "tooltip": "Manually trigger the 'New Day' log entry.", "txt_source_key": "Main TXT"},
-            "Settings":{"command_ref": self.open_settings, "frame": other_actions_frame, "tooltip": "Open the configuration window."},
-            "Sync DB":{"command_ref": self.sync_excel_to_sqlite_triggered, "frame": other_actions_frame, "tooltip": "Read the Excel log and update the SQLite DB with changes (Requires RecordID column)."}
-        }
-
-        # --- Prepare Custom Button Data ---
-        custom_buttons_by_tab = {group: [] for group in sorted_tab_groups if group} # Ensure groups are not empty
-        source_order = {"Main TXT": 0, "TXT Source 2": 1, "TXT Source 3": 2, "None": 3}
-
+        # Prepare and sort custom button data by tab
+        custom_buttons_by_tab = {group: [] for group in all_tab_groups if group}
         for config in self.custom_button_configs[:self.num_custom_buttons]:
-            button_text = config.get("text", f"Custom Button")
-            event_desc = config.get("event_text", f"{button_text} Triggered")
-            txt_source = config.get("txt_source_key", "None")
-            tab_group = config.get("tab_group", "Main") # **MODIFIED:** Default to "Main"
-
-            # Ensure the tab_group exists in our dictionary, create if not
+            tab_group = config.get("tab_group", "Main")
             if tab_group not in custom_buttons_by_tab:
                 custom_buttons_by_tab[tab_group] = []
-                # Dynamically add the tab here if it was not pre-created (e.g., from an old config)
-                if tab_group not in self.custom_button_tab_frames:
-                    tab_frame = ttk.Frame(self.custom_buttons_notebook, padding=(5,5,5,0))
-                    self.custom_buttons_notebook.add(tab_frame, text=tab_group)
-                    tab_frame.columnconfigure(0, weight=1)
-                    self.custom_button_tab_frames[tab_group] = tab_frame
-                    tab_frame.bind("<Button-3>", self._show_add_button_context_menu)
+            custom_buttons_by_tab[tab_group].append(config)
 
+        # Create and grid custom buttons inside their tabs
+        for tab_group, configs in custom_buttons_by_tab.items():
+            if tab_group in self.custom_button_tab_frames:
+                tab_frame = self.custom_button_tab_frames[tab_group]
+                for i, config in enumerate(configs):
+                    button_text = config.get("text", "Custom")
+                    event_desc = config.get("event_text", "Triggered")
+                    txt_source = config.get("txt_source_key", "None")
 
-            custom_buttons_by_tab[tab_group].append({
-                "text": button_text, "config": config,
-                "tooltip": f"Log '{event_desc}' with current data. (Source: {txt_source})",
-                "txt_source_key": txt_source
-            })
-        
-        # Sort buttons within each tab
-        for tab_group, buttons_list in custom_buttons_by_tab.items():
-            try:
-                custom_buttons_by_tab[tab_group] = sorted(buttons_list, key=lambda cfg: source_order.get(cfg.get('txt_source_key', 'None'), 99))
-            except Exception as e:
-                print(f"Warning: Could not sort custom buttons in tab '{tab_group}'. Using default order. Error: {e}")
-
-        # --- Layout Buttons ---
-        buttons_dict = {}
-
-        # First, create all standard buttons
-        for text, data in all_buttons_data.items():
-            style_name = f"{text.replace(' ', '').replace('->','')}.TButton"
-            _, bg_color = self.button_colors.get(text, (None, None))
-            final_style = "TButton"
-            if bg_color:
-                try:
-                    self.style.configure(style_name, background=bg_color)
-                    final_style = style_name
-                except tk.TclError as e_style:
-                    print(f"Warning: Could not apply style color '{bg_color}' for button '{text}'. Error: {e_style}")
-            button = ttk.Button(data["frame"], text=text, style=final_style)
-            buttons_dict[text] = {"widget": button, "data": data}
-
-        # Then, create custom buttons within their respective tabs
-        for tab_group, buttons_list in custom_buttons_by_tab.items():
-            tab_frame = self.custom_button_tab_frames[tab_group]
-            num_custom_cols = 5 # Can be adjusted or made dynamic later
-            
-            for i, button_config_data in enumerate(buttons_list):
-                button_text = button_config_data["text"]
-                txt_source = button_config_data.get("txt_source_key", "None")
-                style_name = f"{button_text.replace(' ', '')}.TButton"
-                
-                _, user_set_color = self.button_colors.get(button_text, (None, None))
-                bg_color = user_set_color if user_set_color else self.source_based_colors.get(txt_source)
-                
-                final_style = "TButton"
-                if bg_color:
-                    try:
+                    _, user_color = self.button_colors.get(button_text, (None, None))
+                    bg_color = user_color if user_color else self.source_based_colors.get(txt_source)
+                    style_name = f"{button_text.replace(' ', '')}.TButton"
+                    final_style = "TButton"
+                    if bg_color:
                         self.style.configure(style_name, background=bg_color)
                         final_style = style_name
-                    except tk.TclError as e_style:
-                        print(f"Warning: Could not apply style color '{bg_color}' for button '{button_text}'. Error: {e_style}")
 
-                button = ttk.Button(tab_frame, text=button_text, style=final_style)
-                config_object = button_config_data.get("config")
-                button.config(command=lambda cfg=config_object, btn=button: self.log_custom_event(cfg, btn))
-                buttons_dict[button_text] = {"widget": button, "data": button_config_data}
-                self.custom_buttons.append(button) # Track all custom button widgets
-                            
-                config_object = button_config_data.get("config")
-                if config_object:
-                    try:
-                        original_index = self.custom_button_configs.index(config_object)
-                        button.bind("<Button-3>", lambda e, idx=original_index: self._show_custom_button_context_menu(e, idx))
-                    except ValueError:
-                        print(f"Warning: Could not find config for button '{button_text}' in main list. Context menu may fail.")
-                        button.bind("<Button-3>", lambda e, txt=button_text: messagebox.showerror("Binding Error", f"Cannot edit '{txt}'. Configuration is out of sync."))
+                    button = ttk.Button(tab_frame, text=button_text, style=final_style)
+                    button.config(command=lambda c=config, b=button: self.log_custom_event(c, b))
+                    
+                    # New layout: 5 columns, 2 rows
+                    row = i % 2
+                    col = i // 2
+                    button.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
+                    
+                    tab_frame.columnconfigure(col, weight=1)
+                    tab_frame.rowconfigure(row, weight=1)
+                    
+                    original_index = self.custom_button_configs.index(config)
+                    button.bind("<Button-3>", lambda e, idx=original_index: self._show_custom_button_context_menu(e, idx))
+                    ToolTip(button, f"Log '{event_desc}' (Source: {txt_source})")
+                    self.custom_buttons.append(button)
 
-                row, col = divmod(i, num_custom_cols)
-                button.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
-                tab_frame.columnconfigure(col, weight=1)
-                tab_frame.rowconfigure(row, weight=1)
-                ToolTip(button, button_config_data["tooltip"])
+        # --- Section 2: General Event Buttons (Middle) ---
+        general_lf = ttk.LabelFrame(self.general_buttons_frame, text="General Events")
+        general_lf.pack(fill="both", expand=True)
+        general_lf.columnconfigure((0, 1), weight=1)
+        general_lf.rowconfigure((0, 1), weight=1)
 
+        # Column 1
+        btn_logon = ttk.Button(general_lf, text="Log on", style="Logon.TButton", command=lambda: self.log_event("Log on", btn_logon, "Main TXT"))
+        btn_logon.grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
+        ToolTip(btn_logon, "Record a 'Log on' marker.")
 
-        # Now, grid the standard buttons within their respective frames
-        # Logging Actions Frame (2 columns)
-        logging_buttons_order = ["Log on", "Log off", "Event", "SVP"]
-        for i, text in enumerate(logging_buttons_order):
-            if text in buttons_dict:
-                button = buttons_dict[text]["widget"]
-                cmd_data = buttons_dict[text]["data"]
-                
-                cmd = None
-                command_ref = cmd_data.get("command_ref")
-                txt_source_key = cmd_data.get("txt_source_key", "Main TXT")
-                if command_ref:
-                    if text in ["Log on", "Log off", "Event"]: cmd = lambda t=text, b=button, src_key=txt_source_key: self.log_event(t, b, src_key)
-                    elif text == "SVP": cmd = lambda b=button, ref=command_ref, src_key=txt_source_key: ref(b, src_key)
-                button.config(command=cmd)
+        btn_logoff = ttk.Button(general_lf, text="Log off", style="Logoff.TButton", command=lambda: self.log_event("Log off", btn_logoff, "Main TXT"))
+        btn_logoff.grid(row=1, column=0, padx=4, pady=4, sticky="nsew")
+        ToolTip(btn_logoff, "Record a 'Log off' marker.")
+        # Column 2
+        btn_event = ttk.Button(general_lf, text="Event", style="Event.TButton", command=lambda: self.log_event("Event", btn_event, "Main TXT"))
+        btn_event.grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
+        ToolTip(btn_event, "Record data from the Main TXT source.")
 
-                row, col = divmod(i, 2) # 2 buttons per row
-                button.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
-                logging_actions_frame.columnconfigure(col, weight=1)
-                logging_actions_frame.rowconfigure(row, weight=1)
-                ToolTip(button, cmd_data["tooltip"])
-
-        # Other Actions Frame (1-2 columns)
-        other_buttons_order = ["New Day", "Sync DB", "Settings"]
-        for i, text in enumerate(other_buttons_order):
-            if text in buttons_dict:
-                button = buttons_dict[text]["widget"]
-                cmd_data = buttons_dict[text]["data"]
-                
-                cmd = None
-                command_ref = cmd_data.get("command_ref")
-                txt_source_key = cmd_data.get("txt_source_key", "Main TXT") # New Day uses txt_source_key
-                if command_ref:
-                    if text == "New Day": cmd = lambda b=button, ref=command_ref, src_key=txt_source_key: ref(b, src_key)
-                    else: cmd = command_ref
-                button.config(command=cmd)
-                
-                col = i # Arrange in a single row if 3 buttons, or 2 columns if more
-                row = 0
-                
-                button.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
-                other_actions_frame.columnconfigure(col, weight=1)
-                other_actions_frame.rowconfigure(row, weight=1)
-                ToolTip(button, cmd_data["tooltip"])
-
-        parent_frame.update_idletasks()
+        btn_svp = ttk.Button(general_lf, text="SVP", style="SVP.TButton", command=lambda: self.apply_svp(btn_svp, "Main TXT"))
+        btn_svp.grid(row=1, column=1, padx=4, pady=4, sticky="nsew")
+        ToolTip(btn_svp, "Record data and insert latest SVP filename.")
 
 
-    def create_status_indicators(self, parent_frame):
+        # --- Section 3: Configuration Buttons (Right Side) ---
+        config_lf = ttk.LabelFrame(self.config_frame, text="Configuration")
+        config_lf.grid(row=0, column=0, sticky="new")
+        self.config_frame.columnconfigure(0, weight=1)
+        config_lf.columnconfigure(0, weight=1)
+
+        btn_settings = ttk.Button(config_lf, text="Settings", style="Small.TButton", command=self.open_settings)
+        btn_settings.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
+        ToolTip(btn_settings, "Open the configuration window.")
+
+        btn_sync = ttk.Button(config_lf, text="Sync DB", style="Small.TButton", command=self.sync_excel_to_sqlite_triggered)
+        btn_sync.grid(row=1, column=0, sticky="ew", padx=4, pady=2)
+        ToolTip(btn_sync, "Update SQLite DB from the Excel log.")
+
+
+    def create_status_indicators(self):
         '''
         Creates the status indicators for monitoring and SQLite connection status.
         This method adds a frame below the main buttons to show the current status of monitoring and SQLite logging.
         '''
         # Create a frame for status indicators
-        indicator_frame = ttk.Frame(parent_frame, padding="3 0") # Reduced padding
-        indicator_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(3, 0)) # Reduced pady
-        indicator_frame.columnconfigure(1, weight=0)
-        indicator_frame.columnconfigure(3, weight=0)
-        # Auto New Day activator button
-        indicator_frame.columnconfigure(4, weight=0) # Column for checkbox
-        indicator_frame.columnconfigure(5, weight=1) # Spacer column
+        indicator_lf = ttk.LabelFrame(self.config_frame, text="Status")
+        indicator_lf.grid(row=1, column=0, sticky="sew", pady=(10, 0))
+        indicator_lf.columnconfigure(1, weight=1)
 
-        # Create labels for monitoring status
-        ttk.Label(indicator_frame, text="Monitoring:", font=("Arial", 8, "bold")).grid(row=0, column=0, sticky=tk.W, padx=(0, 2)) # Smaller font
-        self.monitor_status_label = ttk.Label(indicator_frame, text="Initializing...", foreground="orange", font=("Arial", 8)) # Smaller font
-        self.monitor_status_label.grid(row=0, column=1, sticky=tk.W)
+        # Monitoring Status
+        ttk.Label(indicator_lf, text="Monitoring:", font=("Arial", 8, "bold")).grid(row=0, column=0, sticky="w", padx=4, pady=2)
+        self.monitor_status_label = ttk.Label(indicator_lf, text="...", foreground="orange", font=("Arial", 8))
+        self.monitor_status_label.grid(row=0, column=1, sticky="w", padx=4, pady=2)
 
-        # Create labels for SQLite status
-        ttk.Label(indicator_frame, text="SQLite:", font=("Arial", 8, "bold")).grid(row=0, column=2, sticky=tk.W, padx=(10, 2)) # Smaller font, reduced padx
-        self.db_status_label = ttk.Label(indicator_frame, text="Initializing...", foreground="orange", font=("Arial", 8)) # Smaller font
-        self.db_status_label.grid(row=0, column=3, sticky=tk.W)
-        # Always on top checkbox
+        # SQLite Status
+        ttk.Label(indicator_lf, text="SQLite:", font=("Arial", 8, "bold")).grid(row=1, column=0, sticky="w", padx=4, pady=2)
+        self.db_status_label = ttk.Label(indicator_lf, text="...", foreground="orange", font=("Arial", 8))
+        self.db_status_label.grid(row=1, column=1, sticky="w", padx=4, pady=2)
+        
+        # Always on Top Checkbox
         always_on_top_check = ttk.Checkbutton(
-            indicator_frame,
+            indicator_lf,
             text="Always on Top",
             variable=self.always_on_top_var,
-            command=self.toggle_always_on_top,
-            style="Large.TCheckbutton"
+            command=self.toggle_always_on_top
         )
-        always_on_top_check.grid(row=0, column=4, sticky=tk.W, padx=(15, 0))
-        ToolTip(always_on_top_check, "If checked, this window will always stay on top of other applications.")
-        ttk.Frame(indicator_frame).grid(row=0, column=4) # Spacer
+        always_on_top_check.grid(row=2, column=0, columnspan=2, sticky='w', padx=4, pady=(5, 2))
+        ToolTip(always_on_top_check, "If checked, this window will always stay on top.")
 
         self.update_db_indicator()
 
@@ -963,16 +869,14 @@ class DataLoggerGUI:
                 conn_sqlite.close()
             return False, f"Sync Error: Unexpected error updating SQLite - {type(e).__name__}"
 
-    def create_status_bar(self, parent_frame):
+    def create_status_bar(self):
         '''
         Creates a status bar at the bottom of the main window to display status messages.
         This method initializes a label that will show the current status of the application, such as monitoring status, database connection status, and other messages.
-        Arguments:
-        * parent_frame: The frame where the status bar will be placed.
         '''
         self.status_var.set("Status: Ready")
-        status_bar = ttk.Label(parent_frame, textvariable=self.status_var, style="StatusBar.TLabel", anchor='w')
-        status_bar.grid(row=2, column=0, sticky=(tk.W, tk.E), padx=0, pady=(3,0)) # Reduced pady
+        status_bar = ttk.Label(self.main_frame, textvariable=self.status_var, style="StatusBar.TLabel", anchor='w')
+        status_bar.grid(row=1, column=0, columnspan=3, sticky="ew")
 
     def update_status(self, message):
         '''
