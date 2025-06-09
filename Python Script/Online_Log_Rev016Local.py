@@ -136,7 +136,8 @@ class FolderMonitor(FileSystemEventHandler):
 
     def on_modified(self, event):
         if not event.is_directory:
-            if not self.file_extension or event.src_path.lower().endswith(self.file_extension.lower()):
+        # Change self.file_extension to self.extension in these two places
+            if not self.extension or event.src_path.lower().endswith(self.extension.lower()):
                 self.update_latest_file()
 
     def on_created(self, event):
@@ -1939,15 +1940,30 @@ class DataLoggerGUI:
     def start_monitoring(self):
         '''Function to read the last version of a file in several folders'''
         print("\n--- Starting Monitoring ---") # DIAGNOSTIC
-        for name, monitor_observer in list(self.monitors.items()):
+       
+        active_monitors = list(self.monitors.items()) # Get a copy of the items
+
+    # Step 1: Signal all threads to stop without blocking indefinitely
+        for name, monitor_observer in active_monitors:
             try:
                 if monitor_observer.is_alive():
                     monitor_observer.stop()
-                    print(f"Stopped existing monitor: {name}") # DIAGNOSTIC
-            except Exception as e: 
-                print(f"Error stopping monitor {name}: {e}") # DIAGNOSTIC
-        self.monitors.clear(); folder_cache.clear()
-        print("Cleared existing monitors and folder cache.") # DIAGNOSTIC
+                    print(f"Signalled monitor to stop: {name}")
+            except Exception as e:
+                print(f"Error signalling monitor {name} to stop: {e}")
+
+    # Step 2: Wait for all threads to terminate with a timeout
+        for name, monitor_observer in active_monitors:
+            try:
+            # The join() call is implicitly part of stop(), but doing it
+            # separately with a timeout prevents one stuck thread from
+            # hanging the entire application.
+                monitor_observer.join(timeout=1.0) 
+                print(f"Joined monitor thread: {name}")
+            except Exception as e:
+                print(f"Error joining monitor {name}: {e}")
+            self.monitors.clear(); folder_cache.clear()
+            print("Cleared existing monitors and folder cache.") # DIAGNOSTIC
 
         count = 0; monitoring_active = False
         
@@ -2438,36 +2454,6 @@ class DataLoggerGUI:
         editor_window.wait_window(editor_window)
         self.custom_inline_editor_window = None
         
-
-        
-        def save_changes():
-            old_button_text = button_config.get("text")
-            
-            button_config["text"] = button_text_var.get().strip() or f"Custom {button_index+1}"
-            button_config["event_text"] = event_text_var.get().strip() or f"{button_config['text']} Triggered"
-            button_config["txt_source_key"] = txt_source_var.get()
-            button_config["tab_group"] = tab_group_var.get().strip() or "Main"
-
-            new_color_hex = button_color_var.get() if button_color_var.get() else None
-            
-            if old_button_text in self.button_colors and old_button_text != button_config["text"]:
-                del self.button_colors[old_button_text]
-            
-            self.button_colors[button_config["text"]] = (None, new_color_hex)
-
-            # --- CORRECTED TAB LOGIC ---
-            # If the user typed a new tab group name, add it to the master list.
-            # Do NOT rebuild the entire list.
-            new_group = button_config["tab_group"]
-            if new_group not in self.custom_button_tab_groups:
-                self.custom_button_tab_groups.append(new_group)
-                self.custom_button_tab_groups.sort()
-            # --- END OF CORRECTION ---
-
-            self.save_settings()
-            self.update_custom_buttons()
-            editor_window.destroy()
-
     def _set_color_on_widget(self, color_str_var, display_label, color_hex, parent_toplevel):
         """Internal helper to validate and set the color for a color picker widget."""
         valid_color = None

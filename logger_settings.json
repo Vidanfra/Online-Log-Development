@@ -1,6 +1,6 @@
 {
     "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/Excel TEmplate/Rheinemtall_SampleTestLog_v2.xlsx",
-    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/CSV",
+    "txt_folder_path": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing",
     "txt_folder_path_set2": "",
     "txt_folder_path_set3": "",
     "txt_field_columns_config": [
@@ -56,10 +56,10 @@
         }
     ],
     "folder_paths": {
-        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/CSV"
+        "Main TXT File": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing"
     },
     "folder_columns": {
-        "Main TXT File": "Main_TXT_File_File"
+        "Main TXT File": "Main_TXT_File"
     },
     "file_extensions": {
         "Main TXT File": "txt"
@@ -70,44 +70,44 @@
     "num_custom_buttons": 7,
     "custom_button_configs": [
         {
-            "text": "Custom 1",
-            "event_text": "Custom 1 Event",
+            "text": "Custom Event 1",
+            "event_text": "Custom Event 1 Triggered",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
-            "text": "Custom 2",
-            "event_text": "Custom 2 Triggered",
+            "text": "Custom Event 2",
+            "event_text": "Custom Event 2 Triggered",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
-            "text": "Custom 3",
-            "event_text": "Custom 3 Event",
-            "txt_source_key": "TXT Source 2",
+            "text": "Custom Event 3",
+            "event_text": "Custom Event 3 Triggered",
+            "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
             "text": "Custom 4",
-            "event_text": "Custom 4 Event",
+            "event_text": "test",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
             "text": "Custom 5",
             "event_text": "Custom 5 Event",
-            "txt_source_key": "TXT Source 2",
+            "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
             "text": "Custom 6",
             "event_text": "Custom 6 Event",
-            "txt_source_key": "TXT Source 3",
+            "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
-            "text": "Custom 9",
-            "event_text": "Custom 9 Event",
+            "text": "Custom 7",
+            "event_text": "Custom 7 Event",
             "txt_source_key": "None",
             "tab_group": "Main"
         }
@@ -123,8 +123,8 @@
         "SVP": "#ADD8E6",
         "New Day": "#FFFF99"
     },
-    "sqlite_enabled": true,
-    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL/SQL TEST.db",
+    "sqlite_enabled": false,
+    "sqlite_db_path": "",
     "sqlite_table": "EventLog",
-    "always_on_top": false
+    "always_on_top": true
 }
