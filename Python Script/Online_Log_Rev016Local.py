@@ -1971,8 +1971,8 @@ class DataLoggerGUI:
     def schedule_hourly_log(self):
         """Schedules the next hourly KP log to trigger on the hour."""
         now = datetime.datetime.now()
-        #next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-        next_hour = (now + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0) # Delta time modified to 1 minute for debugging
+        next_hour = (now + datetime.timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+        #next_hour = (now + datetime.timedelta(minutes=1)).replace(second=0, microsecond=0) # Delta time modified to 1 minute for debugging
         time_until_next_hour_ms = int((next_hour - now).total_seconds() * 1000)
 
         # Add a small buffer (e.g., 1 second) to ensure it triggers after the hour
@@ -2504,7 +2504,6 @@ class SettingsWindow:
         self.create_txt_column_mapping_tab()
         self.create_button_configuration_tab() 
         self.create_monitored_folders_tab() 
-        self.create_button_colors_tab() 
         self.create_sqlite_tab()
         self.create_auto_events_tab()
 
@@ -3510,10 +3509,6 @@ class SettingsWindow:
         self.num_buttons_entry.delete(0, tk.END)
         self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
         self.recreate_custom_button_settings()
-
-        for btn_name, (color_var, display_label) in self.all_button_color_widgets.items():
-            loaded_color_hex = self.parent_gui.button_colors.get(btn_name, (None, None))[1]
-            self.parent_gui._set_color_on_widget(color_var, display_label, loaded_color_hex, self.master)
         
         # Load colors for the new Auto Events tab
         new_day_color = self.parent_gui.button_colors.get("New Day", (None, None))[1]
