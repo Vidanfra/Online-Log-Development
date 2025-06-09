@@ -10,7 +10,7 @@
 | 05/06/2025 | Layout Shape                  | Long and thin to fit in the Excel top pane     | **DONE (needs to be reviewed)**      |
 | 06/06/2025 | Logger always over Excel      | Keep the logger menu always in th front        | DONE        |
 | 07/06/2025 | Solve time mismatch      | Use always PC time        | DONE       |
-|09/06/2025 | Colours of buttons | Should match colour set for excel row highlight | **To Do** |
+|09/06/2025 | Colours of buttons | Should match colour set for excel row highlight | **DONE but some bugs to fix** |
 | 09/06/2025 | text colour | ability to change text colour for row in excel | **To Do** |
 | 09/06/2025 | Right Click main buttons | Log on, Log off etc should be managed by right clicking rather than in settings window | **To Do** |
 | 09/06/2025 | additional attribute added for each button for time coding | used for future DPR integration perhaps | **To Do** |
