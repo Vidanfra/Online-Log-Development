@@ -16,7 +16,8 @@
 | 09/06/2025 | additional attribute added for each button for time coding | used for future DPR integration perhaps | DONE |
 | 09/06/2025 | Automatic updates defined by user based on value in text file | script should be able to look at the text file and create an event when a value is reached, for example ROV depth at 15m | **To Do** |
 | 09/06/2025 | Average speed button | inputs the average speed of the ROV between two event, such as log on / Log off | **To Do** |
-| 09/06/2025 | User scheduling | add the names of each shift and the user column in excel switches at shift handover | **To Do** |
+| 09/06/2025 | User scheduling | add the names of each shift and the user column in excel switches at shift handover | **Changed: it can be done reading from the corresponding cells from the Template Excel Log** |
 | 09/06/2025 | error checking if no text file associated with button | Hint to user where the error is | DONE |
-| 10/06/2025 | Update the Tkinter Custom Layout |   Makes GUI Better | **To Do** | 
-| 10/06/2025 |   Field Log Viewer   |   Ability to sync SQl DB to Field log viewer for offline | **To Do**
+| 10/06/2025 | Update the Tkinter Custom Layout |   Makes GUI Better | Not prioritary | 
+| 10/06/2025 | Field Log Viewer   |   Ability to sync SQl DB to Field log viewer for offline | DONE |
+| 10/06/2025 | TXT, Excel Log, SQLite Headers mapping | User defined matching the columns from the columns in every file from the Settings menu| DONE |
