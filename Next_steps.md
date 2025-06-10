@@ -18,3 +18,4 @@
 | 09/06/2025 | Average speed button | inputs the average speed of the ROV between two event, such as log on / Log off | **To Do** |
 | 09/06/2025 | User scheduling | add the names of each shift and the user column in excel switches at shift handover | **To Do** |
 | 09/06/2025 | error checking if no text file associated with button | Hint to user where the error is | **To Do** |
+| 10/06/2025 | Update the Tkinter Custom Layout |   Makes GUI Better | **To Do** | 
