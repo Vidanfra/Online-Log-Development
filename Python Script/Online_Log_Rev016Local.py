@@ -674,15 +674,15 @@ class DataLoggerGUI:
         * Parses the data, ensuring date and time formats are handled correctly.
         * Connects to the SQLite database specified in self.sqlite_db_path.
         * Checks if the specified table exists, creating it if necessary.
-        * Compares the Excel data against existing records in the SQLite table using RecordID.
-        * Inserts new records and updates existing ones based on RecordID.
+        * Compares the Excel data against existing records in the SQLite table using GUID.
+        * Inserts new records and updates existing ones based on GUID.
         * Cleans up resources and returns success status.
         '''
         # Initialization
         excel_file = self.log_file_path
         db_file = self.sqlite_db_path
         db_table = self.sqlite_table
-        record_id_column = "RecordID"
+        guid_column = "GUID"
         date_col_name = "Date"
         time_col_name = "Time"
 
@@ -709,14 +709,14 @@ class DataLoggerGUI:
             header_range = sheet.range('A1').expand('right')
             if header_range is None: raise ValueError("Cannot find header range")
             header = header_range.value
-            # Check if header is None or includes the RecordID column
-            if header is None or record_id_column not in header:
-                raise ValueError(f"Column '{record_id_column}' not found in Excel header or header is empty.")
+            # Check if header is None or includes the GUID column
+            if header is None or guid_column not in header:
+                raise ValueError(f"Column '{guid_column}' not found in Excel header or header is empty.")
 
-            record_id_col_index = header.index(record_id_column) + 1
+            guid_col_index = header.index(guid_column) + 1
             last_row = 1
             try:
-                last_row = sheet.range(sheet.api.Rows.Count, record_id_col_index).end('up').row
+                last_row = sheet.range(sheet.api.Rows.Count, guid_col_index).end('up').row
             except Exception:
                 try:
                     max_row = sheet.cells.last_cell.row
@@ -742,14 +742,14 @@ class DataLoggerGUI:
             if time_col_name in df_excel.columns:
                 df_excel[time_col_name] = pd.to_numeric(df_excel[time_col_name], errors='coerce')
 
-            # Filter out rows where RecordID is NaN, None, or empty
-            if record_id_column in df_excel.columns:
-                df_excel[record_id_column] = df_excel[record_id_column].astype(str)
-                df_excel[record_id_column] = df_excel[record_id_column].replace({'nan': '', 'None': '', None: ''})
-                df_excel = df_excel[df_excel[record_id_column].str.strip() != '']
-                df_excel = df_excel.dropna(subset=[record_id_column])
+            # Filter out rows where GUID is NaN, None, or empty
+            if guid_column in df_excel.columns:
+                df_excel[guid_column] = df_excel[guid_column].astype(str)
+                df_excel[guid_column] = df_excel[guid_column].replace({'nan': '', 'None': '', None: ''})
+                df_excel = df_excel[df_excel[guid_column].str.strip() != '']
+                df_excel = df_excel.dropna(subset=[guid_column])
             else:
-                raise ValueError(f"'{record_id_column}' column disappeared after initial read.")
+                raise ValueError(f"'{guid_column}' column disappeared after initial read.")
 
             if df_excel.empty:
                 if wb: wb.close()
@@ -757,8 +757,8 @@ class DataLoggerGUI:
                 wb = None; app = None
                 return True, "Sync Info: No valid Excel rows found to sync."
 
-            # Set RecordID as index and convert to dictionary:  Clean Excel data into a usable format keyed by RecordID
-            df_excel = df_excel.set_index(record_id_column, drop=False)
+            # Set GUID as index and convert to dictionary:  Clean Excel data into a usable format keyed by GUID
+            df_excel = df_excel.set_index(guid_column, drop=False)
             excel_data = df_excel.to_dict('index')
 
             if wb: wb.close(); wb = None
@@ -800,21 +800,21 @@ class DataLoggerGUI:
                 conn_sqlite.close()
                 return False, f"Sync Error: SQLite table '{db_table}' does not exist."
             
-            # Check if RecordID exists as a column
+            # Check if GUID exists as a column
             cursor.execute(f"PRAGMA table_info([{db_table}])")
             cols_info = cursor.fetchall()
             db_cols = [col['name'] for col in cols_info]
-            if record_id_column not in db_cols:
+            if guid_column not in db_cols:
                 conn_sqlite.close()
-                return False, f"Sync Error: Column '{record_id_column}' not found in SQLite table."
+                return False, f"Sync Error: Column '{guid_column}' not found in SQLite table."
 
-            # Read all rows from the database table into a dictionary (sqlite_data), keyed by RecordID
+            # Read all rows from the database table into a dictionary (sqlite_data), keyed by GUID
             quoted_db_cols = ", ".join([f"[{c}]" for c in db_cols])
             cursor.execute(f"SELECT {quoted_db_cols} FROM [{db_table}]")
             rows = cursor.fetchall()
             for row in rows:
                 row_dict = dict(row)
-                rec_id = str(row_dict.get(record_id_column, '')).strip()
+                rec_id = str(row_dict.get(guid_column, '')).strip()
                 if rec_id:
                     sqlite_data[rec_id] = row_dict
 
@@ -842,7 +842,7 @@ class DataLoggerGUI:
 
                 # Compare Column by Column
                 for excel_col_name, excel_val in excel_row_dict.items():
-                    if excel_col_name in db_cols_set and excel_col_name != record_id_column:
+                    if excel_col_name in db_cols_set and excel_col_name != guid_column:
                         # Get the corresponding value from SQLite
                         sqlite_val = sqlite_row_dict.get(excel_col_name)
                         # Handle Special Formatting (Date/Time)
@@ -897,7 +897,7 @@ class DataLoggerGUI:
                     values.append(val)
                 if set_clauses:
                     values.append(rec_id)
-                    sql_update = f"UPDATE [{db_table}] SET {', '.join(set_clauses)} WHERE [{record_id_column}] = ?"
+                    sql_update = f"UPDATE [{db_table}] SET {', '.join(set_clauses)} WHERE [{guid_column}] = ?"
                     cursor.execute(sql_update, values)
             conn_sqlite.commit()
             if conn_sqlite: conn_sqlite.close()
@@ -1042,6 +1042,7 @@ class DataLoggerGUI:
                                  triggering_button=button_widget,
                                  txt_source_key=txt_source_key) # This is correctly passing it
 
+    # Review this fuction: innecessarily specific for "New Day"
     def log_new_day(self, button_widget=None, txt_source_key="Main TXT"):
         '''
         This function is called when the "New Day" button is pressed.
@@ -1053,7 +1054,7 @@ class DataLoggerGUI:
                                  event_text_for_excel="New Day",
                                  triggering_button=button_widget,
                                  txt_source_key=txt_source_key)
-
+    # Review this fuction: innecessarily specific for SVP
     def apply_svp(self, button_widget, txt_source_key="Main TXT"):
         '''
         This function is called when the "Apply SVP" button is pressed.
@@ -1119,9 +1120,9 @@ class DataLoggerGUI:
                 triggering_button = None
 
         # Define a background thread to avoid blocking the GUI
-        def _worker_thread_func():
+        def _log_thread_func():
             nonlocal original_text
-            # Prepares an empty data row with a RecordID
+            # Prepares an empty data row with a GUID
             row_data = {}
             excel_success = False
             sqlite_logged = False
@@ -1132,17 +1133,17 @@ class DataLoggerGUI:
             try:
                 # --- STEP 1: Initialize and collect all data from file sources FIRST ---
                 row_data = {}
-                record_id = str(uuid.uuid4())
-                row_data["RecordID"] = record_id
+                guid = str(uuid.uuid4())
+                row_data["GUID"] = guid
 
                 # --- TXT Data Collection ---
-                if txt_source_key and txt_source_key != "None":
+                if txt_source_key and txt_source_key != "None": # To change: hardcoded key
                     source_folder_path = None
-                    if txt_source_key == "Main TXT":
-                        source_folder_path = self.txt_folder_path
-                    elif txt_source_key == "TXT Source 2":
+                    if txt_source_key == "Main TXT": # To change: hardcoded key
+                        source_folder_path = self.txt_folder_path 
+                    elif txt_source_key == "TXT Source 2": # To change: hardcoded key
                         source_folder_path = self.txt_folder_path_set2
-                    elif txt_source_key == "TXT Source 3":
+                    elif txt_source_key == "TXT Source 3": # To change: hardcoded key
                         source_folder_path = self.txt_folder_path_set3
 
                     # Ensure path exists and is a directory before attempting to read
@@ -1151,7 +1152,7 @@ class DataLoggerGUI:
                             txt_data = self._get_txt_data_from_source(source_folder_path)
                             print(f"TXT data fetched from {source_folder_path}: {txt_data}")  # DIAGNOSTIC
                             if txt_data:
-                                row_data.update(txt_data)
+                                row_data.update(txt_data) # Update row_data with TXT data
                                 print(f"row_data after TXT update: {row_data}")  # DIAGNOSTIC
                             else:
                                 print(f"No TXT data returned from {source_folder_path}")  # DIAGNOSTIC
@@ -1226,7 +1227,7 @@ class DataLoggerGUI:
                     color_tuple = self.button_colors.get(event_type, (None, None))
                     row_color_for_excel = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
 
-                    excel_data = {k: v for k, v in row_data.items() if k != 'EventType'}
+                    excel_data = {k: v for k, v in row_data.items() if k != 'EventType'} # Copy row_data dictionary excluding 'EventType' because in Excel we only need the event text, not the type itself.
 
                     try:
                         print(f"Attempting to save to Excel. Log file: {self.log_file_path}")  # DIAGNOSTIC
@@ -1296,7 +1297,7 @@ class DataLoggerGUI:
                             pass
                     self.master.after(0, re_enable_button)
 
-        log_thread = threading.Thread(target=_worker_thread_func, daemon=True)
+        log_thread = threading.Thread(target=_log_thread_func, daemon=True)
         log_thread.start()
 
     # --- Data Fetching Methods (Refactored to support multiple TXT sources) ---
@@ -1359,7 +1360,7 @@ class DataLoggerGUI:
                     print(f"Failed to read any lines from TXT file: {latest_txt_file_path}") # DIAGNOSTIC
                     return row_data
 
-                last_line_str = lines[-1].strip()
+                last_line_str = lines[-1].strip() # Get the last line of the file
                 print(f"Last line of TXT file: '{last_line_str}'") # DIAGNOSTIC
                 latest_line_parts = last_line_str.split(",")
                 print(f"Last line parts: {latest_line_parts}") # DIAGNOSTIC
@@ -1458,13 +1459,11 @@ class DataLoggerGUI:
         * None if successful, raises an exception if there is an error.
         '''
         print(f"Entering save_to_excel. Data: {row_data}") # DIAGNOSTIC
-        # Check Excel file path and existence
-        if not self.log_file_path:
-            print("Excel log file path is missing (save_to_excel).") # DIAGNOSTIC
-            raise ValueError("Excel log file path is missing.")
-        if not os.path.exists(self.log_file_path):
-            print(f"Excel log file not found: {self.log_file_path} (save_to_excel).") # DIAGNOSTIC
-            raise FileNotFoundError(f"Excel log file not found: {self.log_file_path}")
+        
+        if not self.log_file_path or not os.path.exists(self.log_file_path):
+            error_msg = f"Excel log file path is invalid or file does not exist: {self.log_file_path}"
+            print(error_msg) # DIAGNOSTIC
+            raise FileNotFoundError(error_msg)
 
         app = None
         workbook = None
@@ -1472,74 +1471,81 @@ class DataLoggerGUI:
         opened_workbook = False
 
         try:
-            # Try to connect to an existing Excel instance first
+            # --- 1. Connect to Excel ---
             try:
-                # Check if an Excel app is already running
                 app = xw.apps.active
                 if app is None: raise Exception("No active Excel instance")
-                print("Connected to existing Excel instance.") # DIAGNOSTIC
-            except Exception as e_app:
-                # If no instance is active, create a new invisible one
-                print(f"No active Excel instance found, creating new: {e_app}") # DIAGNOSTIC
+                print("Connected to an existing Excel instance.") # DIAGNOSTIC
+            except Exception:
+                print("No active Excel instance found, creating a new one.") # DIAGNOSTIC
                 app = xw.App(visible=False)
                 opened_new_app = True
-                print("New Excel instance created.") # DIAGNOSTIC
 
-            # Normalize paths for reliable comparison
+            # --- 2. Open the Workbook ---
             target_norm_path = os.path.normcase(os.path.abspath(self.log_file_path))
-            print(f"Target Excel file normalized path: {target_norm_path}") # DIAGNOSTIC
-            
-            # Check if the workbook is already open in this Excel instance
             for wb in app.books:
                 try:
-                    # Check if the workbook is already open by comparing normalized paths
                     if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
                         workbook = wb
-                        print(f"Workbook '{wb.name}' found already open.") # DIAGNOSTIC
+                        print(f"Workbook '{wb.name}' is already open.") # DIAGNOSTIC
                         break
-                except Exception as e_wb:
-                    print(f"Error checking open workbook {wb.name}: {e_wb}") # DIAGNOSTIC
-                    continue # Ignore workbooks that might cause errors (e.g., protected)
-
-            # If the workbook was not found open, open it
+                except Exception:
+                    continue
+            
             if workbook is None:
-                print(f"Workbook '{self.log_file_path}' not found open, opening it.") # DIAGNOSTIC
+                print(f"Opening workbook: '{self.log_file_path}'") # DIAGNOSTIC
                 workbook = app.books.open(self.log_file_path, read_only=False)
                 opened_workbook = True
-                print("Workbook opened successfully.") # DIAGNOSTIC
 
-            # Check if the workbook has at least one sheet
             sheet = workbook.sheets[0]
-            #print(f"Working on sheet: {sheet.name}") # DIAGNOSTIC # Comment to improve readibility of the terminal
-            # Get the header row (A1)
-            header_range_obj = sheet.range("A1").expand("right")
-            header_values = header_range_obj.value
-            if not header_values or not any(h is not None for h in header_values):
-                print("Excel header row is missing or empty.") # DIAGNOSTIC
-                raise ValueError("Excel header row is missing or empty.")
-            #print(f"Excel Header: {header_values}") # DIAGNOSTIC # Comment to improve readibility of the terminal
-            
-            record_id_col_name = "RecordID"
-            if record_id_col_name not in header_values:
-                print(f"Excel header missing required '{record_id_col_name}' column.") # DIAGNOSTIC
-                raise ValueError(f"Excel header missing required '{record_id_col_name}' column.")
 
+            # --- 3. DYNAMIC HEADER SEARCH ---
+            # Define the columns that must be present in the header.
+            required_columns = {'runline', 'kp', 'kp ref.', 'event', 'guid'} # HARDCODED for now, can be made dynamic later
+            header_row_index = -1
+            header_values = []
+            
+            # Search for the header in the first 30 rows (a reasonable limit).
+            for i in range(1, 31):
+                row_values = sheet.range(f'A{i}').expand('right').value
+
+                # If the row is completely empty, row_values will be None. Skip it.
+                if row_values is None:
+                    continue
+                # Clean the values and convert them to lowercase for robust comparison
+                current_row_headers = {str(h).lower() for h in row_values if h is not None}
+                
+                # Check if the required columns are a subset of the headers in this row.
+                if required_columns.issubset(current_row_headers):
+                    header_row_index = i
+                    header_values = row_values
+                    print(f"Header found in row: {header_row_index}") # DIAGNOSTIC
+                    break
+            
+            if header_row_index == -1:
+                raise ValueError("Could not find the header row with required columns in the Excel file.")
+
+            # --- 4. COLUMN MAPPING ---
+            # Create a dictionary to map the column name (lowercase) to its column index (position).
             header_map_lower = {str(h).lower(): i + 1 for i, h in enumerate(header_values) if h is not None}
             last_header_col_index = max(header_map_lower.values()) if header_map_lower else 1
 
+            # --- 5. FIND NEXT EMPTY ROW ---
             if next_row is None:
-                try:
-                    # Find the last used row in the first column and add 1
-                    last_row_a = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
-                    next_row = last_row_a + 1
-                    if sheet.range(f'A{last_row_a}').value is None: # Handle case where sheet is empty
-                             next_row = 2
-                    print(f"Next available row in Excel: {next_row}") # DIAGNOSTIC
-                except Exception as e_row:
-                    next_row = 2 # Fallback for completely empty sheets
-                    print(f"Error finding last row, defaulting to row 2: {e_row}") # DIAGNOSTIC
+                # Find the last row with data in column A.
+                # The .end('up') method is robust because it searches from the bottom of the sheet upwards.
+                last_row_with_data = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
+                
+                # The next row is the last row with data + 1.
+                # If the last found row is the header, it will start writing right below it.
+                if last_row_with_data < header_row_index:
+                    next_row = header_row_index + 1
+                else:
+                    next_row = last_row_with_data + 1
+                
+                print(f"Next available row in Excel: {next_row}") # DIAGNOSTIC
 
-            # --- Write data to cells ---
+            # --- 6. WRITE DATA ---
             written_cols = []
             for col_name, value in row_data.items():
                 col_name_lower = str(col_name).lower()
@@ -1547,24 +1553,25 @@ class DataLoggerGUI:
                     col_index = header_map_lower[col_name_lower]
                     try:
                         target_cell = sheet.range(next_row, col_index)
-                        if col_name == record_id_col_name:
-                            target_cell.number_format = '@' # Ensure RecordID is treated as text
+                        # Ensure GUID is treated as text to prevent scientific notation.
+                        if col_name.lower() == 'guid':
+                            target_cell.number_format = '@'
                         target_cell.value = value
                         written_cols.append(col_index)
                         print(f"Wrote '{value}' to cell R{next_row}C{col_index} (Column '{col_name}').") # DIAGNOSTIC
                     except Exception as e_write:
                         print(f"Warning: Could not write to column '{col_name}'. Error: {e_write}") # DIAGNOSTIC
 
-            # If row_color is specified, apply it to the entire row
+            # Apply color to the row if specified
             if row_color and written_cols:
                 try:
                     target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
                     target_range.color = row_color
                     print(f"Applied color {row_color} to row {next_row}.") # DIAGNOSTIC
                 except Exception as e_color:
-                        print(f"Warning: Could not apply color to row. Error: {e_color}") # DIAGNOSTIC
+                    print(f"Warning: Could not apply color to row. Error: {e_color}") # DIAGNOSTIC
 
-            # --- CRITICAL SAVE OPERATION ---
+            # --- 7. SAVE WORKBOOK ---
             try:
                 print("Attempting to save workbook...") # DIAGNOSTIC
                 workbook.save()
@@ -1574,12 +1581,12 @@ class DataLoggerGUI:
                 error_msg = (
                     "Failed to save the Excel file. This is usually because the file is locked.\n\n"
                     "1. Check Task Manager for any lingering 'EXCEL.EXE' processes and end them.\n"
-                    "2. Ensure you have permissions to write to the file.\n\n"
+                    "2. Ensure you have write permissions for the file.\n\n"
                     f"(Details: {e_save})"
                 )
-                print(f"Excel SAVE FAILED: {error_msg}") # DIAGNOSTIC
-                # Show the error in the main thread's GUI
-                self.master.after(0, lambda: messagebox.showerror("Excel Save Conflict", error_msg, parent=self.master))
+                print(f"EXCEL SAVE FAILED: {error_msg}") # DIAGNOSTIC
+                if self.master:
+                    self.master.after(0, lambda: messagebox.showerror("Excel Save Conflict", error_msg, parent=self.master))
                 raise IOError(f"Failed to save Excel workbook: {e_save}")
 
         except Exception as e:
@@ -1587,21 +1594,20 @@ class DataLoggerGUI:
             print(f"Unhandled error in save_to_excel: {e}") # DIAGNOSTIC
             raise e
         finally:
+            # --- 8. CLEANUP ---
             print("Executing finally block in save_to_excel.") # DIAGNOSTIC
             if workbook is not None and opened_workbook:
                 try:
-                    print("Closing workbook (that was opened by this script).") # DIAGNOSTIC
+                    print("Closing workbook (opened by this script).") # DIAGNOSITC
                     workbook.close(save_changes=False)
                 except Exception as e_close:
                     print(f"Error closing workbook: {e_close}") # DIAGNOSTIC
-                    pass # Ignore errors on close
             if app is not None and opened_new_app:
                 try:
-                    print("Quitting Excel application (that was started by this script).") # DIAGNOSTIC
+                    print("Quitting Excel application (started by this script).") # DIAGNOSTIC
                     app.quit()
                 except Exception as e_quit:
                     print(f"Error quitting Excel app: {e_quit}") # DIAGNOSTIC
-                    pass # Ignore errors on quit
             print("Exiting save_to_excel.") # DIAGNOSTIC
 
     def log_to_sqlite(self, row_data):
@@ -2967,7 +2973,7 @@ class SettingsWindow:
 
     def select_excel_file(self):
         initial_dir = os.path.dirname(self.log_file_entry.get()) if self.log_file_entry.get() else os.getcwd()
-        file_path = filedialog.askopenfilename(initialdir=initial_dir, filetypes=[("Excel files", "*.xlsx")], parent=self.master, title="Select Excel Log File")
+        file_path = filedialog.askopenfilename(initialdir=initial_dir, filetypes=[("Excel files", ["*.xlsx",".xlsb"])], parent=self.master, title="Select Excel Log File")
         if file_path: self.log_file_entry.delete(0, tk.END); self.log_file_entry.insert(0, file_path)
 
     def select_txt_folder(self, entry_widget):

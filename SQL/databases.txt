@@ -1,4 +1,4 @@
-SQL TEST:
+SQL TEST (10/06/2025):
 
 CREATE TABLE "fieldlog" (
 	"LogID"	INTEGER,
@@ -28,6 +28,8 @@ CREATE TABLE "fieldlog" (
 	"RecordID"	TEXT,
 	PRIMARY KEY("RecordID")
 )
+
+SQL DB Rheinmetall Project (10/06/2025):
 
 CREATE TABLE "fieldlog" (
     "id"    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,3 +89,8 @@ CREATE TABLE "fieldlog" (
 8219156	Viking Reach	SUP10	SROV	UXO ID and Clearance	Nick Herrington	Oslo	Rheinmetall	Patrick Bell			Pierre Lowe	Sindre Kristoffersen	Marina Nurkina			Craig Weatherill	Cristian Vlacicu	2025-06-09 10:36:10	B08_X1_CL	272	15.959	WROV	As-Left Survey, End of Line 			97								AL-E	Easting [m]	325395.48	Northing [m]	6031473.2	DCC	-0.17	18.56					J160N022		B31C132D-3AF2-C947-9EAF-4ED1E311FC0D	2025-06-10 12:44:21
 8219157	Viking Reach	SUP10	SROV	UXO ID and Clearance	Nick Herrington	Oslo	Rheinmetall	Patrick Bell			Pierre Lowe	Sindre Kristoffersen	Marina Nurkina			Craig Weatherill	Cristian Vlacicu	2025-06-09 10:37:00	B08_X1_CL_P 1.00	272	15.96	WROV	As-Left Survey, Start of Line			97								AL-S	Easting [m]	325396.47	Northing [m]	6031473.29	DCC	-0.16	18.46				B08_X1_CL_P 1.00_20250609_1036_2051.db	J160N023		E102405C-A915-4345-85C4-862DAEC8CDEA	2025-06-10 12:44:21
 8219158	Viking Reach	SUP10	SROV	UXO ID and Clearance	Nick Herrington	Oslo	Rheinmetall	Patrick Bell			Pierre Lowe	Sindre Kristoffersen	Marina Nurkina			Craig Weatherill	Cristian Vlacicu	2025-06-09 10:38:05	B08_X1_CL_P 1.00	272	15.965	WROV	As-Left Survey, End of Line 			97								AL-E	Easting [m]	325396.44	Northing [m]	6031479.86	DCC	-0.16	18.41				B08_X1_CL_P 1.00_20250609_1036_2051.db	J160N023		6967F5E6-53F4-A748-AD89-B60326806545	2025-06-10 12:44:21
+
+600053_Daily_Log-Week24.xlsb:
+
+Runline	KP	KP Ref.	Event	Dive	Gradiometer	SSS	SBP	MBES	Video	Event	Easting [m]	Northing [m]	DCC	Depth	Alti	MAG Files	Pulse Lenght	QPS DB Files	S-Files	Notes	GUID
+
