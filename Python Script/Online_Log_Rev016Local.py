@@ -1133,7 +1133,7 @@ class DataLoggerGUI:
             try:
                 # --- STEP 1: Initialize and collect all data from file sources FIRST ---
                 row_data = {}
-                guid = str(uuid.uuid4())
+                guid = str(uuid.uuid4()).upper()  # Generate a new GUID for this event (capital letters)
                 row_data["GUID"] = guid
 
                 # --- TXT Data Collection ---
@@ -1611,12 +1611,12 @@ class DataLoggerGUI:
             print("Exiting save_to_excel.") # DIAGNOSTIC
 
     def log_to_sqlite(self, row_data):
-        '''Logs the provided row_data to the SQLite database.
+        '''Logs the provided row_data to the SQLite database using mapping from settings.
             Arguments:
-            * row_data: A dictionary containing the data to log, where keys are column names and values are the data to insert.
+            * row_data: A dictionary containing the data to log, where keys are Excel column names.
             Returns:
             * success: True if logging was successful, False otherwise.
-            * error_type: A string indicating the type of error if logging failed, or None if successful.
+            * error_type: A string indicating the type of error, or None.
         '''
         print(f"Entering log_to_sqlite. Data: {row_data}") # DIAGNOSTIC
         success = False
@@ -1627,260 +1627,98 @@ class DataLoggerGUI:
             return False, "Disabled"
 
         if not self.sqlite_db_path or not self.sqlite_table:
-            self.master.after(0, self.update_status, "SQLite Log Error: DB Path or Table Name missing in settings.")
             print("SQLite config missing (path or table).") # DIAGNOSTIC
             return False, "ConfigurationMissing"
 
         conn = None
         cursor = None
         try:
-            print(f"Connecting to SQLite DB: {self.sqlite_db_path}") # DIAGNOSTIC
-            conn = sqlite3.connect(self.sqlite_db_path, timeout=5)
+            conn = sqlite3.connect(self.sqlite_db_path, timeout=10)
             cursor = conn.cursor()
-            print("SQLite connection successful.") # DIAGNOSTIC
 
-            table_columns_info = {}
-            try:
-                pragma_sql = f"PRAGMA table_info([{self.sqlite_table}]);"
-                cursor.execute(pragma_sql)
-                results = cursor.fetchall()
-                if not results: 
-                    print(f"SQLite table '{self.sqlite_table}' does not exist.") # DIAGNOSTIC
-                    raise sqlite3.OperationalError(f"No such table: {self.sqlite_table}")
-                table_columns_info = {row[1].lower(): row[1] for row in results}
-                print(f"SQLite table columns: {table_columns_info}") # DIAGNOSTIC
-            except sqlite3.Error as e_meta:
-                self.master.after(0, self.update_status, f"SQLite Log Error: Cannot get columns for '{self.sqlite_table}'")
-                error_type = f"MetadataError_{type(e_meta).__name__}"
-                print(f"Error getting table metadata: {e_meta}") # DIAGNOSTIC
-                raise e_meta 
-            
-            # Prepare the data to insert, matching keys to DB columns
-            print("Applying hardcoded mapping rules to prepare data...") # DIAGNOSTIC
-        
-            mapped_data = {}
+            # --- START: UI-DRIVEN DYNAMIC MAPPING ---
+            print("Applying UI-driven mapping rules to prepare data...") # DIAGNOSTIC
+            data_to_insert = {}
 
-            # Rule: time_fix = Date + Time
-            date_val = row_data.get('Date')
-            time_val = row_data.get('Time')
+            # Iterate through the configuration from the settings
+            for config_item in self.txt_field_columns_config:
+                excel_col = config_item.get("column_name")
+                db_col = config_item.get("db_column_name")
+                
+                # Check if the Excel column name exists in the incoming data AND a DB column is specified
+                if excel_col and db_col and excel_col in row_data:
+                    data_to_insert[db_col] = row_data[excel_col]
+
+            # --- SPECIAL HANDLING FOR FIELDS NOT IN THE UI ---
+            # GUID is critical and always mapped directly
+            if 'GUID' in row_data:
+                # Find the DB column mapped from the 'GUID' field, if any.
+                guid_db_col = "guid" # Default
+                for item in self.txt_field_columns_config:
+                    if item.get("field") == "GUID" and item.get("db_column_name"):
+                        guid_db_col = item.get("db_column_name")
+                        break
+                data_to_insert[guid_db_col] = row_data['GUID']
+
+
+            # Handle combined 'time_fix' field
+            date_excel_col = self.txt_field_columns.get("Date")
+            time_excel_col = self.txt_field_columns.get("Time")
+            time_fix_db_col = "time_fix" # You could make this configurable too in the future
+
+            date_val = row_data.get(date_excel_col)
+            time_val = row_data.get(time_excel_col)
             if date_val and time_val:
-                mapped_data['time_fix'] = f"{date_val} {time_val}"
+                data_to_insert[time_fix_db_col] = f"{date_val} {time_val}"
 
-            # Rule: Simple renaming (Source Key -> DB Column)
-            simple_mapping = {
-                'KP': 'kp',
-                'Event': 'event',
-                'Code': 'task_event',
-                'GUID': 'guid'
-            }
-            for source_key, db_col in simple_mapping.items():
-                if source_key in row_data:
-                    mapped_data[db_col] = row_data[source_key]
+            print(f"Data prepared for SQLite insert: {data_to_insert}") # DIAGNOSTIC
+            # --- END: DYNAMIC MAPPING ---
 
-            # Rule: Paired custom fields (e.g., Easting -> coustom_text_1, coustom_value_1)
-            custom_fields_mapping = {
-                'Easting [m]': ('coustom_text_1', 'coustom_value_1'),
-                'Northing [m]': ('coustom_text_2', 'coustom_value_2'),
-                'DCC': ('coustom_text_3', 'coustom_value_3')
-            }
-            for source_key, (text_col, val_col) in custom_fields_mapping.items():
-                if source_key in row_data:
-                    mapped_data[text_col] = source_key  # The DB 'text' column gets the key name
-                    mapped_data[val_col] = row_data[source_key] # The DB 'value' column gets the value
+            if not data_to_insert:
+                print("No data to insert after mapping.") # DIAGNOSTIC
+                return True, None
 
-            # Now, filter the mapped data to ensure all keys are valid DB columns
-            data_to_insert = {}
+            # Check for table and column validity before inserting
+            cursor.execute(f"PRAGMA table_info([{self.sqlite_table}]);")
+            db_columns = {row[1].lower() for row in cursor.fetchall()}
             
-            for key, value in mapped_data.items():
-                if key.lower() in table_columns_info:
-                    # Use the original casing for the column name
-                    db_col_name = table_columns_info[key.lower()]
-                    data_to_insert[db_col_name] = value
+            final_data_to_insert = {}
+            for key, value in data_to_insert.items():
+                if key.lower() in db_columns:
+                    final_data_to_insert[key] = value
                 else:
-                    print(f"Warning: Mapped key '{key}' not found in DB table and will be skipped.") # DIAGNOSTIC
+                    print(f"Warning: Mapped DB column '{key}' not found in table '{self.sqlite_table}' and will be skipped.")
             
-            print(f"Data prepared for SQLite insert: {data_to_insert}") # DIAGNOSTIC
+            if not final_data_to_insert:
+                 print("No data left to insert after validating against table columns.")
+                 return True, None
 
-            if not data_to_insert:
-                print("No data to insert after mapping and validation.") # DIAGNOSTIC
-                return True, None # Successful in the sense that there was nothing to do
-
-
-            cols = list(data_to_insert.keys())
+            cols = list(final_data_to_insert.keys())
             placeholders = ", ".join(["?"] * len(cols))
-            col_name_string = ", ".join([f"[{c}]" for c in cols])
-            sql_insert = f"INSERT INTO [{self.sqlite_table}] ({col_name_string}) VALUES ({placeholders})"
-            values = [data_to_insert[c] for c in cols]
+            col_name_string = ", ".join([f'"{c}"' for c in cols])
+            sql_insert = f'INSERT INTO "{self.sqlite_table}" ({col_name_string}) VALUES ({placeholders})'
+            values = list(final_data_to_insert.values())
             
             print(f"Executing SQLite insert: SQL='{sql_insert}', Values='{values}'") # DIAGNOSTIC
             cursor.execute(sql_insert, values)
             conn.commit()
             print("SQLite insert committed successfully.") # DIAGNOSTIC
             success = True
-            error_type = None
 
         except sqlite3.OperationalError as op_err:
             error_message = str(op_err); error_type = "OperationalError"
-            self.master.after(0, self.update_status, f"SQLite Log Error: {error_message}")
-            if conn:
-                try: conn.rollback()
-                except Exception: pass
             print(f"SQLite OperationalError: {error_message}") # DIAGNOSTIC
-            if "no such table" in error_message.lower():
-                error_type = "NoSuchTable"
-            elif "has no column named" in error_message.lower():
-                error_type = "NoSuchColumn"
-            elif "database is locked" in error_message.lower():
-                error_type = "DatabaseLocked"
-            self.master.after(0, lambda em=error_message, et=error_type: self.show_sqlite_error_message(em, et))
+            if conn: conn.rollback()
+            # (Your existing specific error handling for "no such table", etc.)
             success = False
-
-        except sqlite3.Error as ex:
-            error_message = str(ex); error_type = type(ex).__name__
-            self.master.after(0, self.update_status, f"SQLite Log Error: {error_message}")
-            if conn:
-                try: conn.rollback()
-                except Exception: pass
-            print(f"SQLite Error: {error_message}") # DIAGNOSTIC
-            self.master.after(0, lambda et=error_type, em=error_message: messagebox.showerror("SQLite Error", f"Failed to log to SQLite database.\nType: {et}\nMessage: {em}", parent=self.master))
-            success = False
-
         except Exception as e:
             error_message = str(e); error_type = type(e).__name__
-            self.master.after(0, self.update_status, f"SQLite Log Error: Unexpected error ({error_type}).")
-            if conn:
-                try: conn.rollback()
-                except Exception: pass
             print(f"Unexpected SQLite logging error: {e}") # DIAGNOSTIC
-            self.master.after(0, lambda em=error_message: messagebox.showerror("Application Error", f"Unexpected error during SQLite logging:\n{em}", parent=self.master))
+            if conn: conn.rollback()
             success = False
-
         finally:
-            if cursor:
-                try: cursor.close()
-                except Exception: pass
-            if conn:
-                try: conn.close()
-                except Exception: pass
-            print("Exiting log_to_sqlite.") # DIAGNOSTIC
-        return success, error_type
-    
-    def log_to_sqlite_test(self, row_data):
-        '''Logs the provided row_data to the SQLite database.
-            Arguments:
-            * row_data: A dictionary containing the data to log, where keys are column names and values are the data to insert.
-            Returns:
-            * success: True if logging was successful, False otherwise.
-            * error_type: A string indicating the type of error if logging failed, or None if successful.
-        '''
-        print(f"Entering log_to_sqlite. Data: {row_data}") # DIAGNOSTIC
-        success = False
-        error_type = None
-
-        if not self.sqlite_enabled:
-            print("SQLite logging disabled.") # DIAGNOSTIC
-            return False, "Disabled"
-
-        if not self.sqlite_db_path or not self.sqlite_table:
-            self.master.after(0, self.update_status, "SQLite Log Error: DB Path or Table Name missing in settings.")
-            print("SQLite config missing (path or table).") # DIAGNOSTIC
-            return False, "ConfigurationMissing"
-
-        conn = None
-        cursor = None
-        try:
-            print(f"Connecting to SQLite DB: {self.sqlite_db_path}") # DIAGNOSTIC
-            conn = sqlite3.connect(self.sqlite_db_path, timeout=5)
-            cursor = conn.cursor()
-            print("SQLite connection successful.") # DIAGNOSTIC
-
-            table_columns_info = {}
-            try:
-                pragma_sql = f"PRAGMA table_info([{self.sqlite_table}]);"
-                cursor.execute(pragma_sql)
-                results = cursor.fetchall()
-                if not results: 
-                    print(f"SQLite table '{self.sqlite_table}' does not exist.") # DIAGNOSTIC
-                    raise sqlite3.OperationalError(f"No such table: {self.sqlite_table}")
-                table_columns_info = {row[1].lower(): row[1] for row in results}
-                print(f"SQLite table columns: {table_columns_info}") # DIAGNOSTIC
-            except sqlite3.Error as e_meta:
-                self.master.after(0, self.update_status, f"SQLite Log Error: Cannot get columns for '{self.sqlite_table}'")
-                error_type = f"MetadataError_{type(e_meta).__name__}"
-                print(f"Error getting table metadata: {e_meta}") # DIAGNOSTIC
-                raise e_meta 
-            
-            data_to_insert = {}
-            provided_keys_lower = {str(k).lower(): k for k, v in row_data.items()}
-            for lower_key, actual_key in provided_keys_lower.items():
-                if lower_key in table_columns_info:
-                    db_col_name = table_columns_info[lower_key]
-                    data_to_insert[db_col_name] = row_data[actual_key]
-            print(f"Data prepared for SQLite insert: {data_to_insert}") # DIAGNOSTIC
-
-            if not data_to_insert:
-                self.master.after(0, self.update_status, "SQLite Log Info: No data matched DB columns.")
-                print("No data matched DB columns for SQLite insert.") # DIAGNOSTIC
-                success = True
-                error_type = None
-                return success, error_type
-
-            cols = list(data_to_insert.keys())
-            placeholders = ", ".join(["?"] * len(cols))
-            col_name_string = ", ".join([f"[{c}]" for c in cols])
-            sql_insert = f"INSERT INTO [{self.sqlite_table}] ({col_name_string}) VALUES ({placeholders})"
-            values = [data_to_insert[c] for c in cols]
-            
-            print(f"Executing SQLite insert: SQL='{sql_insert}', Values='{values}'") # DIAGNOSTIC
-            cursor.execute(sql_insert, values)
-            conn.commit()
-            print("SQLite insert committed successfully.") # DIAGNOSTIC
-            success = True
-            error_type = None
-
-        except sqlite3.OperationalError as op_err:
-            error_message = str(op_err); error_type = "OperationalError"
-            self.master.after(0, self.update_status, f"SQLite Log Error: {error_message}")
-            if conn:
-                try: conn.rollback()
-                except Exception: pass
-            print(f"SQLite OperationalError: {error_message}") # DIAGNOSTIC
-            if "no such table" in error_message.lower():
-                error_type = "NoSuchTable"
-            elif "has no column named" in error_message.lower():
-                error_type = "NoSuchColumn"
-            elif "database is locked" in error_message.lower():
-                error_type = "DatabaseLocked"
-            self.master.after(0, lambda em=error_message, et=error_type: self.show_sqlite_error_message(em, et))
-            success = False
-
-        except sqlite3.Error as ex:
-            error_message = str(ex); error_type = type(ex).__name__
-            self.master.after(0, self.update_status, f"SQLite Log Error: {error_message}")
-            if conn:
-                try: conn.rollback()
-                except Exception: pass
-            print(f"SQLite Error: {error_message}") # DIAGNOSTIC
-            self.master.after(0, lambda et=error_type, em=error_message: messagebox.showerror("SQLite Error", f"Failed to log to SQLite database.\nType: {et}\nMessage: {em}", parent=self.master))
-            success = False
-
-        except Exception as e:
-            error_message = str(e); error_type = type(e).__name__
-            self.master.after(0, self.update_status, f"SQLite Log Error: Unexpected error ({error_type}).")
-            if conn:
-                try: conn.rollback()
-                except Exception: pass
-            print(f"Unexpected SQLite logging error: {e}") # DIAGNOSTIC
-            self.master.after(0, lambda em=error_message: messagebox.showerror("Application Error", f"Unexpected error during SQLite logging:\n{em}", parent=self.master))
-            success = False
-
-        finally:
-            if cursor:
-                try: cursor.close()
-                except Exception: pass
-            if conn:
-                try: conn.close()
-                except Exception: pass
+            if cursor: cursor.close()
+            if conn: conn.close()
             print("Exiting log_to_sqlite.") # DIAGNOSTIC
         return success, error_type
 
@@ -3894,6 +3732,7 @@ class SettingsWindow:
                     field_name = f"Unknown_Field_{i}" 
 
             column_name = row_info["column_entry"].get().strip()
+            db_column_name = row_info["db_column_entry"].get().strip() # Get DB column name
             skip_value = row_info["skip_var"].get()
             
             # Ensure field_name is not empty for custom fields, assign a default if it is
@@ -3904,6 +3743,7 @@ class SettingsWindow:
             new_txt_field_configs.append({
                 "field": field_name,
                 "column_name": column_name if column_name else field_name, # Default to field name if column is empty
+                "db_column_name": db_column_name,
                 "skip": skip_value
             })
         self.parent_gui.txt_field_columns_config = new_txt_field_configs

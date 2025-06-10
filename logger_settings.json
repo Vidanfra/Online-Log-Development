@@ -7,56 +7,67 @@
         {
             "field": "Date",
             "column_name": "Date",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Time",
-            "column_name": "Time",
+            "column_name": "UTC Time",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "KP",
             "column_name": "KP",
+            "db_column_name": "kp",
             "skip": false
         },
         {
             "field": "DCC",
             "column_name": "DCC",
+            "db_column_name": "coustom_value_3",
             "skip": false
         },
         {
             "field": "Line name",
-            "column_name": "Line name",
+            "column_name": "Target",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Latitude",
             "column_name": "Latitude",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Longitude",
             "column_name": "Longitude",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Easting",
             "column_name": "Easting [m]",
+            "db_column_name": "coustom_value_1",
             "skip": false
         },
         {
             "field": "Northing",
             "column_name": "Northing [m]",
+            "db_column_name": "coustom_value_2",
             "skip": false
         },
         {
             "field": "Event",
             "column_name": "Event",
+            "db_column_name": "event",
             "skip": false
         },
         {
             "field": "Code",
             "column_name": "Code",
+            "db_column_name": "task_event",
             "skip": false
         }
     ],
@@ -105,7 +116,7 @@
         {
             "text": "sdvgdfvdsfc",
             "event_text": "cdfffsdf",
-            "event_code": "",
+            "event_code": "test",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
@@ -133,9 +144,9 @@
         {
             "text": "Custom 9",
             "event_text": "Custom 9 Event",
-            "event_code": "",
-            "txt_source_key": "None",
-            "tab_group": "Main"
+            "event_code": "test",
+            "txt_source_key": "Main TXT",
+            "tab_group": "ROV"
         },
         {
             "text": "Custom 10",
@@ -227,6 +238,7 @@
         "New Day": "#80ffff",
         "Custom Event 1": "#BAE1FF",
         "ROV Off Deck": "#FFFFBA",
+        "sdvgdfvdsfc": "#BAE1FF",
         "Custom 9": "#FFB3BA",
         "Custom 12": "#FFFFBA",
         "Hourly KP Log": "#00ffff"
