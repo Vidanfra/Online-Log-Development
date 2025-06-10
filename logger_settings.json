@@ -72,120 +72,140 @@
         {
             "text": "Custom Event 1",
             "event_text": "Custom Event 1 Triggered",
+            "event_code": "",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
             "text": "Custom Event 2",
             "event_text": "Custom Event 2 Triggered",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
             "text": "Custom Event 3",
             "event_text": "Custom Event 3 Triggered",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
             "text": "ROV Off Deck",
             "event_text": "ROV Off Deck",
+            "event_code": "",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
             "text": "sdvgdfvdsfc",
             "event_text": "cdfffsdf",
+            "event_code": "",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
             "text": "Custom 6",
             "event_text": "Custom 6 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
             "text": "Custom 7",
             "event_text": "Custom 7 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
             "text": "Custom 8",
             "event_text": "Custom 8 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
             "text": "Custom 9",
             "event_text": "Custom 9 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
             "text": "Custom 10",
             "event_text": "Custom 10 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 11",
             "event_text": "Custom 11 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 12",
             "event_text": "Custom 12 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 13",
             "event_text": "Custom 13 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 14",
             "event_text": "Custom 14 Event",
-            "txt_source_key": "None",
+            "event_code": "OffDeck",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 15",
             "event_text": "Custom 15 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 16",
             "event_text": "Custom 16 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 17",
             "event_text": "Custom 17 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 18",
             "event_text": "Custom 18 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 19",
             "event_text": "Custom 19 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 20",
             "event_text": "Custom 20 Event",
+            "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
         }
@@ -195,7 +215,6 @@
         "ROV"
     ],
     "button_colors": {
-        "Log on": "#BAFFC9",
         "Log off": "#FFB6C1",
         "Event": "#FFFFE0",
         "SVP": "#ADD8E6",
@@ -211,5 +230,23 @@
     "sqlite_table": "EventLog",
     "always_on_top": true,
     "new_day_event_enabled": true,
-    "hourly_event_enabled": true
+    "hourly_event_enabled": true,
+    "main_button_configs": {
+        "Log on": {
+            "event_text": "Log on event occurred",
+            "event_code": "test"
+        },
+        "Log off": {
+            "event_text": "Log off event occurred",
+            "event_code": ""
+        },
+        "Event": {
+            "event_text": "",
+            "event_code": ""
+        },
+        "SVP": {
+            "event_text": "SVP applied",
+            "event_code": ""
+        }
+    }
 }

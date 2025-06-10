@@ -311,6 +311,17 @@ class DataLoggerGUI:
         This method is called when the GUI is first launched.
         '''
         self.log_file_path = None
+
+       # Event Code Configuration ---
+        self.event_codes_file = "event_codes.json"
+        self.event_codes = {} # Will store {'code': 'description'}
+
+        self.main_button_configs = {
+            "Log on": {"event_text": "Log on event occurred", "event_code": ""},
+            "Log off": {"event_text": "Log off event occurred", "event_code": ""},
+            "Event": {"event_text": "", "event_code": ""}, # Intentionally blank for the "Event" button
+            "SVP": {"event_text": "SVP applied", "event_code": ""}
+        }
         
         # Original TXT path for the 'Event' button
         self.txt_folder_path = None 
@@ -338,7 +349,9 @@ class DataLoggerGUI:
             {"field": "Longitude", "column_name": "Longitude", "skip": False},
             {"field": "Easting", "column_name": "Easting", "skip": False},
             {"field": "Northing", "column_name": "Northing", "skip": False},
-            {"field": "Event", "column_name": "Event", "skip": False} # Default "Event" field is still here
+            {"field": "Event", "column_name": "Event", "skip": False}, # Default "Event" field is still here
+            {"field": "Code", "column_name": "Code", "skip": False}
+
         ]
         # These two will be derived from txt_field_columns_config for backwards compatibility/easier lookup
         self.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.txt_field_columns_config}
@@ -360,9 +373,9 @@ class DataLoggerGUI:
         # 'TXT Source 2' maps to self.txt_folder_path_set2
         # 'TXT Source 3' maps to self.txt_folder_path_set3
         self.custom_button_configs = [
-            {"text": "Custom Event 1", "event_text": "Custom Event 1 Triggered", "txt_source_key": "Main TXT", "tab_group": "Main"},
-            {"text": "Custom Event 2", "event_text": "Custom Event 2 Triggered", "txt_source_key": "None", "tab_group": "Main"},
-            {"text": "Custom Event 3", "event_text": "Custom Event 3 Triggered", "txt_source_key": "None", "tab_group": "Main"},
+            {"text": "Custom Event 1", "event_text": "Custom Event 1 Triggered", "txt_source_key": "Main TXT", "tab_group": "Main", "event_code": ""},
+            {"text": "Custom Event 2", "event_text": "Custom Event 2 Triggered", "txt_source_key": "None", "tab_group": "Main", "event_code": ""},
+            {"text": "Custom Event 3", "event_text": "Custom Event 3 Triggered", "txt_source_key": "None", "tab_group": "Main", "event_code": ""}
         ]
         self.custom_buttons = []
         self.button_colors = {
@@ -396,6 +409,22 @@ class DataLoggerGUI:
         self.settings_window_instance = None # Track settings window
         self.custom_inline_editor_window = None # To track the open inline editor
 
+    def load_event_codes(self):
+        """Loads the event codes from its dedicated JSON file."""
+        print(f"--- Loading Event Codes from {self.event_codes_file} ---")
+        if os.path.exists(self.event_codes_file):
+            try:
+                with open(self.event_codes_file, 'r') as f:
+                    self.event_codes = json.load(f)
+                print(f"Loaded {len(self.event_codes)} event codes.")
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Error loading event codes file: {e}")
+                self.event_codes = {} # Reset to empty on error
+                messagebox.showerror("Load Error", f"Could not load or parse the event codes file:\n{self.event_codes_file}\n\nError: {e}", parent=self.master)
+        else:
+            print("Event codes file not found. Using empty set.")
+            self.event_codes = {}
+
     def create_main_buttons(self):
         '''
         Builds and renders all the buttons in the GUI dynamically, grouped for better intuitiveness.
@@ -407,7 +436,7 @@ class DataLoggerGUI:
                 widget.destroy()
         self.custom_buttons = []
 
-        # --- Section 1: Custom Buttons (Left Side) ---
+        # --- Section 1: Custom Events (Left Side) ---
         custom_lf = ttk.LabelFrame(self.custom_buttons_frame, text="Custom Events")
         custom_lf.pack(fill="both", expand=True)
         self.custom_buttons_notebook = ttk.Notebook(custom_lf)
@@ -470,22 +499,47 @@ class DataLoggerGUI:
         general_lf.columnconfigure((0, 1), weight=1)
         general_lf.rowconfigure((0, 1), weight=1)
 
+        # --- Helper function to create styled main buttons ---
+        def create_main_button(parent, text, command_func, tooltip_text, grid_row, grid_col):
+            # 1. Get the configured color
+            _, color_hex = self.button_colors.get(text, (None, None))
+            
+            # 2. Create a unique style for this button
+            style_name = f"MainBtn.{text.replace(' ', '')}.TButton"
+            final_style = "TButton"
+            
+            # 3. Configure the style with the color, if one is set
+            if color_hex:
+                self.style.configure(style_name, background=color_hex, font=("Arial", 10, "bold"), padding=4)
+                final_style = style_name
+            
+            # 4. Create the button with the dynamic style
+            btn = ttk.Button(parent, text=text, style=final_style, command=lambda: command_func(btn))
+            btn.grid(row=grid_row, column=grid_col, padx=4, pady=4, sticky="nsew")
+            
+            # 5. Add right-click menu and tooltip
+            btn.bind("<Button-3>", lambda e, name=text: self._show_main_button_context_menu(e, name))
+            ToolTip(btn, tooltip_text)
+            return btn
+
+        # --- Create the buttons using the helper function ---
         # Column 1
-        btn_logon = ttk.Button(general_lf, text="Log on", style="Logon.TButton", command=lambda: self.log_event("Log on", btn_logon, "Main TXT"))
-        btn_logon.grid(row=0, column=0, padx=4, pady=4, sticky="nsew")
-        ToolTip(btn_logon, "Record a 'Log on' marker.")
+        create_main_button(general_lf, "Log on", 
+                           lambda btn: self.log_event("Log on", btn, "Main TXT"), 
+                           "Record a 'Log on' marker.", 0, 0)
+                           
+        create_main_button(general_lf, "Log off", 
+                           lambda btn: self.log_event("Log off", btn, "Main TXT"),
+                           "Record a 'Log off' marker.", 1, 0)
 
-        btn_logoff = ttk.Button(general_lf, text="Log off", style="Logoff.TButton", command=lambda: self.log_event("Log off", btn_logoff, "Main TXT"))
-        btn_logoff.grid(row=1, column=0, padx=4, pady=4, sticky="nsew")
-        ToolTip(btn_logoff, "Record a 'Log off' marker.")
         # Column 2
-        btn_event = ttk.Button(general_lf, text="Event", style="Event.TButton", command=lambda: self.log_event("Event", btn_event, "Main TXT"))
-        btn_event.grid(row=0, column=1, padx=4, pady=4, sticky="nsew")
-        ToolTip(btn_event, "Record data from the Main TXT source.")
-
-        btn_svp = ttk.Button(general_lf, text="SVP", style="SVP.TButton", command=lambda: self.apply_svp(btn_svp, "Main TXT"))
-        btn_svp.grid(row=1, column=1, padx=4, pady=4, sticky="nsew")
-        ToolTip(btn_svp, "Record data and insert latest SVP filename.")
+        create_main_button(general_lf, "Event", 
+                           lambda btn: self.log_event("Event", btn, "Main TXT"), 
+                           "Record data from the Main TXT source.", 0, 1)
+                           
+        create_main_button(general_lf, "SVP", 
+                           lambda btn: self.apply_svp(btn, "Main TXT"), 
+                           "Record data and insert latest SVP filename.", 1, 1)
 
 
         # --- Section 3: Configuration Buttons (Right Side) ---
@@ -928,6 +982,26 @@ class DataLoggerGUI:
         except tk.TclError:
             pass # Widget might be destroyed
 
+    def update_monitor_indicator_text(self):
+        """
+        Updates the monitoring status label text and color based on the current
+        state of the monitor threads, without restarting them.
+        """
+        # First, ensure the widget exists. This is a safeguard.
+        if not hasattr(self, 'monitor_status_label') or not self.monitor_status_label or not self.monitor_status_label.winfo_exists():
+            return
+
+        is_active = any(observer.is_alive() for observer in self.monitors.values())
+        
+        try:
+            if is_active:
+                self.monitor_status_label.config(text="Active", foreground="green")
+            else:
+                self.monitor_status_label.config(text="Inactive", foreground="red")
+        except tk.TclError:
+            # This can happen if the widget is destroyed between the check and the config call
+            pass
+
 
     # --- Logging Actions (using threading) ---
 
@@ -941,11 +1015,8 @@ class DataLoggerGUI:
         '''
         event_text_for_excel = None
         skip_files = False
-        if event_type in ["Log on", "Log off"]:
-            event_text_for_excel = f"{event_type} event occurred"
-        elif event_type == "Event":
-            skip_files = True
-            event_text_for_excel = ""
+        event_text_for_excel = self.main_button_configs.get(event_type, {}).get("event_text", f"Default {event_type}")
+        skip_files = (event_type == "Event") # Still skip files only for the main "Event" button
             
         self._perform_log_action(event_type=event_type,
                                  event_text_for_excel=event_text_for_excel,
@@ -1004,8 +1075,9 @@ class DataLoggerGUI:
             self.update_status("SVP Error: Excel file missing.")
             return
 
+        event_text = self.main_button_configs.get("SVP", {}).get("event_text", "SVP applied")
         self._perform_log_action(event_type="SVP",
-                                 event_text_for_excel="SVP applied",
+                                 event_text_for_excel=event_text,
                                  svp_specific_handling=True,
                                  triggering_button=button_widget,
                                  txt_source_key=txt_source_key) # Changed to pass txt_source_key
@@ -1021,24 +1093,20 @@ class DataLoggerGUI:
         * skip_latest_files: Whether to skip checking monitored folders (used for basic events).
         * svp_specific_handling: Enables special logic if the event is "SVP".
         * triggering_button: The button that was pressed (used to temporarily disable it).
-        * txt_source_set: Specifies which TXT file set (1 or 2) to use for extracting data.
+        * txt_source_key: Specifies which TXT file source to use for extracting data.
 
         Workflow explanation:
         When you click a button in the GUI:
         * _perform_log_action() is triggered.
-        * It calls insert_txt_data() to extract latest TXT data.
-        * Then it appends other folder-monitor-based data.
+        * It calls helper methods to get the latest data.
         * Then it logs everything to:
         * Excel: with optional row color
         * SQLite: if enabled
         * Updates the GUI status with success/failure feedback.
-
-
-
         '''
         self.update_status(f"Processing '{event_type}'...")
-        print(f"\n--- Log Action Initiated for '{event_type}' ---") # DIAGNOSTIC
-        print(f"txt_source_key received: {txt_source_key}") # DIAGNOSTIC
+        print(f"\n--- Log Action Initiated for '{event_type}' ---")  # DIAGNOSTIC
+        print(f"txt_source_key received: {txt_source_key}")  # DIAGNOSTIC
 
         original_text = None
         # Disable the button if it exists and is a ttk.Button
@@ -1052,7 +1120,7 @@ class DataLoggerGUI:
 
         # Define a background thread to avoid blocking the GUI
         def _worker_thread_func():
-            nonlocal original_text 
+            nonlocal original_text
             # Prepares an empty data row with a RecordID
             row_data = {}
             excel_success = False
@@ -1065,6 +1133,7 @@ class DataLoggerGUI:
                 # --- STEP 1: Initialize and collect all data from file sources FIRST ---
                 row_data = {}
                 record_id = str(uuid.uuid4())
+                row_data["RecordID"] = record_id
 
                 # --- TXT Data Collection ---
                 if txt_source_key and txt_source_key != "None":
@@ -1075,69 +1144,82 @@ class DataLoggerGUI:
                         source_folder_path = self.txt_folder_path_set2
                     elif txt_source_key == "TXT Source 3":
                         source_folder_path = self.txt_folder_path_set3
-                    
-                    if source_folder_path and os.path.isdir(source_folder_path): 
-                        try:
-                            txt_data = self._get_txt_data_from_source(source_folder_path)
-                            if txt_data:
-                                row_data.update(txt_data)
-                        except Exception as e_txt:
-                            print(f"Error getting TXT data from source '{txt_source_key}': {e_txt}")
-                            self.master.after(0, lambda e=e_txt: messagebox.showerror("Error", f"Failed to read TXT data from {txt_source_key}:\n{e}", parent=self.master))
-                    
+
                     # Ensure path exists and is a directory before attempting to read
-                    if source_folder_path and os.path.isdir(source_folder_path): 
+                    if source_folder_path and os.path.isdir(source_folder_path):
                         try:
                             txt_data = self._get_txt_data_from_source(source_folder_path)
-                            print(f"TXT data fetched from {source_folder_path}: {txt_data}") # DIAGNOSTIC
+                            print(f"TXT data fetched from {source_folder_path}: {txt_data}")  # DIAGNOSTIC
                             if txt_data:
                                 row_data.update(txt_data)
-                                print(f"row_data after TXT update: {row_data}") # DIAGNOSTIC
+                                print(f"row_data after TXT update: {row_data}")  # DIAGNOSTIC
                             else:
-                                print(f"No TXT data returned from {source_folder_path}") # DIAGNOSTIC
+                                print(f"No TXT data returned from {source_folder_path}")  # DIAGNOSTIC
                         except Exception as e_txt:
-                            print(f"Error getting TXT data from source '{txt_source_key}': {e_txt}") # DIAGNOSTIC
+                            print(f"Error getting TXT data from source '{txt_source_key}': {e_txt}")  # DIAGNOSTIC
                             self.master.after(0, lambda e=e_txt: messagebox.showerror("Error", f"Failed to read TXT data from {txt_source_key}:\n{e}", parent=self.master))
                     else:
-                        print(f"Source folder path is invalid or empty for {txt_source_key}: {source_folder_path}") # DIAGNOSTIC
+                        print(f"Source folder path is invalid or empty for {txt_source_key}: {source_folder_path}")  # DIAGNOSTIC
                 else:
-                    print(f"txt_source_key is 'None' or empty, skipping TXT data collection.") # DIAGNOSTIC
+                    print(f"txt_source_key is 'None' or empty, skipping TXT data collection.")  # DIAGNOSTIC
+                    error_title = "Configuration Error"
+                    # Debugging to highlight if a text file has not been assigned to a button
+                    error_message = (
+                        f"The button '{event_type}' could not get data from its text file source.\n\n"
+                        f"Reason: The folder path for source '{txt_source_key}' has not been assigned or is invalid.\n\n"
+                        "To fix this, go to 'Settings' -> 'File Paths' and assign a valid folder for this source."
+                    )
+                    # Schedule the message box to be shown safely in the main GUI thread.
+                    self.master.after(0, lambda: messagebox.showwarning(error_title, error_message, parent=self.master))
                 # --- End TXT Data Collection ---
 
                 if not skip_latest_files:
                     try:
                         latest_files_data = self.get_latest_files_data()
-                        print(f"Latest files data (monitored folders): {latest_files_data}") # DIAGNOSTIC
-                        if latest_files_data: row_data.update(latest_files_data)
+                        print(f"Latest files data (monitored folders): {latest_files_data}")  # DIAGNOSTIC
+                        if latest_files_data:
+                            row_data.update(latest_files_data)
                     except Exception as e_files:
-                        print(f"Error getting latest file data (monitored folders): {e_files}") # DIAGNOSTIC
+                        print(f"Error getting latest file data (monitored folders): {e_files}")  # DIAGNOSTIC
                         self.master.after(0, lambda e=e_files: messagebox.showerror("Error", f"Failed to get latest file data:\n{e}", parent=self.master))
 
                 # Adds SVP file info if applicable
-                if svp_specific_handling: # SVP logic also global
+                if svp_specific_handling:  # SVP logic also global
                     svp_folder_path = self.folder_paths.get("SVP")
                     svp_col_name = self.folder_columns.get("SVP", "SVP")
                     if svp_folder_path and svp_col_name:
                         latest_svp_file = folder_cache.get("SVP")
                         row_data[svp_col_name] = latest_svp_file if latest_svp_file else "N/A"
-                        print(f"SVP data added: {svp_col_name}: {row_data[svp_col_name]}") # DIAGNOSTIC
+                        print(f"SVP data added: {svp_col_name}: {row_data[svp_col_name]}")  # DIAGNOSTIC
                     elif svp_col_name:
                         row_data[svp_col_name] = "Config Error"
-                        print(f"SVP column config error: {svp_col_name}") # DIAGNOSTIC
-                
-                print(f"Final row_data before Excel/SQLite save: {row_data}") # DIAGNOSTIC
+                        print(f"SVP column config error: {svp_col_name}")  # DIAGNOSTIC
 
-                 # -----------------------------------------------------------------
-                # --- FIX: ADD THE EVENT TEXT TO THE ROW DATA DICTIONARY ---
+                print(f"Final row_data before processing event text/code: {row_data}")  # DIAGNOSTIC
+
                 # Find the column name configured for the "Event" data.
                 event_column_name = self.txt_field_columns.get("Event")
-                
                 # If the event column is defined and text is provided, add it.
-                # This will correctly place text like "Custom Event 1 Triggered".
                 if event_column_name and event_text_for_excel is not None:
                     row_data[event_column_name] = event_text_for_excel
-                # --- END FIX ---
-                # -----------------------------------------------------------------
+
+                # Determine and add the Event Code
+                event_code_to_log = ""
+                # Check if it's a custom button event
+                if event_type in [cfg['text'] for cfg in self.custom_button_configs]:
+                    for cfg in self.custom_button_configs:
+                        if cfg['text'] == event_type:
+                            event_code_to_log = cfg.get("event_code", "")
+                            break
+                # Check if it's a main button event
+                elif event_type in self.main_button_configs:
+                    event_code_to_log = self.main_button_configs[event_type].get("event_code", "")
+
+                # Find the configured column name for "Code" and add it to the data row
+                code_column_name = self.txt_field_columns.get("Code")
+                if code_column_name and event_code_to_log:
+                    row_data[code_column_name] = event_code_to_log
+                    print(f"Event Code '{event_code_to_log}' added to column '{code_column_name}'")  # DIAGNOSTIC
 
                 if row_data:
                     # Get the color for the row based on the event type
@@ -1147,54 +1229,62 @@ class DataLoggerGUI:
                     excel_data = {k: v for k, v in row_data.items() if k != 'EventType'}
 
                     try:
-                        print(f"Attempting to save to Excel. Log file: {self.log_file_path}") # DIAGNOSTIC
-                        if not self.log_file_path: excel_save_exception = ValueError("Excel path missing")
-                        elif not os.path.exists(self.log_file_path): excel_save_exception = FileNotFoundError("Excel file missing")
+                        print(f"Attempting to save to Excel. Log file: {self.log_file_path}")  # DIAGNOSTIC
+                        if not self.log_file_path:
+                            excel_save_exception = ValueError("Excel path missing")
+                        elif not os.path.exists(self.log_file_path):
+                            excel_save_exception = FileNotFoundError("Excel file missing")
                         else:
                             # Save the data to Excel
                             self.save_to_excel(excel_data, row_color=row_color_for_excel)
                             excel_success = True
-                            print("Excel save: SUCCESS") # DIAGNOSTIC
+                            print("Excel save: SUCCESS")  # DIAGNOSTIC
                     except Exception as e_excel:
                         excel_save_exception = e_excel
                         traceback.print_exc()
-                        print(f"Excel save: FAILED with error: {e_excel}") # DIAGNOSTIC
+                        print(f"Excel save: FAILED with error: {e_excel}")  # DIAGNOSTIC
                         self.master.after(0, lambda e=e_excel: messagebox.showerror("Excel Error", f"Failed to save to Excel:\n{e}", parent=self.master))
-                    
-                    # If Excel save was successful, log to SQLite
+
+                    # Log to SQLite
                     sqlite_logged, sqlite_save_exception_type = self.log_to_sqlite(row_data)
-                    print(f"SQLite log result: Success={sqlite_logged}, Error={sqlite_save_exception_type}") # DIAGNOSTIC
+                    print(f"SQLite log result: Success={sqlite_logged}, Error={sqlite_save_exception_type}")  # DIAGNOSTIC
 
                     # Constructs a status message to show whether Excel and SQLite logging succeeded or failed.
                     status_parts = []
-                    if excel_success: status_parts.append("Excel: OK")
-                    elif excel_save_exception: status_parts.append(f"Excel: Fail ({type(excel_save_exception).__name__})")
-                    else: status_parts.append("Excel: Fail (Check Path)")
+                    if excel_success:
+                        status_parts.append("Excel: OK")
+                    elif excel_save_exception:
+                        status_parts.append(f"Excel: Fail ({type(excel_save_exception).__name__})")
+                    else:
+                        status_parts.append("Excel: Fail (Check Path)")
 
                     if self.sqlite_enabled:
-                        if sqlite_logged: status_parts.append("SQLite: OK")
+                        if sqlite_logged:
+                            status_parts.append("SQLite: OK")
                         else:
                             err_detail = f" ({sqlite_save_exception_type})" if sqlite_save_exception_type else ""
                             status_parts.append(f"SQLite: Fail{err_detail}")
 
                     if not excel_success and not (self.sqlite_enabled and sqlite_logged):
                         status_msg = f"'{event_type}' log FAILED. " + ", ".join(status_parts)
-                    elif not status_parts: status_msg = f"Error logging '{event_type}' - No status."
-                    else: status_msg = f"'{event_type}' logged. " + ", ".join(status_parts) + "."
+                    elif not status_parts:
+                        status_msg = f"Error logging '{event_type}' - No status."
+                    else:
+                        status_msg = f"'{event_type}' logged. " + ", ".join(status_parts) + "."
                 else:
                     status_msg = f"'{event_type}' pressed, but no data was collected/generated."
-                    print(f"No row_data to save for '{event_type}'.") # DIAGNOSTIC
+                    print(f"No row_data to save for '{event_type}'.")  # DIAGNOSTIC
 
             except Exception as thread_ex:
                 traceback.print_exc()
                 status_msg = f"'{event_type}' - Unexpected thread error: {thread_ex}"
-                print(f"CRITICAL THREAD ERROR: {thread_ex}") # DIAGNOSTIC
+                print(f"CRITICAL THREAD ERROR: {thread_ex}")  # DIAGNOSTIC
                 self.master.after(0, lambda e=thread_ex: messagebox.showerror("Thread Error", f"Critical error during logging action '{event_type}':\n{e}", parent=self.master))
 
             finally:
                 self.master.after(0, self.update_status, status_msg)
 
-            # Re-enables the button if it was disabled
+                # Re-enables the button if it was disabled
                 if triggering_button and isinstance(triggering_button, ttk.Button):
                     def re_enable_button(btn=triggering_button, txt=original_text):
                         try:
@@ -1202,7 +1292,8 @@ class DataLoggerGUI:
                                 btn.config(state=tk.NORMAL)
                                 if txt:
                                     btn.config(text=txt)
-                        except tk.TclError: pass
+                        except tk.TclError:
+                            pass
                     self.master.after(0, re_enable_button)
 
         log_thread = threading.Thread(target=_worker_thread_func, daemon=True)
@@ -1676,7 +1767,8 @@ class DataLoggerGUI:
             "sqlite_db_path": self.sqlite_db_path, "sqlite_table": self.sqlite_table,
             "always_on_top": self.always_on_top_var.get(),
             "new_day_event_enabled": self.new_day_event_enabled_var.get(),
-            "hourly_event_enabled": self.hourly_event_enabled_var.get()
+            "hourly_event_enabled": self.hourly_event_enabled_var.get(),
+            "main_button_configs": self.main_button_configs 
         }
         try:
             with open(self.settings_file, 'w') as f: 
@@ -1701,6 +1793,16 @@ class DataLoggerGUI:
             if os.path.exists(self.settings_file):
                 with open(self.settings_file, 'r') as f: settings = json.load(f)
                 self.log_file_path = settings.get("log_file_path")
+
+                # Load main button configs, merging with defaults to handle new settings
+
+                self.load_event_codes() 
+                print("\n--- Loading Settings ---") # DIAGNOSTIC
+
+                loaded_main_configs = settings.get("main_button_configs", {})
+                for btn_name, default_conf in self.main_button_configs.items():
+                    # Update the default config with any saved values
+                    default_conf.update(loaded_main_configs.get(btn_name, {}))
                 
                 self.txt_folder_path = settings.get("txt_folder_path")
                 self.txt_folder_path_set2 = settings.get("txt_folder_path_set2")
@@ -1720,7 +1822,7 @@ class DataLoggerGUI:
                     old_txt_skips = settings.get("txt_field_skips", {})
                     # Reconstruct the ordered list from old dicts, prioritizing new fields
                     new_config = []
-                    default_order_fields = ["Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event"]
+                    default_order_fields = ["Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code"]
                     for field in default_order_fields:
                         new_config.append({
                             "field": field,
@@ -1758,9 +1860,14 @@ class DataLoggerGUI:
                         config = loaded_configs[i]
                     else:
                         config = {"text": f"Custom {i+1}", "event_text": f"Custom {i+1} Event"}
-                    config["txt_source_key"] = config.get("txt_source_key", "None")  
-                    config["tab_group"] = config.get("tab_group", "Main") # NEW: Load tab group, default to "Main"
+                    
+                    # Ensure all required keys exist with defaults
+                    config["txt_source_key"] = config.get("txt_source_key", "None")
+                    config["tab_group"] = config.get("tab_group", "Main")
+                    config["event_code"] = config.get("event_code", "") # Ensure event_code is loaded for each button
+                    
                     updated_custom_configs.append(config)
+
                 self.custom_button_configs = updated_custom_configs
                 print(f"Loaded custom_button_configs: {self.custom_button_configs}") # DIAGNOSTIC
 
@@ -1845,13 +1952,15 @@ class DataLoggerGUI:
             # Call create_main_buttons without arguments, as it now handles all frames.
             self.create_main_buttons()
             self.create_status_indicators()
+            # FIX: Add this line to update the text of the newly created monitor status label
+            self.update_monitor_indicator_text() 
             self.master.update_idletasks()
 
     # --- Monitoring ---
     def start_monitoring(self):
         '''Function to read the last version of a file in several folders'''
         print("\n--- Starting Monitoring ---") # DIAGNOSTIC
-       
+        
         active_monitors = list(self.monitors.items()) # Get a copy of the items
 
     # Step 1: Signal all threads to stop without blocking indefinitely
@@ -1906,10 +2015,11 @@ class DataLoggerGUI:
 
         self.update_status(f"Monitoring {count} active folders.")
 
-        if hasattr(self, 'monitor_status_label') and self.monitor_status_label:
-            if monitoring_active: self.monitor_status_label.config(text="Active", foreground="green")
-            else: self.monitor_status_label.config(text="Inactive", foreground="red")
+        # --- REFACTOR ---
+        # Replace the old logic with a call to the new, reusable functions
+        self.update_monitor_indicator_text()
         self.update_db_indicator()
+        
         print("--- End Starting Monitoring ---") # DIAGNOSTIC
 
     def start_folder_monitoring(self, folder_name, folder_path, file_extension):
@@ -2078,6 +2188,25 @@ class DataLoggerGUI:
         finally:
             context_menu.grab_release()
 
+    def _show_main_button_context_menu(self, event, button_name):
+        """Shows a context menu for the clicked main button."""
+        # If an inline editor is already open, focus it instead of opening a new one
+        if self.custom_inline_editor_window and self.custom_inline_editor_window.winfo_exists():
+            self.custom_inline_editor_window.lift()
+            self.custom_inline_editor_window.focus_set()
+            return
+
+        context_menu = tk.Menu(self.master, tearoff=0)
+        
+        # Add the command to edit the button's settings
+        context_menu.add_command(label=f"Edit \"{button_name}\" Settings...",
+                                 command=lambda: self._edit_main_button_inline(button_name))
+        
+        try:
+            context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            context_menu.grab_release()
+
     def _show_add_button_context_menu(self, event):
         """Shows a context menu specifically for adding a new button."""
         if self.num_custom_buttons >= self.MAX_CUSTOM_BUTTONS:
@@ -2092,6 +2221,106 @@ class DataLoggerGUI:
             context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             context_menu.grab_release()
+
+    def _edit_main_button_inline(self, button_name):
+        """
+        Opens a small Toplevel window to edit settings for a specific main button.
+        """
+        if self.custom_inline_editor_window and self.custom_inline_editor_window.winfo_exists():
+            self.custom_inline_editor_window.lift()
+            self.custom_inline_editor_window.focus_set()
+            return
+
+        # Fetch the complete configuration for the button
+        button_config = self.main_button_configs.get(button_name, {})
+        
+        editor_window = tk.Toplevel(self.master)
+        self.custom_inline_editor_window = editor_window
+        editor_window.title(f"Edit \"{button_name}\"")
+        editor_window.transient(self.master)
+        editor_window.grab_set()
+        editor_window.resizable(False, False)
+
+        frame = ttk.Frame(editor_window, padding="15")
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        # --- Get current values ---
+        current_event_text = button_config.get("event_text", "")
+        current_event_code = button_config.get("event_code", "")
+        current_color = self.button_colors.get(button_name, (None, None))[1]
+        
+        # --- Create StringVars ---
+        event_text_var = tk.StringVar(value=current_event_text)
+        event_code_var = tk.StringVar(value=current_event_code)
+        button_color_var = tk.StringVar(value=current_color if current_color else "")
+        
+        # --- UI Elements for the editor ---
+        row_idx = 0
+        # Event Text Entry (was missing)
+        ttk.Label(frame, text="Event Text:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
+        event_text_entry = ttk.Entry(frame, textvariable=event_text_var, width=40)
+        event_text_entry.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
+        ToolTip(event_text_entry, "Text written to the 'Event' column in the log.")
+
+        row_idx += 1
+        # Event Code Combobox
+        ttk.Label(frame, text="Event Code:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
+        event_code_options = [""] + sorted(list(self.event_codes.keys()))
+        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_var,
+                                           values=event_code_options, state="readonly", width=37)
+        event_code_combobox.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
+        ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
+
+        row_idx += 1
+        # Button/Row Color Picker
+        ttk.Label(frame, text="Button/Row Color:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
+        
+        color_widget_frame = ttk.Frame(frame)
+        color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
+
+        color_display_label = tk.Label(color_widget_frame, width=4, relief="solid", borderwidth=1,
+                                       background=button_color_var.get() if button_color_var.get() else 'SystemButtonFace')
+        color_display_label.pack(side="left", padx=(0, 5))
+
+        clear_btn = ttk.Button(color_widget_frame, text="X", width=2,
+                               command=lambda: self._set_color_on_widget(button_color_var, color_display_label, None, editor_window))
+        clear_btn.pack(side="left", padx=1)
+        ToolTip(clear_btn, "Clear button/row color.")
+
+        choose_btn = ttk.Button(color_widget_frame, text="...", width=3,
+                                command=lambda v=button_color_var, l=color_display_label: self._choose_color_dialog(v, l, editor_window, button_name))
+        choose_btn.pack(side="left", padx=1)
+        ToolTip(choose_btn, "Choose a custom color.")
+
+        # --- Save and Cancel buttons ---
+        row_idx += 1
+        button_controls_frame = ttk.Frame(frame)
+        button_controls_frame.grid(row=row_idx, column=0, columnspan=2, pady=(15,0), sticky="e")
+
+        def save_main_button_changes():
+            # Save the new event text
+            self.main_button_configs[button_name]['event_text'] = event_text_var.get()
+            self.main_button_configs[button_name]['event_code'] = event_code_var.get()
+
+            # Save the new color
+            new_color_hex = button_color_var.get() if button_color_var.get() else None
+            self.button_colors[button_name] = (None, new_color_hex)
+            
+            # Persist all settings and redraw the UI
+            self.save_settings()
+            
+            # --- FIX: Call the comprehensive update function ---
+            self.update_custom_buttons() 
+            
+            editor_window.destroy()
+
+        ttk.Button(button_controls_frame, text="Save", command=save_main_button_changes, style="Accent.TButton").pack(side="right", padx=5)
+        ttk.Button(button_controls_frame, text="Cancel", command=editor_window.destroy).pack(side="right")
+
+        editor_window.protocol("WM_DELETE_WINDOW", editor_window.destroy)
+        editor_window.wait_window(editor_window)
+        self.custom_inline_editor_window = None     
 
     def _add_new_custom_button(self):
         """Adds a new custom button configuration and updates the GUI."""
@@ -2339,6 +2568,7 @@ class DataLoggerGUI:
         event_text_var = tk.StringVar(value=button_config.get("event_text", f"{button_config.get('text', f'Custom {button_index+1}')} Triggered"))
         txt_source_var = tk.StringVar(value=button_config.get("txt_source_key", "None"))
         tab_group_var = tk.StringVar(value=button_config.get("tab_group", "Main"))
+        event_code_var = tk.StringVar(value=button_config.get("event_code", ""))
         current_color = self.button_colors.get(button_config.get("text"), (None, None))[1]
         button_color_var = tk.StringVar(value=current_color if current_color else "")
         
@@ -2348,11 +2578,21 @@ class DataLoggerGUI:
         text_entry.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(text_entry, "Text displayed on the button.")
 
+        #... inside _edit_custom_button_inline
         row_idx += 1
         ttk.Label(frame, text="Event Text:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         event_entry = ttk.Entry(frame, textvariable=event_text_var, width=30)
         event_entry.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(event_entry, "Text written to the 'Event' column in the log.")
+
+        row_idx += 1 # FIX: Increment row index for the next set of widgets
+        ttk.Label(frame, text="Event Code:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
+        # The list of available codes should include an empty option
+        event_code_options = [""] + sorted(list(self.event_codes.keys()))
+        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_var, 
+                                            values=event_code_options, state="readonly", width=27)
+        event_code_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
+        ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
 
         row_idx += 1
         ttk.Label(frame, text="Event Source:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
@@ -2415,6 +2655,7 @@ class DataLoggerGUI:
             button_config["text"] = button_text_var.get().strip() or f"Custom {button_index+1}"
             button_config["event_text"] = event_text_var.get().strip() or f"{button_config['text']} Triggered"
             button_config["txt_source_key"] = txt_source_var.get()
+            button_config["event_code"] = event_code_var.get()
             button_config["tab_group"] = tab_group_var.get().strip() or "Main"
 
             new_color_hex = button_color_var.get() if button_color_var.get() else None
@@ -2478,6 +2719,9 @@ class DataLoggerGUI:
 
 # --- Settings Window Class (MODIFIED) ---
 class SettingsWindow:
+    # In class SettingsWindow:
+# REPLACE the entire __init__ method with this one.
+
     def __init__(self, master, parent_gui):
         self.master = master
         self.parent_gui = parent_gui
@@ -2488,22 +2732,23 @@ class SettingsWindow:
 
         self.main_frame = ttk.Frame(self.master)
         self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        self.main_frame.rowconfigure(0, weight=1); self.main_frame.columnconfigure(0, weight=1)
+        self.main_frame.rowconfigure(0, weight=1)
+        self.main_frame.columnconfigure(0, weight=1)
 
         self.notebook = ttk.Notebook(self.main_frame)
         self.notebook.grid(row=0, column=0, sticky="nsew")
 
         # Initialize selection tracking for TXT data columns
-        self.selected_txt_row_index = -1 # -1 means no row is selected
+        self.selected_txt_row_index = -1  # -1 means no row is selected
         self.txt_move_up_btn = None
         self.txt_move_down_btn = None
 
-
-        # Create tabs
-        self.create_file_paths_tab() 
+        # --- Create tabs (ensure each is called only ONCE) ---
+        self.create_file_paths_tab()
         self.create_txt_column_mapping_tab()
-        self.create_button_configuration_tab() 
-        self.create_monitored_folders_tab() 
+        self.create_button_configuration_tab()
+        self.create_event_codes_tab()  # For the feature added previously
+        self.create_monitored_folders_tab()
         self.create_sqlite_tab()
         self.create_auto_events_tab()
 
@@ -2518,6 +2763,154 @@ class SettingsWindow:
         self.master.destroy()
 
     # --- Tab Creation Methods ---
+
+    # Add this entire new method to the SettingsWindow class
+
+    def create_event_codes_tab(self):
+        """Creates the UI tab for managing the event codes configuration."""
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="Event Codes")
+
+        # --- Description ---
+        desc_frame = ttk.Frame(tab)
+        desc_frame.pack(fill='x', pady=(0, 10))
+        ttk.Label(desc_frame, text="Create and manage event codes here. These codes can be assigned to buttons to be logged in the 'Code' column.", wraplength=900).pack(anchor='w')
+        
+        # --- Main content frame ---
+        content_frame = ttk.Frame(tab)
+        content_frame.pack(fill='both', expand=True)
+        content_frame.columnconfigure(0, weight=1)
+        content_frame.rowconfigure(0, weight=1)
+
+        # --- Treeview to display codes ---
+        tree_frame = ttk.Frame(content_frame)
+        tree_frame.grid(row=0, column=0, sticky='nsew', pady=(0, 10))
+        tree_frame.rowconfigure(0, weight=1)
+        tree_frame.columnconfigure(0, weight=1)
+
+        self.event_codes_tree = ttk.Treeview(tree_frame, columns=('Code', 'Description'), show='headings', height=10)
+        self.event_codes_tree.heading('Code', text='Code')
+        self.event_codes_tree.heading('Description', text='Description')
+        self.event_codes_tree.column('Code', width=150, stretch=False)
+        self.event_codes_tree.column('Description', width=400, stretch=True)
+        
+        tree_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.event_codes_tree.yview)
+        self.event_codes_tree.configure(yscrollcommand=tree_scrollbar.set)
+
+        self.event_codes_tree.grid(row=0, column=0, sticky='nsew')
+        tree_scrollbar.grid(row=0, column=1, sticky='ns')
+
+        # --- Buttons for managing codes ---
+        button_frame = ttk.Frame(content_frame)
+        button_frame.grid(row=1, column=0, sticky='e')
+
+        ttk.Button(button_frame, text="Add Code...", command=self.add_event_code).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Edit Selected...", command=self.edit_event_code).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Delete Selected", command=self.delete_event_code).pack(side=tk.LEFT, padx=5)
+
+    def populate_event_codes_tree(self):
+        """Clears and re-populates the event codes treeview from the parent GUI's data."""
+        # Clear existing items
+        for item in self.event_codes_tree.get_children():
+            self.event_codes_tree.delete(item)
+        
+        # Populate with new data
+        codes = self.parent_gui.event_codes
+        for code, description in sorted(codes.items()):
+            self.event_codes_tree.insert('', 'end', values=(code, description))
+
+    def save_event_codes_to_file(self):
+        """Saves the current event codes from the parent GUI to the JSON file."""
+        try:
+            with open(self.parent_gui.event_codes_file, 'w') as f:
+                json.dump(self.parent_gui.event_codes, f, indent=4)
+            print(f"Event codes saved to {self.parent_gui.event_codes_file}")
+            self.parent_gui.update_status("Event codes configuration saved.")
+            # Also reload them in the parent GUI to ensure consistency
+            self.parent_gui.load_event_codes()
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Could not save event codes file:\n{e}", parent=self.master)
+
+    def _show_event_code_dialog(self, title, initial_code="", initial_desc=""):
+        """Helper dialog for adding/editing event codes."""
+        dialog = Toplevel(self.master)
+        dialog.title(title)
+        dialog.transient(self.master)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        frame = ttk.Frame(dialog, padding="15")
+        frame.pack(fill='both', expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Code:").grid(row=0, column=0, sticky='w', pady=5)
+        code_entry = ttk.Entry(frame, width=40)
+        code_entry.grid(row=0, column=1, sticky='ew', pady=5)
+        code_entry.insert(0, initial_code)
+        
+        ttk.Label(frame, text="Description:").grid(row=1, column=0, sticky='w', pady=5)
+        desc_entry = ttk.Entry(frame, width=40)
+        desc_entry.grid(row=1, column=1, sticky='ew', pady=5)
+        desc_entry.insert(0, initial_desc)
+
+        result = {}
+        def on_ok():
+            result['code'] = code_entry.get().strip()
+            result['desc'] = desc_entry.get().strip()
+            if not result['code']:
+                messagebox.showwarning("Input Error", "Code cannot be empty.", parent=dialog)
+                return
+            dialog.destroy()
+
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=2, column=0, columnspan=2, pady=(10,0), sticky='e')
+        ttk.Button(button_frame, text="OK", command=on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT)
+
+        dialog.wait_window()
+        return result
+
+    def add_event_code(self):
+        result = self._show_event_code_dialog("Add New Event Code")
+        if result and result.get('code'):
+            if result['code'] in self.parent_gui.event_codes:
+                messagebox.showwarning("Duplicate Code", "This event code already exists.", parent=self.master)
+                return
+            self.parent_gui.event_codes[result['code']] = result['desc']
+            self.save_event_codes_to_file()
+            self.populate_event_codes_tree()
+
+    def edit_event_code(self):
+        selected_item = self.event_codes_tree.focus()
+        if not selected_item:
+            messagebox.showinfo("No Selection", "Please select an event code to edit.", parent=self.master)
+            return
+        
+        item_values = self.event_codes_tree.item(selected_item, 'values')
+        old_code, old_desc = item_values[0], item_values[1]
+
+        result = self._show_event_code_dialog("Edit Event Code", initial_code=old_code, initial_desc=old_desc)
+        if result and result.get('code'):
+            new_code = result['code']
+            new_desc = result['desc']
+            # Remove old code first
+            del self.parent_gui.event_codes[old_code]
+            # Add new/updated code
+            self.parent_gui.event_codes[new_code] = new_desc
+            self.save_event_codes_to_file()
+            self.populate_event_codes_tree()
+
+    def delete_event_code(self):
+        selected_item = self.event_codes_tree.focus()
+        if not selected_item:
+            messagebox.showinfo("No Selection", "Please select an event code to delete.", parent=self.master)
+            return
+
+        code_to_delete = self.event_codes_tree.item(selected_item, 'values')[0]
+        if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete the code '{code_to_delete}'?", parent=self.master):
+            del self.parent_gui.event_codes[code_to_delete]
+            self.save_event_codes_to_file()
+            self.populate_event_codes_tree()
 
     def create_file_paths_tab(self):
         tab = ttk.Frame(self.notebook, padding=20)
@@ -2701,7 +3094,7 @@ class SettingsWindow:
 
     def add_txt_field_header(self, parent):
         header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
-        header_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        header_frame.grid(row=0, column=0, sticky="w", pady=(0, 5))
         
         # --- MODIFIED: Added Preview Data column ---
         header_frame.grid_columnconfigure(0, weight=1) # TXT Field Name
@@ -2815,7 +3208,7 @@ class SettingsWindow:
         self.txt_field_row_widgets.clear()
 
         # Define the set of default fields that should not be editable as 'TXT Field' or removable
-        default_fixed_fields = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event"}
+        default_fixed_fields = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code"}
 
         # Recreate rows based on the current self.parent_gui.txt_field_columns_config
         for i, config in enumerate(self.parent_gui.txt_field_columns_config):
@@ -2837,7 +3230,7 @@ class SettingsWindow:
                 except Exception: pass
 
             row_frame = ttk.Frame(self.txt_fields_scrollable_frame, style=row_style, padding=(0, 2))
-            row_frame.grid(row=row_index, column=0, sticky="ew", pady=0)
+            row_frame.grid(row=row_index, column=0, sticky="w", pady=0)
             
             # --- MODIFIED: Added Preview Data column ---
             row_frame.grid_columnconfigure(0, weight=1) # TXT Field Name
@@ -2920,20 +3313,22 @@ class SettingsWindow:
 
         # Header for the custom button configuration table
         header_frame = ttk.Frame(tab, style="Header.TFrame", padding=(5,3))
-        header_frame.pack(fill='x', pady=(15,5))
+        header_frame.pack(anchor='w', pady=(15,5))
         
         # Configure columns for the header frame to match the rows
         header_frame.grid_columnconfigure(0, weight=0) # Button #
         header_frame.grid_columnconfigure(1, weight=1) # Button Text
         header_frame.grid_columnconfigure(2, weight=2) # Event Text (longer)
-        header_frame.grid_columnconfigure(3, weight=0) # Event Source
-        header_frame.grid_columnconfigure(4, weight=0) # NEW: Tab Group
+        header_frame.grid_columnconfigure(3, weight=0) # Event Code
+        header_frame.grid_columnconfigure(4, weight=0) # Event Source
+        header_frame.grid_columnconfigure(5, weight=0) # Tab Group
 
         ttk.Label(header_frame, text="Button #", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=(5,0), sticky='w')
         ttk.Label(header_frame, text="Button Text", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=5, sticky='ew')
         ttk.Label(header_frame, text="Event Text (for Log)", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=5, sticky='ew')
-        ttk.Label(header_frame, text="Event Source", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=5, sticky='w')
-        ttk.Label(header_frame, text="Tab Group", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=5, sticky='w') # NEW
+        ttk.Label(header_frame, text="Event Code", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=5, sticky='w')
+        ttk.Label(header_frame, text="Event Source", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=5, sticky='w')
+        ttk.Label(header_frame, text="Tab Group", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=5, sticky='w')
 
         self.custom_button_entries_frame = ttk.Frame(tab); self.custom_button_entries_frame.pack(pady=0, fill='both', expand=True)
         self.custom_button_widgets = []
@@ -2977,34 +3372,43 @@ class SettingsWindow:
 
             style_name = f"Row{i % 2}.TFrame"
             row_frame = ttk.Frame(self.custom_button_entries_frame, style=style_name, padding=(0, 2))
-            row_frame.pack(fill='x', pady=0)
+            row_frame.pack(anchor='w', pady=0)
 
             # Configure columns for each row frame
-            row_frame.grid_columnconfigure(0, weight=0) # Button # Label (fixed width)
-            row_frame.grid_columnconfigure(1, weight=1) # Button Text Entry
-            row_frame.grid_columnconfigure(2, weight=2) # Event Text Entry (expands more)
-            row_frame.grid_columnconfigure(3, weight=0) # Event Source Combobox (fixed width)
-            row_frame.grid_columnconfigure(4, weight=0) # NEW: Tab Group Combobox (fixed width)
+            row_frame.grid_columnconfigure(0, weight=0)  # Button # Label
+            row_frame.grid_columnconfigure(1, weight=1)  # Button Text Entry
+            row_frame.grid_columnconfigure(2, weight=2)  # Event Text Entry
+            row_frame.grid_columnconfigure(3, weight=0)  # Event Code
+            row_frame.grid_columnconfigure(4, weight=0)  # Event Source
+            row_frame.grid_columnconfigure(5, weight=0)  # Tab Group
 
+            # Get initial values
+            initial_event_code = config.get("event_code", "")
 
             ttk.Label(row_frame, text=f"{i+1}", width=7, style=style_name.replace("Frame","Label")).grid(row=0, column=0, padx=(5,0), sticky='w')
             text_entry = ttk.Entry(row_frame, width=20); text_entry.insert(0, initial_text); text_entry.grid(row=0, column=1, padx=5, sticky='ew'); ToolTip(text_entry, "Text displayed on the button.")
             event_entry = ttk.Entry(row_frame, width=30); event_entry.insert(0, initial_event); event_entry.grid(row=0, column=2, padx=5, sticky='ew'); ToolTip(event_entry, "Text written to the 'Event' column in the log.")
 
+            # Event Code Combobox
+            event_code_var = tk.StringVar(value=initial_event_code)
+            event_code_options = [""] + sorted(list(self.parent_gui.event_codes.keys()))
+            event_code_combobox = ttk.Combobox(row_frame, textvariable=event_code_var, values=event_code_options, state="readonly", width=12)
+            event_code_combobox.grid(row=0, column=3, padx=5, sticky='w')
+            ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column.")
+
+            # Event Source Combobox
             txt_source_var = tk.StringVar(value=initial_txt_source)
-            txt_source_combobox = ttk.Combobox(row_frame, textvariable=txt_source_var,
-                                                 values=txt_source_options, state="readonly", width=12)
-            txt_source_combobox.grid(row=0, column=3, padx=5, sticky='w')
+            txt_source_combobox = ttk.Combobox(row_frame, textvariable=txt_source_var, values=txt_source_options, state="readonly", width=12)
+            txt_source_combobox.grid(row=0, column=4, padx=5, sticky='w')
             ToolTip(txt_source_combobox, "Select which TXT file source this button should read data from. 'None' means no TXT data will be logged by this button.")
 
-            # NEW: Tab Group Combobox
+            # Tab Group Combobox
             tab_group_var = tk.StringVar(value=initial_tab_group)
-            tab_group_combobox = ttk.Combobox(row_frame, textvariable=tab_group_var,
-                                               values=all_tab_groups, width=12) # Not readonly, allows new input
-            tab_group_combobox.grid(row=0, column=4, padx=5, sticky='w')
+            tab_group_combobox = ttk.Combobox(row_frame, textvariable=tab_group_var, values=all_tab_groups, width=12)
+            tab_group_combobox.grid(row=0, column=5, padx=5, sticky='w')
             ToolTip(tab_group_combobox, "Assign this button to a tab group. You can type a new group name or select an existing one.")
 
-            self.custom_button_widgets.append( (text_entry, event_entry, txt_source_var, tab_group_var) )
+            self.custom_button_widgets.append( (text_entry, event_entry, event_code_var, txt_source_var, tab_group_var) )
 
     def create_monitored_folders_tab(self): # Renamed
         tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="Monitored Folders")
@@ -3031,7 +3435,7 @@ class SettingsWindow:
 
     def add_folder_header(self, parent):
         header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
-        header_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        header_frame.grid(row=0, column=0, sticky="w", pady=(0, 5))
         
         # Define column weights and sticky for the header to match row layout
         # Col 0: Folder Type - fixed width
@@ -3117,7 +3521,8 @@ class SettingsWindow:
         row_index = len(self.folder_row_widgets) + 1; style_name = f"Row{row_index % 2}.TFrame"
         try: self.style.configure(style_name)
         except tk.TclError: bg = "#ffffff" if row_index % 2 == 0 else "#f5f5f5"; self.style.configure(style_name, background=bg)
-        row_frame = ttk.Frame(self.scrollable_frame, style=style_name, padding=(0, 2)); row_frame.grid(row=row_index, column=0, sticky="ew", pady=0); 
+        row_frame = ttk.Frame(self.scrollable_frame, style=style_name, padding=(0, 2))
+        row_frame.grid(row=row_index, column=0, sticky="w", pady=0); 
         
         # Add columnconfigure to each row frame to match the header
         row_frame.grid_columnconfigure(0, weight=0) # Folder Type (fixed width)
@@ -3152,85 +3557,6 @@ class SettingsWindow:
         self.scrollable_frame.update_idletasks()
         self.folder_canvas.configure(scrollregion=self.folder_canvas.bbox("all"))
 
-    def create_button_colors_tab(self): # New tab for all button colors
-        tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(tab, text="Button Colors")
-        self.pastel_colors = ["#FFB3BA", "#FFDFBA", "#FFFFBA", "#BAFFC9", "#BAE1FF", "#E0BBE4", "#FFC8A2", "#D4A5A5", "#A2D4AB", "#A2C4D4"]
-
-        canvas = tk.Canvas(tab, borderwidth=0, background=self.style.lookup("TFrame", "background"))
-        scrollbar = ttk.Scrollbar(tab, orient="vertical", command=canvas.yview)
-        self.color_scrollable_frame = ttk.Frame(canvas)
-        self.color_scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=self.color_scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.pack(side="left", fill="both", expand=True, padx=(0,0), pady=0)
-        scrollbar.pack(side="right", fill="y", padx=(0,0), pady=0)
-
-        # Headers for color tab
-        header_frame = ttk.Frame(self.color_scrollable_frame, style="Header.TFrame", padding=(5,3))
-        header_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
-        # Ensure consistent column configurations with the rows below
-        header_frame.grid_columnconfigure(0, weight=0) # Button Name (fixed width)
-        header_frame.grid_columnconfigure(1, weight=1) # Button/Row Color (expands)
-
-        ttk.Label(header_frame, text="Button Name", font=("Arial", 10, "bold"), width=20, anchor='w').grid(row=0, column=0, padx=5, sticky='w')
-        ttk.Label(header_frame, text="Button/Row Color", font=("Arial", 10, "bold"), width=30, anchor='w').grid(row=0, column=1, padx=5, sticky='w')
-
-        self.all_button_color_widgets = {} # Stores (StringVar, Label) for all buttons
-
-        # Add standard button color rows
-        standard_buttons_to_color = ["Log on", "Log off", "Event", "SVP", "New Day"]
-        for i, btn_name in enumerate(standard_buttons_to_color):
-            self._add_color_row(self.color_scrollable_frame, i + 1, btn_name, is_custom=False)
-        
-        
-
-    def _add_color_row(self, parent_frame, row_index, btn_name, is_custom=False):
-        """Helper to create a single row for color setting."""
-        style_name = f"Row{row_index % 2}.TFrame"
-        row_f = ttk.Frame(parent_frame, style=style_name, padding=(0, 2))
-        row_f.grid(row=row_index, column=0, sticky='ew', pady=0)
-        
-        # Configure columns for this row frame to match the header
-        row_f.grid_columnconfigure(0, weight=0) # Button Name (fixed width)
-        row_f.grid_columnconfigure(1, weight=1) # Color widgets frame (expands)
-
-
-        label_style = style_name.replace("Frame", "Label")
-        try: self.style.configure(label_style, background=self.style.lookup(style_name, 'background'))
-        except Exception: pass
-
-        ttk.Label(row_f, text=f"{btn_name}:", width=20, style=label_style, anchor='w').grid(row=0, column=0, padx=(5,0), sticky='w')
-
-        color_widget_frame = ttk.Frame(row_f, style=style_name)
-        color_widget_frame.grid(row=0, column=1, padx=5, sticky='ew') 
-
-        initial_color = self.parent_gui.button_colors.get(btn_name, (None, None))[1]
-        selected_color_var = tk.StringVar(value=initial_color if initial_color else "")
-
-        color_display_label = tk.Label(color_widget_frame, width=4, relief="solid", borderwidth=1)
-        color_display_label.pack(side="left", padx=(0, 5))
-        try: color_display_label.config(background=initial_color if initial_color else 'SystemButtonFace')
-        except tk.TclError: color_display_label.config(background='SystemButtonFace')
-
-        clear_btn = ttk.Button(color_widget_frame, text="X", width=2, style="Toolbutton",
-                                 command=lambda v=selected_color_var, l=color_display_label: self.parent_gui._set_color_on_widget(v, l, None, self.master))
-        clear_btn.pack(side="left", padx=1); ToolTip(clear_btn, f"Clear color for {btn_name}.")
-
-        presets_frame = ttk.Frame(color_widget_frame, style=style_name)
-        presets_frame.pack(side="left", padx=(2, 2))
-        for p_color in self.pastel_colors[:5]:
-            try:
-                b = tk.Button(presets_frame, bg=p_color, width=1, height=1, relief="raised", bd=1,
-                                      command=lambda c=p_color, v=selected_color_var, l=color_display_label: self.parent_gui._set_color_on_widget(v, l, c, self.master))
-                b.pack(side=tk.LEFT, padx=1)
-            except tk.TclError: pass
-
-        choose_btn = ttk.Button(color_widget_frame, text="...", width=3, style="Toolbutton",
-                                      command=lambda v=selected_color_var, l=color_display_label, n=btn_name: self.parent_gui._choose_color_dialog(v, l, self.master, n))
-        choose_btn.pack(side="left", padx=1); ToolTip(choose_btn, f"Choose a custom color for {btn_name}.")
-
-        self.all_button_color_widgets[btn_name] = (selected_color_var, color_display_label)
 
 
     def create_sqlite_tab(self):
@@ -3440,17 +3766,24 @@ class SettingsWindow:
 
         parent_custom_configs = []
         all_new_tab_groups = set() # Collect all tab groups
-        for i, (text_widget, event_widget, txt_source_var, tab_group_var) in enumerate(self.custom_button_widgets): # Unpack new var
-            text = text_widget.get().strip();
-            event_text = event_widget.get().strip();
-            txt_source_key = txt_source_var.get();
-            tab_group = tab_group_var.get().strip() or "Main" # **MODIFIED:** Get tab group
+        for i, (text_widget, event_widget, event_code_var, txt_source_var, tab_group_var) in enumerate(self.custom_button_widgets): # Unpack new var
+            text = text_widget.get().strip()
+            event_text = event_widget.get().strip()
+            event_code = event_code_var.get() # Get event code
+            txt_source_key = txt_source_var.get()
+            tab_group = tab_group_var.get().strip() or "Main"
 
-            default_text = f"Custom {i + 1}";
-            final_text = text if text else default_text;
+            default_text = f"Custom {i + 1}"
+            final_text = text if text else default_text
             final_event_text = event_text if event_text else f"{final_text} Triggered"
 
-            parent_custom_configs.append({"text": final_text, "event_text": final_event_text, "txt_source_key": txt_source_key, "tab_group": tab_group}) # Add tab_group
+            parent_custom_configs.append({
+                "text": final_text, 
+                "event_text": final_event_text, 
+                "event_code": event_code, # Add event_code to saved config
+                "txt_source_key": txt_source_key, 
+                "tab_group": tab_group
+            })
             all_new_tab_groups.add(tab_group) # Add to set of new tab groups
 
         self.parent_gui.num_custom_buttons = len(parent_custom_configs)
@@ -3481,6 +3814,7 @@ class SettingsWindow:
 
     def load_settings(self):
         self.log_file_entry.delete(0, tk.END)
+        self.populate_event_codes_tree()
         self.log_file_entry.insert(0, self.parent_gui.log_file_path or "")
         
         self.txt_folder_entry_main.delete(0, tk.END)
