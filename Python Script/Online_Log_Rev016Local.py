@@ -2880,8 +2880,6 @@ class DataLoggerGUI:
 
 # --- Settings Window Class (MODIFIED) ---
 class SettingsWindow:
-    # In class SettingsWindow:
-# REPLACE the entire __init__ method with this one.
 
     def __init__(self, master, parent_gui):
         self.master = master
@@ -3139,9 +3137,9 @@ class SettingsWindow:
 
     def create_txt_column_mapping_tab(self):
         tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(tab, text="TXT Data Columns")
+        self.notebook.add(tab, text="Data Columns")
         
-        ttk.Label(tab, text="Map fields found in TXT files to your desired Excel/Database column names. Check 'Skip' to ignore a field entirely. Click on a row to select it, then use the Move Up/Down buttons to reorder.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
+        ttk.Label(tab, text="Map header found in TXT files to your desired Excel and Database column names. Check 'Skip' to ignore a field entirely. Click on a row to select it, then use the Move Up/Down buttons to reorder.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
 
         # Control buttons for adding/removing/reordering fields
         controls_frame = ttk.Frame(tab)
@@ -3254,49 +3252,60 @@ class SettingsWindow:
         self.parent_gui.update_status("Preview cleared.")
 
     def add_txt_field_header(self, parent):
-        header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
-        header_frame.grid(row=0, column=0, sticky="w", pady=(0, 5))
+        """Adds a header row to the TXT field mapping section."""
         
-        # --- MODIFIED: Added Preview Data column ---
-        header_frame.grid_columnconfigure(0, weight=1) # TXT Field Name
-        header_frame.grid_columnconfigure(1, weight=1) # Target Column
-        header_frame.grid_columnconfigure(2, weight=1) # Preview Data (NEW)
-        header_frame.grid_columnconfigure(3, weight=0) # Skip
-        header_frame.grid_columnconfigure(4, weight=0) # Actions
+        # Apply column configuration to the single, shared parent frame
+        parent.grid_columnconfigure(0, weight=2, minsize=150) # TXT Field Name
+        parent.grid_columnconfigure(1, weight=2, minsize=150) # Target Excel Column
+        parent.grid_columnconfigure(2, weight=2, minsize=150) # Target DB Column
+        parent.grid_columnconfigure(3, weight=2, minsize=150) # Preview Data
+        parent.grid_columnconfigure(4, weight=0, minsize=50)  # Skip
+        parent.grid_columnconfigure(5, weight=0, minsize=80)  # Actions
 
-        ttk.Label(header_frame, text="TXT Field (Name / Index)", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=5, sticky='w')
-        ttk.Label(header_frame, text="Target Excel/DB Column Name", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=5, sticky='w')
-        ttk.Label(header_frame, text="Preview Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=5, sticky='w') # NEW
-        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=5, sticky='w')
-        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=5, sticky='w')
+        header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
+        header_frame.grid(row=0, column=0, columnspan=8, sticky="ew") # Span all columns
+
+        # Place labels inside the header_frame, but they will align because the parent of header_frame has the config
+        ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=8, sticky='w')
+        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=6, sticky='w')
+        ttk.Label(header_frame, text="DB Column", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
+
+        # Also apply the same column configure to the header_frame itself so its internal labels space out correctly
+        for i in range(6):
+            header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0))
+            header_frame.grid_columnconfigure(i, minsize=parent.grid_columnconfigure(i).get('minsize', 0))
 
     def _select_txt_row(self, index):
-        """Highlights the selected row and updates the selected index."""
+        """Highlights the selected row by changing the background of all its widgets."""
+        # First, deselect the previously selected row
         if self.selected_txt_row_index != -1 and self.selected_txt_row_index < len(self.txt_field_row_widgets):
-            # Deselect previous row
             prev_row_info = self.txt_field_row_widgets[self.selected_txt_row_index]
-            prev_row_frame = prev_row_info["row_frame"]
-            original_style = f"Row{self.selected_txt_row_index % 2}.TFrame"
-            prev_row_frame.config(style=original_style)
-            # Re-apply styles to child widgets if they were overridden
-            for child in prev_row_frame.winfo_children():
-                if isinstance(child, ttk.Label):
-                    child.config(style=original_style.replace("Frame", "Label"))
-                elif isinstance(child, ttk.Checkbutton):
-                    child.config(style=original_style.replace("Frame", "Checkbutton"))
+            original_bg = "#f5f5f5" if self.selected_txt_row_index % 2 else "#ffffff"
+            for widget in prev_row_info.get("all_widgets", []):
+                try:
+                    # For ttk widgets, changing style is preferred but complex. Direct config is simpler.
+                    if isinstance(widget, (ttk.Entry, ttk.Label, ttk.Checkbutton)):
+                        widget.configure(style=f"Row{self.selected_txt_row_index % 2}.T{type(widget).__name__}")
+                    else: # Fallback for non-ttk or custom widgets
+                        widget.configure(background=original_bg)
+                except tk.TclError:
+                    pass # Widget might be gone
 
-
+        # Now, select the new row
         self.selected_txt_row_index = index
         if index != -1 and index < len(self.txt_field_row_widgets):
-            # Select current row
             current_row_info = self.txt_field_row_widgets[index]
-            current_row_frame = current_row_info["row_frame"]
-            current_row_frame.config(style="Selected.TFrame")
-            for child in current_row_frame.winfo_children():
-                if isinstance(child, ttk.Label):
-                    child.config(style="Selected.TLabel") # Apply a specific style for selected labels
-                elif isinstance(child, ttk.Checkbutton):
-                    child.config(style="Selected.TCheckbutton")
+            selection_color = "#ADD8E6" # Light blue
+            for widget in current_row_info.get("all_widgets", []):
+                try:
+                    # For ttk widgets, it's best to configure a style for selection
+                    # but for simplicity here we can try direct configuration
+                    widget.configure(style=f"Selected.T{type(widget).__name__}")
+                except tk.TclError:
+                    pass # Widget might be gone or style doesn't apply
 
         self._update_txt_move_buttons_state()
 
@@ -3313,24 +3322,32 @@ class SettingsWindow:
     def move_selected_txt_field(self, direction):
         """Moves the selected TXT field up or down."""
         current_index = self.selected_txt_row_index
+        
+        # Add validation guard clauses at the beginning ---
         if current_index == -1:
             messagebox.showinfo("No Selection", "Please select a row to move.", parent=self.master)
             return
 
-        if direction == "up":
-            if current_index > 0:
-                self.parent_gui.txt_field_columns_config[current_index], self.parent_gui.txt_field_columns_config[current_index - 1] = \
-                    self.parent_gui.txt_field_columns_config[current_index - 1], self.parent_gui.txt_field_columns_config[current_index]
-                self.selected_txt_row_index -= 1 # Update selected index
-                self.recreate_txt_field_rows(reselect_index=self.selected_txt_row_index)
-                self.parent_gui.update_status(f"Moved field '{self.parent_gui.txt_field_columns_config[self.selected_txt_row_index]['field']}' up.")
-        elif direction == "down":
-            if current_index < len(self.parent_gui.txt_field_columns_config) - 1:
-                self.parent_gui.txt_field_columns_config[current_index], self.parent_gui.txt_field_columns_config[current_index + 1] = \
-                    self.parent_gui.txt_field_columns_config[current_index + 1], self.parent_gui.txt_field_columns_config[current_index]
-                self.selected_txt_row_index += 1 # Update selected index
-                self.recreate_txt_field_rows(reselect_index=self.selected_txt_row_index)
-                self.parent_gui.update_status(f"Moved field '{self.parent_gui.txt_field_columns_config[self.selected_txt_row_index]['field']}' down.")
+        total_items = len(self.parent_gui.txt_field_columns_config)
+
+        # Now, perform the move only if the operation is valid
+        if direction == "up" and current_index > 0:
+            # Swap with the item above
+            self.parent_gui.txt_field_columns_config[current_index], self.parent_gui.txt_field_columns_config[current_index - 1] = \
+                self.parent_gui.txt_field_columns_config[current_index - 1], self.parent_gui.txt_field_columns_config[current_index]
+            
+            self.selected_txt_row_index -= 1
+            self.recreate_txt_field_rows(reselect_index=self.selected_txt_row_index)
+            self.parent_gui.update_status(f"Moved field up.")
+
+        elif direction == "down" and current_index < total_items - 1:
+            # Swap with the item below
+            self.parent_gui.txt_field_columns_config[current_index], self.parent_gui.txt_field_columns_config[current_index + 1] = \
+                self.parent_gui.txt_field_columns_config[current_index + 1], self.parent_gui.txt_field_columns_config[current_index]
+            
+            self.selected_txt_row_index += 1
+            self.recreate_txt_field_rows(reselect_index=self.selected_txt_row_index)
+            self.parent_gui.update_status(f"Moved field down.")
 
 
     def add_txt_field_row(self):
@@ -3349,117 +3366,116 @@ class SettingsWindow:
         self.parent_gui.update_status(f"Added new TXT field '{new_field_name}'.")
 
     def remove_txt_field_row(self, index_to_remove):
+        """Removes a TXT field row by index."""
+        # Before doing anything, check if the index is valid for the CURRENT list size.
+        if not (0 <= index_to_remove < len(self.parent_gui.txt_field_columns_config)):
+            print(f"Warning: remove_txt_field_row called with invalid index {index_to_remove}. Ignoring.")
+            return
+
+        # The rest of the function can now proceed safely
         if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove field '{self.parent_gui.txt_field_columns_config[index_to_remove]['field']}'?", parent=self.master):
             del self.parent_gui.txt_field_columns_config[index_to_remove]
-            # Adjust selected index if the removed row was before it or was the selected one
             if self.selected_txt_row_index == index_to_remove:
-                self.selected_txt_row_index = -1 # No longer selected
+                self.selected_txt_row_index = -1
             elif self.selected_txt_row_index > index_to_remove:
                 self.selected_txt_row_index -= 1
 
-            self.recreate_txt_field_rows(reselect_index=self.selected_txt_row_index) # Redraw all rows
+            self.recreate_txt_field_rows(reselect_index=self.selected_txt_row_index)
             self.parent_gui.update_status("TXT field removed.")
 
 
     def recreate_txt_field_rows(self, reselect_index=None):
         # Clear existing widgets except the header
-        for widget_info in self.txt_field_row_widgets:
-            if "row_frame" in widget_info and widget_info["row_frame"].winfo_exists():
-                widget_info["row_frame"].destroy()
+        for widget in self.txt_fields_scrollable_frame.winfo_children():
+            # The header is at row 0. We only want to destroy the data rows (row > 0).
+            if int(widget.grid_info()["row"]) > 0:
+                widget.destroy()
         self.txt_field_row_widgets.clear()
 
         # Define the set of default fields that should not be editable as 'TXT Field' or removable
         default_fixed_fields = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code"}
 
-        # Recreate rows based on the current self.parent_gui.txt_field_columns_config
+        # Recreate rows based on the current configuration
         for i, config in enumerate(self.parent_gui.txt_field_columns_config):
-            row_index = i + 1 # +1 because of the header row
+            # Each data row starts from grid row 1 (header is at row 0)
+            grid_row_index = i + 1 
+
+            # All widgets are placed directly into self.txt_fields_scrollable_frame ---
+            parent_frame = self.txt_fields_scrollable_frame
             
-            # Determine initial style based on row index and reselect_index
-            if reselect_index is not None and i == reselect_index:
-                row_style = "Selected.TFrame"
-                label_style = "Selected.TLabel"
-                checkbox_style = "Selected.TCheckbutton"
-                self.selected_txt_row_index = i # Ensure internal state is updated for reselection
-            else:
-                row_style = f"Row{i % 2}.TFrame"
-                label_style = row_style.replace("Frame", "Label")
-                checkbox_style = row_style.replace("Frame", "Checkbutton")
-                try: self.style.configure(label_style, background=self.style.lookup(row_style, 'background'))
-                except Exception: pass
-                try: self.style.configure(checkbox_style, background=self.style.lookup(row_style, 'background'))
-                except Exception: pass
+            # Create a list to hold all widgets for this row for easy selection/styling
+            widgets_in_row = []
 
-            row_frame = ttk.Frame(self.txt_fields_scrollable_frame, style=row_style, padding=(0, 2))
-            row_frame.grid(row=row_index, column=0, sticky="w", pady=0)
-            
-            # --- MODIFIED: Added Preview Data column ---
-            row_frame.grid_columnconfigure(0, weight=1) # TXT Field Name
-            row_frame.grid_columnconfigure(1, weight=1) # Target Column
-            row_frame.grid_columnconfigure(2, weight=1) # Preview Data (NEW)
-            row_frame.grid_columnconfigure(3, weight=0) # Skip
-            row_frame.grid_columnconfigure(4, weight=0) # Actions
-
-            # Bind click event to all elements in the row for selection
-            click_handler = lambda e, idx=i: self._select_txt_row(idx)
-            row_frame.bind("<Button-1>", click_handler)
-
-            # TXT Field Label/Entry (fixed or editable)
+            # TXT Field Label/Entry
+            current_field_entry_widget = None
             if config["field"] in default_fixed_fields:
-                field_label = ttk.Label(row_frame, text=f"{config['field']}:", anchor='w', style=label_style)
-                field_label.grid(row=0, column=0, padx=5, sticky='ew')
-                field_label.bind("<Button-1>", click_handler)
-                current_field_entry_widget = None
-            else: # Allow custom fields to be edited
-                field_entry = ttk.Entry(row_frame)
-                field_entry.insert(0, config["field"])
-                field_entry.grid(row=0, column=0, padx=5, sticky='ew')
-                ToolTip(field_entry, "Enter the exact name of the field as it appears in the TXT file. E.g., 'Depth'.")
-                current_field_entry_widget = field_entry
+                field_widget = ttk.Label(parent_frame, text=f"{config['field']}:", anchor='w')
+                field_widget.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
+            else:
+                field_widget = ttk.Entry(parent_frame)
+                field_widget.insert(0, config["field"])
+                field_widget.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
+                ToolTip(field_widget, "Enter the exact name of the field as it appears in the TXT file.")
+                current_field_entry_widget = field_widget
+            widgets_in_row.append(field_widget)
 
-            # Target Excel/DB Column Name
-            column_entry = ttk.Entry(row_frame)
-            column_entry.insert(0, config.get("column_name", config["field"])) # Default to field name if not set
-            column_entry.grid(row=0, column=1, padx=5, sticky="ew")
-            ToolTip(column_entry, f"Enter the exact column name in your Excel/DB where '{config['field']}' data should be written.")
+            # Preview Data Label
+            preview_label = ttk.Label(parent_frame, text="", anchor='w', foreground="blue")
+            preview_label.grid(row=grid_row_index, column=1, padx=5, pady=2, sticky='ew')
+            widgets_in_row.append(preview_label)
+
+            # Target Excel Column Name
+            column_entry = ttk.Entry(parent_frame)
+            column_entry.insert(0, config.get("column_name", config["field"]))
+            column_entry.grid(row=grid_row_index, column=2, padx=5, pady=2, sticky="ew")
+            ToolTip(column_entry, "Enter the column name for the Excel Log.")
+            widgets_in_row.append(column_entry)
+
+
             
-            # --- NEW: Preview Data Label ---
-            preview_label = ttk.Label(row_frame, text="", style=label_style, anchor='w', foreground="blue")
-            preview_label.grid(row=0, column=2, padx=5, sticky='ew')
-            preview_label.bind("<Button-1>", click_handler)
+            # Target DB Column Name
+            db_column_entry = ttk.Entry(parent_frame)
+            db_column_entry.insert(0, config.get("db_column_name", ""))
+            db_column_entry.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky="ew")
+            ToolTip(db_column_entry, "Enter the target column name for the SQLite Database.")
+            widgets_in_row.append(db_column_entry)
+
             
             # Skip Checkbox
             skip_var = tk.BooleanVar(value=config.get("skip", False))
-            skip_checkbox = ttk.Checkbutton(row_frame, variable=skip_var, style=checkbox_style)
-            skip_checkbox.grid(row=0, column=3, padx=5, sticky='w')
-            ToolTip(skip_checkbox, f"Check this box to ignore the '{config['field']}' field entirely when logging TXT data.")
+            skip_checkbox = ttk.Checkbutton(parent_frame, variable=skip_var)
+            skip_checkbox.grid(row=grid_row_index, column=4, padx=(15,5), pady=2, sticky='w')
+            widgets_in_row.append(skip_checkbox)
 
             # Remove Button
-            remove_button_frame = ttk.Frame(row_frame, style=row_style)
-            remove_button_frame.grid(row=0, column=4, padx=5, sticky='w')
-            remove_btn = ttk.Button(remove_button_frame, text="Remove", width=8, style="Toolbutton",
+            remove_btn = ttk.Button(parent_frame, text="Remove", width=8, style="Toolbutton",
                                      command=lambda idx=i: self.remove_txt_field_row(idx))
             if config["field"] in default_fixed_fields:
-                remove_btn.config(state=tk.DISABLED) # Disable removing default fields
-            remove_btn.pack(side=tk.LEFT, padx=1)
-            ToolTip(remove_btn, "Remove this custom field.")
+                remove_btn.config(state=tk.DISABLED)
+            remove_btn.grid(row=grid_row_index, column=5, padx=5, pady=2, sticky='w')
+            widgets_in_row.append(remove_btn)
 
-            # Store references to widgets for later retrieval
+            # Bind click event to all widgets in the row for selection
+            click_handler = lambda e, idx=i: self._select_txt_row(idx)
+            for widget in widgets_in_row:
+                widget.bind("<Button-1>", click_handler)
+
+            # Store references
             self.txt_field_row_widgets.append({
                 "field_entry_widget": current_field_entry_widget,
                 "column_entry": column_entry,
+                "db_column_entry": db_column_entry,
                 "skip_var": skip_var,
-                "preview_label": preview_label, # NEW
-                "row_frame": row_frame
+                "preview_label": preview_label,
+                "all_widgets": widgets_in_row # Store list of all widgets in the row
             })
         
-        # After recreating all rows, ensure the selection state is correct
-        if reselect_index is None or not (0 <= reselect_index < len(self.parent_gui.txt_field_columns_config)):
-            self.selected_txt_row_index = -1 
-        if self.selected_txt_row_index != -1:
-            pass 
+        # After recreating, re-apply selection highlighting if needed
+        if reselect_index is not None:
+             self._select_txt_row(reselect_index)
+        else:
+            self._select_txt_row(-1) # Deselect all
 
-        self._update_txt_move_buttons_state() # Update button states
         self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
 
 
