@@ -379,12 +379,16 @@ class DataLoggerGUI:
         ]
         self.custom_buttons = []
         self.button_colors = {
-            "Log on": (None, "#90EE90"), "Log off": (None, "#FFB6C1"),
-            "Event": (None, "#FFFFE0"), "SVP": (None, "#ADD8E6"),
-            "New Day": (None, "#FFFF99"), "Hourly KP Log": (None, "#FFFF99")
+            "Log on": ("#90EE90", None),  # Format: (background_color, font_color)
+            "Log off": ("#FFB6C1", None),
+            "Event": ("#FFFFE0", None),
+            "SVP": ("#ADD8E6", None),
+            "New Day": ("#FFFF99", None),
+            "Hourly KP Log": ("#FFFF99", None)
         }
-        # Initialize custom button colors to None
-        for i in range(self.MAX_CUSTOM_BUTTONS): self.button_colors[f"Custom {i+1}"] = (None, None)
+        # Initialize custom button colors to None for both background and font
+        for i in range(self.MAX_CUSTOM_BUTTONS):
+            self.button_colors[f"Custom {i+1}"] = (None, None)
         
         # Define the three tab groups explicitly
         self.custom_button_tab_groups = ["Main"]
@@ -434,7 +438,7 @@ class DataLoggerGUI:
         for frame in [self.custom_buttons_frame, self.general_buttons_frame, self.config_frame]:
             for widget in frame.winfo_children():
                 widget.destroy()
-        self.custom_buttons = []
+        self.custom_buttons = [] # Reset custom_buttons list
 
         # --- Section 1: Custom Events (Left Side) ---
         custom_lf = ttk.LabelFrame(self.custom_buttons_frame, text="Custom Events")
@@ -469,18 +473,34 @@ class DataLoggerGUI:
                     event_desc = config.get("event_text", "Triggered")
                     txt_source = config.get("txt_source_key", "None")
 
-                    _, user_color = self.button_colors.get(button_text, (None, None))
-                    bg_color = user_color if user_color else self.source_based_colors.get(txt_source)
-                    style_name = f"{button_text.replace(' ', '')}.TButton"
-                    final_style = "TButton"
-                    if bg_color:
-                        self.style.configure(style_name, background=bg_color)
-                        final_style = style_name
+                    # Retrieve configured background and font colors for this specific button
+                    # Fallback to source_based_colors for background if button-specific not set
+                    bg_color_hex, font_color_hex = self.button_colors.get(button_text, (None, None))
+                    
+                    # If button-specific background is not set, try source_based_colors
+                    if not bg_color_hex:
+                        bg_color_hex = self.source_based_colors.get(txt_source)
+                    
+                    # Create a unique style name for this button
+                    # Use a clean version of button_text for the style name
+                    cleaned_button_text = ''.join(e for e in button_text if e.isalnum()) 
+                    style_name = f"CustomBtn_{cleaned_button_text}.TButton"
+                    
+                    # Configure the specific style for this button
+                    style_config = {}
+                    if bg_color_hex:
+                        style_config['background'] = bg_color_hex
+                    if font_color_hex:
+                        style_config['foreground'] = font_color_hex # This is where font color is applied
 
-                    button = ttk.Button(tab_frame, text=button_text, style=final_style)
+                    # Configure or re-configure the style based on collected colors
+                    # Ensure font is always set, and padding is maintained
+                    self.style.configure(style_name, font=("Arial", 10, "bold"), padding=4, **style_config)
+                    
+                    button = ttk.Button(tab_frame, text=button_text, style=style_name)
+                    # Corrected: lambda function for command
                     button.config(command=lambda c=config, b=button: self.log_custom_event(c, b))
                     
-                    # New layout: 5 columns, 2 rows
                     row = i % 2
                     col = i // 2
                     button.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
@@ -501,20 +521,25 @@ class DataLoggerGUI:
 
         # --- Helper function to create styled main buttons ---
         def create_main_button(parent, text, command_func, tooltip_text, grid_row, grid_col):
-            # 1. Get the configured color
-            _, color_hex = self.button_colors.get(text, (None, None))
+            # 1. Get the configured colors (background, font)
+            bg_color_hex, font_color_hex = self.button_colors.get(text, (None, None))
             
             # 2. Create a unique style for this button
-            style_name = f"MainBtn.{text.replace(' ', '')}.TButton"
-            final_style = "TButton"
+            cleaned_text = ''.join(e for e in text if e.isalnum()) 
+            style_name = f"MainBtn_{cleaned_text}.TButton"
             
-            # 3. Configure the style with the color, if one is set
-            if color_hex:
-                self.style.configure(style_name, background=color_hex, font=("Arial", 10, "bold"), padding=4)
-                final_style = style_name
+            # 3. Configure the style with the colors, if they are set
+            style_config = {}
+            if bg_color_hex:
+                style_config['background'] = bg_color_hex
+            if font_color_hex:
+                style_config['foreground'] = font_color_hex
+            
+            # Ensure font is always set, and padding is maintained
+            self.style.configure(style_name, font=("Arial", 10, "bold"), padding=4, **style_config)
             
             # 4. Create the button with the dynamic style
-            btn = ttk.Button(parent, text=text, style=final_style, command=lambda: command_func(btn))
+            btn = ttk.Button(parent, text=text, style=style_name, command=command_func) # Command is now correctly passed
             btn.grid(row=grid_row, column=grid_col, padx=4, pady=4, sticky="nsew")
             
             # 5. Add right-click menu and tooltip
@@ -523,23 +548,12 @@ class DataLoggerGUI:
             return btn
 
         # --- Create the buttons using the helper function ---
-        # Column 1
-        create_main_button(general_lf, "Log on", 
-                           lambda btn: self.log_event("Log on", btn, "Main TXT"), 
-                           "Record a 'Log on' marker.", 0, 0)
-                           
-        create_main_button(general_lf, "Log off", 
-                           lambda btn: self.log_event("Log off", btn, "Main TXT"),
-                           "Record a 'Log off' marker.", 1, 0)
-
-        # Column 2
-        create_main_button(general_lf, "Event", 
-                           lambda btn: self.log_event("Event", btn, "Main TXT"), 
-                           "Record data from the Main TXT source.", 0, 1)
-                           
-        create_main_button(general_lf, "SVP", 
-                           lambda btn: self.apply_svp(btn, "Main TXT"), 
-                           "Record data and insert latest SVP filename.", 1, 1)
+        # The lambda for the command needs to wrap the function call to ensure the button itself is passed
+        # and that the logging function is called *when the button is clicked*, not when it's created.
+        create_main_button(general_lf, "Log on", lambda b=None: self.log_event("Log on", b, "Main TXT"), "Record a 'Log on' marker.", 0, 0)
+        create_main_button(general_lf, "Log off", lambda b=None: self.log_event("Log off", b, "Main TXT"), "Record a 'Log off' marker.", 1, 0)
+        create_main_button(general_lf, "Event", lambda b=None: self.log_event("Event", b, "Main TXT"), "Record data from the Main TXT source.", 0, 1)
+        create_main_button(general_lf, "SVP", lambda b=None: self.apply_svp(b, "Main TXT"), "Record data and insert latest SVP filename.", 1, 1)
 
 
         # --- Section 3: Configuration Buttons (Right Side) ---
@@ -1224,10 +1238,15 @@ class DataLoggerGUI:
 
                 if row_data:
                     # Get the color for the row based on the event type
+                    # We store (background_color, font_color)
                     color_tuple = self.button_colors.get(event_type, (None, None))
-                    row_color_for_excel = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
+                    # Only pass the background color to save_to_excel
+                    row_color_for_excel = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
+                    
+                    # Pass font_color to save_to_excel
+                    font_color_for_excel = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
 
-                    excel_data = {k: v for k, v in row_data.items() if k != 'EventType'} # Copy row_data dictionary excluding 'EventType' because in Excel we only need the event text, not the type itself.
+                    excel_data = {k: v for k, v in row_data.items() if k != 'EventType'}
 
                     try:
                         print(f"Attempting to save to Excel. Log file: {self.log_file_path}")  # DIAGNOSTIC
@@ -1236,15 +1255,16 @@ class DataLoggerGUI:
                         elif not os.path.exists(self.log_file_path):
                             excel_save_exception = FileNotFoundError("Excel file missing")
                         else:
-                            # Save the data to Excel
-                            self.save_to_excel(excel_data, row_color=row_color_for_excel)
+                            # Pass both background and font color
+                            self.save_to_excel(excel_data, row_color=row_color_for_excel, font_color=font_color_for_excel)
                             excel_success = True
                             print("Excel save: SUCCESS")  # DIAGNOSTIC
                     except Exception as e_excel:
                         excel_save_exception = e_excel
                         traceback.print_exc()
                         print(f"Excel save: FAILED with error: {e_excel}")  # DIAGNOSTIC
-                        self.master.after(0, lambda e=e_excel: messagebox.showerror("Excel Error", f"Failed to save to Excel:\n{e}", parent=self.master))
+                        self.master.after(0, lambda e=e_excel: messagebox.showerror("Error", f"Failed to save to Excel:\n{e}", parent=self.master))
+
 
                     # Log to SQLite
                     sqlite_logged, sqlite_save_exception_type = self.log_to_sqlite(row_data)
@@ -1449,21 +1469,19 @@ class DataLoggerGUI:
         except FileNotFoundError: return None
         except Exception: return None
 
-    def save_to_excel(self, row_data, row_color=None, next_row=None):
+    def save_to_excel(self, row_data, row_color=None, font_color=None, next_row=None): # Added font_color parameter
         '''Saves the provided row_data to the specified Excel log file.
         Arguments:
         * row_data: A dictionary containing the data to log, where keys are column names and values are the data to insert.
-        * row_color: An optional RGB tuple (R, G, B) to apply as the background color for the row in Excel.
+        * row_color: An optional RGB hex string (e.g., "#RRGGBB") to apply as the background color for the row in Excel.
+        * font_color: An optional RGB hex string (e.g., "#RRGGBB") to apply as the font color for the text in Excel.
         * next_row: The row number where the data should be written. If None, finds the next empty row automatically.
         Returns:
         * None if successful, raises an exception if there is an error.
         '''
-        print(f"Entering save_to_excel. Data: {row_data}") # DIAGNOSTIC
-        
+        print(f"Entering save_to_excel. Data: {row_data}")
         if not self.log_file_path or not os.path.exists(self.log_file_path):
-            error_msg = f"Excel log file path is invalid or file does not exist: {self.log_file_path}"
-            print(error_msg) # DIAGNOSTIC
-            raise FileNotFoundError(error_msg)
+            raise FileNotFoundError("Excel log file path is invalid or file does not exist.")
 
         app = None
         workbook = None
@@ -1475,10 +1493,10 @@ class DataLoggerGUI:
             try:
                 app = xw.apps.active
                 if app is None: raise Exception("No active Excel instance")
-                print("Connected to an existing Excel instance.") # DIAGNOSTIC
+                print("Connected to an existing Excel instance.")
             except Exception:
-                print("No active Excel instance found, creating a new one.") # DIAGNOSTI
-                app = xw.App(visible=False)
+                print("No active Excel instance found, creating a new one.")
+                app = xw.App(visible=False) # Keep it invisible
                 opened_new_app = True
 
             # --- 2. Open the Workbook ---
@@ -1487,63 +1505,49 @@ class DataLoggerGUI:
                 try:
                     if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
                         workbook = wb
-                        print(f"Workbook '{wb.name}' is already open.") # DIAGNOSTIC
+                        print(f"Workbook '{wb.name}' is already open.")
                         break
                 except Exception:
                     continue
             
             if workbook is None:
-                print(f"Opening workbook: '{self.log_file_path}'") # DIAGNOSTIC
+                print(f"Opening workbook: '{self.log_file_path}'")
                 workbook = app.books.open(self.log_file_path, read_only=False)
                 opened_workbook = True
 
             sheet = workbook.sheets[0]
 
             # --- 3. DYNAMIC HEADER SEARCH ---
-            # Define the columns that must be present in the header.
-            required_columns = {'runline', 'kp', 'kp ref.', 'event', 'guid'} # HARDCODED for now, can be made dynamic later
+            required_columns = {'runline', 'kp', 'kp ref.', 'event', 'guid'}
             header_row_index = -1
             header_values = []
             
-            # Search for the header in the first 30 rows (a reasonable limit).
             for i in range(1, 31):
                 row_values = sheet.range(f'A{i}').expand('right').value
-
-                # If the row is completely empty, row_values will be None. Skip it.
                 if row_values is None:
                     continue
-                # Clean the values and convert them to lowercase for robust comparison
                 current_row_headers = {str(h).lower() for h in row_values if h is not None}
-                
-                # Check if the required columns are a subset of the headers in this row.
                 if required_columns.issubset(current_row_headers):
                     header_row_index = i
                     header_values = row_values
-                    print(f"Header found in row: {header_row_index}") # DIAGNOSTIC
+                    print(f"Header found in row: {header_row_index}")
                     break
             
             if header_row_index == -1:
                 raise ValueError("Could not find the header row with required columns in the Excel file.")
 
             # --- 4. COLUMN MAPPING ---
-            # Create a dictionary to map the column name (lowercase) to its column index (position).
             header_map_lower = {str(h).lower(): i + 1 for i, h in enumerate(header_values) if h is not None}
             last_header_col_index = max(header_map_lower.values()) if header_map_lower else 1
 
             # --- 5. FIND NEXT EMPTY ROW ---
             if next_row is None:
-                # Find the last row with data in column A.
-                # The .end('up') method is robust because it searches from the bottom of the sheet upwards.
                 last_row_with_data = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
-                
-                # The next row is the last row with data + 1.
-                # If the last found row is the header, it will start writing right below it.
                 if last_row_with_data < header_row_index:
                     next_row = header_row_index + 1
                 else:
                     next_row = last_row_with_data + 1
-                
-                print(f"Next available row in Excel: {next_row}") # DIAGNOSTIC
+                print(f"Next available row in Excel: {next_row}")
 
             # --- 6. WRITE DATA ---
             written_cols = []
@@ -1553,62 +1557,90 @@ class DataLoggerGUI:
                     col_index = header_map_lower[col_name_lower]
                     try:
                         target_cell = sheet.range(next_row, col_index)
-                        # Ensure GUID is treated as text to prevent scientific notation.
                         if col_name.lower() == 'guid':
                             target_cell.number_format = '@'
                         target_cell.value = value
                         written_cols.append(col_index)
-                        print(f"Wrote '{value}' to cell R{next_row}C{col_index} (Column '{col_name}').") # DIAGNOSTIC
+                        print(f"Wrote '{value}' to cell R{next_row}C{col_index} (Column '{col_name}').")
                     except Exception as e_write:
-                        print(f"Warning: Could not write to column '{col_name}'. Error: {e_write}") # DIAGNOSTIC
+                        print(f"Warning: Could not write to column '{col_name}'. Error: {e_write}")
 
-            # Apply color to the row if specified
+            # Helper function to convert Hex RGB to direct RGB integer (for font color)
+            def hex_rgb_to_direct_int(hex_color_string):
+                if not isinstance(hex_color_string, str) or not hex_color_string.startswith("#") or len(hex_color_string) != 7:
+                    return None
+                try:
+                    # Strip '#' and convert directly to integer (which is RGB)
+                    rgb_value = int(hex_color_string[1:], 16)
+                    print(f"  Font Color Conversion: HEX: {hex_color_string} -> Direct RGB Int: {rgb_value}")
+                    return rgb_value
+                except ValueError:
+                    print(f"  Font Color Conversion: Failed to convert hex string '{hex_color_string}' to integer.")
+                    return None
+
+            # Apply background color to the row if specified
             if row_color and written_cols:
                 try:
+                    # Keep using the direct hex string for background, as you confirmed it works
                     target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
                     target_range.color = row_color
-                    print(f"Applied color {row_color} to row {next_row}.") # DIAGNOSTIC
+                    print(f"Applied background color {row_color} to row {next_row}.")
                 except Exception as e_color:
-                    print(f"Warning: Could not apply color to row. Error: {e_color}") # DIAGNOSTIC
+                    print(f"Warning: Could not apply background color to row. Error: {e_color}")
 
-            # --- 7. SAVE WORKBOOK ---
+            # Apply font color to the row if specified
+            if font_color and written_cols:
+                # For font color, explicitly convert to a direct RGB integer
+                excel_font_color_int = hex_rgb_to_direct_int(font_color)
+                if excel_font_color_int is not None:
+                    try:
+                        target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
+                        target_range.api.Font.Color = excel_font_color_int
+                        print(f"Applied font color {font_color} (Direct RGB: {excel_font_color_int}) to row {next_row}.")
+                    except Exception as e_font_color:
+                        print(f"Warning: Could not apply font color to row. Error: {e_font_color}")
+                else:
+                    print(f"Warning: Skipping invalid font color format: {font_color}")
+
+
+            # --- CRITICAL SAVE OPERATION ---
             try:
-                print("Attempting to save workbook...") # DIAGNOSTIC
+                print("Attempting to save workbook...")
                 workbook.save()
-                print("Workbook saved successfully.") # DIAGNOSTIC
+                print("Workbook saved successfully.")
             except Exception as e_save:
                 traceback.print_exc()
                 error_msg = (
                     "Failed to save the Excel file. This is usually because the file is locked.\n\n"
                     "1. Check Task Manager for any lingering 'EXCEL.EXE' processes and end them.\n"
-                    "2. Ensure you have write permissions for the file.\n\n"
+                    "2. Ensure you have permissions to write to the file.\n\n"
                     f"(Details: {e_save})"
                 )
-                print(f"EXCEL SAVE FAILED: {error_msg}") # DIAGNOSTIC
-                if self.master:
-                    self.master.after(0, lambda: messagebox.showerror("Excel Save Conflict", error_msg, parent=self.master))
+                print(f"Excel SAVE FAILED: {error_msg}")
+                self.master.after(0, lambda: messagebox.showerror("Excel Save Conflict", error_msg, parent=self.master))
                 raise IOError(f"Failed to save Excel workbook: {e_save}")
 
         except Exception as e:
             traceback.print_exc()
-            print(f"Unhandled error in save_to_excel: {e}") # DIAGNOSTIC
+            print(f"Unhandled error in save_to_excel: {e}")
             raise e
         finally:
-            # --- 8. CLEANUP ---
-            print("Executing finally block in save_to_excel.") # DIAGNOSTIC
+            print("Executing finally block in save_to_excel.")
             if workbook is not None and opened_workbook:
                 try:
-                    print("Closing workbook (opened by this script).") # DIAGNOSITC
+                    print("Closing workbook (that was opened by this script).")
                     workbook.close(save_changes=False)
                 except Exception as e_close:
-                    print(f"Error closing workbook: {e_close}") # DIAGNOSTIC
+                    print(f"Error closing workbook: {e_close}")
+                    pass
             if app is not None and opened_new_app:
                 try:
-                    print("Quitting Excel application (started by this script).") # DIAGNOSTIC
+                    print("Quitting Excel application (that was started by this script).")
                     app.quit()
                 except Exception as e_quit:
-                    print(f"Error quitting Excel app: {e_quit}") # DIAGNOSTIC
-            print("Exiting save_to_excel.") # DIAGNOSTIC
+                    print(f"Error quitting Excel app: {e_quit}")
+                    pass
+            print("Exiting save_to_excel.")
 
     def log_to_sqlite(self, row_data):
         '''Logs the provided row_data to the SQLite database using mapping from settings.
@@ -1749,8 +1781,10 @@ class DataLoggerGUI:
         '''Saves the current settings to the JSON file. Cleans up button colors for custom buttons that no longer exist.'''
         print("\n--- Saving Settings ---") # DIAGNOSTIC
         colors_to_save = {}
-        for key, (_, color_hex) in self.button_colors.items():
-            if color_hex: colors_to_save[key] = color_hex
+        for key, (bg_color, font_color) in self.button_colors.items(): # Iterate over (bg_color, font_color) tuples
+            # Save the tuple if at least one color is set
+            if bg_color or font_color:
+                colors_to_save[key] = (bg_color, font_color)
         settings = {
             "log_file_path": self.log_file_path,
             "txt_folder_path": self.txt_folder_path,
@@ -1879,23 +1913,38 @@ class DataLoggerGUI:
 
 
                 loaded_colors = settings.get("button_colors", {})
-                default_colors = {"Log on": (None, "#90EE90"), "Log off": (None, "#FFB6C1"), "Event": (None, "#FFFFE0"), "SVP": (None, "#ADD8E6"), "New Day": (None, "#FFFF99")}
+                default_colors = {
+                    "Log on": ("#90EE90", None),
+                    "Log off": ("#FFB6C1", None),
+                    "Event": ("#FFFFE0", None),
+                    "SVP": ("#ADD8E6", None),
+                    "New Day": ("#FFFF99", None),
+                    "Hourly KP Log": ("#FFFF99", None)
+                        }
+                self.button_colors = default_colors.copy() # Start with defaults
                 self.button_colors = default_colors
                 for config in self.custom_button_configs:
                     btn_text = config.get("text")
-                    if btn_text and btn_text not in self.button_colors: self.button_colors[btn_text] = (None, None)
-                for key, color_hex in loaded_colors.items():
-                    if color_hex: self.button_colors[key] = (None, color_hex)
-                self.sqlite_enabled = settings.get("sqlite_enabled", False)
-                self.sqlite_db_path = settings.get("sqlite_db_path")
-                always_on_top_setting = settings.get("always_on_top", False)
-                self.always_on_top_var.set(always_on_top_setting)
-                self.master.wm_attributes("-topmost", always_on_top_setting)
-                self.sqlite_table = settings.get("sqlite_table", "EventLog")
-                self.always_on_top_var.set(settings.get("always_on_top", True))
-                self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
-                self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
-                
+                    if btn_text and btn_text not in self.button_colors:
+                        self.button_colors[btn_text] = (None, None) # Default to no colors for new custom buttons
+
+                for key, color_value in loaded_colors.items():
+                    if isinstance(color_value, list) and len(color_value) == 2: # Check if it's the new tuple format (JSON loads lists)
+                        self.button_colors[key] = (color_value[0], color_value[1])
+                    elif isinstance(color_value, str): # Handle old format (only background hex string) for backward compatibility
+                        self.button_colors[key] = (color_value, None) # Assume it's a background color, no font color
+                    else:
+                        self.button_colors[key] = (None, None) # Fallback for unknown formats
+                        self.sqlite_enabled = settings.get("sqlite_enabled", False)
+                        self.sqlite_db_path = settings.get("sqlite_db_path")
+                        always_on_top_setting = settings.get("always_on_top", False)
+                        self.always_on_top_var.set(always_on_top_setting)
+                        self.master.wm_attributes("-topmost", always_on_top_setting)
+                        self.sqlite_table = settings.get("sqlite_table", "EventLog")
+                        self.always_on_top_var.set(settings.get("always_on_top", True))
+                        self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
+                        self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
+                    
                 self.update_status("Settings loaded.")
             else:
                 self.update_status("Settings file not found. Using defaults.")
@@ -2247,16 +2296,18 @@ class DataLoggerGUI:
         # --- Get current values ---
         current_event_text = button_config.get("event_text", "")
         current_event_code = button_config.get("event_code", "")
-        current_color = self.button_colors.get(button_name, (None, None))[1]
+        current_bg_color, current_font_color = self.button_colors.get(button_name, (None, None))
         
         # --- Create StringVars ---
         event_text_var = tk.StringVar(value=current_event_text)
         event_code_var = tk.StringVar(value=current_event_code)
-        button_color_var = tk.StringVar(value=current_color if current_color else "")
+        button_bg_color_var = tk.StringVar(value=current_bg_color if current_bg_color else "")
+        button_font_color_var = tk.StringVar(value=current_font_color if current_font_color else "")
         
         # --- UI Elements for the editor ---
         row_idx = 0
-        # Event Text Entry (was missing)
+        
+        # Event Text Entry
         ttk.Label(frame, text="Event Text:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
         event_text_entry = ttk.Entry(frame, textvariable=event_text_var, width=40)
         event_text_entry.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
@@ -2267,30 +2318,52 @@ class DataLoggerGUI:
         ttk.Label(frame, text="Event Code:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
         event_code_options = [""] + sorted(list(self.event_codes.keys()))
         event_code_combobox = ttk.Combobox(frame, textvariable=event_code_var,
-                                           values=event_code_options, state="readonly", width=37)
+                                            values=event_code_options, state="readonly", width=37)
         event_code_combobox.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
         ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
 
         row_idx += 1
-        # Button/Row Color Picker
-        ttk.Label(frame, text="Button/Row Color:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
+        # Button Background Color Picker
+        ttk.Label(frame, text="Button Background:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
         
-        color_widget_frame = ttk.Frame(frame)
-        color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
+        bg_color_widget_frame = ttk.Frame(frame)
+        bg_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
 
-        color_display_label = tk.Label(color_widget_frame, width=4, relief="solid", borderwidth=1,
-                                       background=button_color_var.get() if button_color_var.get() else 'SystemButtonFace')
-        color_display_label.pack(side="left", padx=(0, 5))
+        bg_color_display_label = tk.Label(bg_color_widget_frame, width=4, relief="solid", borderwidth=1,
+                                         background=button_bg_color_var.get() if button_bg_color_var.get() else 'SystemButtonFace')
+        bg_color_display_label.pack(side="left", padx=(0, 5))
 
-        clear_btn = ttk.Button(color_widget_frame, text="X", width=2,
-                               command=lambda: self._set_color_on_widget(button_color_var, color_display_label, None, editor_window))
-        clear_btn.pack(side="left", padx=1)
-        ToolTip(clear_btn, "Clear button/row color.")
+        clear_bg_btn = ttk.Button(bg_color_widget_frame, text="X", width=2,
+                                  command=lambda: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, None, editor_window))
+        clear_bg_btn.pack(side="left", padx=1)
+        ToolTip(clear_bg_btn, "Clear button background color.")
 
-        choose_btn = ttk.Button(color_widget_frame, text="...", width=3,
-                                command=lambda v=button_color_var, l=color_display_label: self._choose_color_dialog(v, l, editor_window, button_name))
-        choose_btn.pack(side="left", padx=1)
-        ToolTip(choose_btn, "Choose a custom color.")
+        choose_bg_btn = ttk.Button(bg_color_widget_frame, text="...", width=3,
+                                  command=lambda v=button_bg_color_var, l=bg_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Background"))
+        choose_bg_btn.pack(side="left", padx=1)
+        ToolTip(choose_bg_btn, "Choose a custom background color.")
+
+        row_idx += 1
+        # Button Font Color Picker
+        ttk.Label(frame, text="Button Font Color:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
+        
+        font_color_widget_frame = ttk.Frame(frame)
+        font_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
+
+        font_color_display_label = tk.Label(font_color_widget_frame, width=4, relief="solid", borderwidth=1,
+                                            background=button_font_color_var.get() if button_font_color_var.get() else 'SystemButtonFace')
+        font_color_display_label.pack(side="left", padx=(0, 5))
+
+        clear_font_btn = ttk.Button(font_color_widget_frame, text="X", width=2,
+                                   command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
+        clear_font_btn.pack(side="left", padx=1)
+        ToolTip(clear_font_btn, "Clear button font color.")
+
+        choose_font_btn = ttk.Button(font_color_widget_frame, text="...", width=3,
+                                    command=lambda v=button_font_color_var, l=font_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Font"))
+        choose_font_btn.pack(side="left", padx=1)
+        ToolTip(choose_font_btn, "Choose a custom font color.")
+
 
         # --- Save and Cancel buttons ---
         row_idx += 1
@@ -2298,20 +2371,21 @@ class DataLoggerGUI:
         button_controls_frame.grid(row=row_idx, column=0, columnspan=2, pady=(15,0), sticky="e")
 
         def save_main_button_changes():
-            # Save the new event text
+            # Save the new event text and code
             self.main_button_configs[button_name]['event_text'] = event_text_var.get()
             self.main_button_configs[button_name]['event_code'] = event_code_var.get()
 
-            # Save the new color
-            new_color_hex = button_color_var.get() if button_color_var.get() else None
-            self.button_colors[button_name] = (None, new_color_hex)
+            # Save the new colors as a tuple
+            new_bg_color_hex = button_bg_color_var.get() if button_bg_color_var.get() else None
+            new_font_color_hex = button_font_color_var.get() if button_font_color_var.get() else None
+            self.button_colors[button_name] = (new_bg_color_hex, new_font_color_hex)
             
             # Persist all settings and redraw the UI
             self.save_settings()
             
-            # --- FIX: Call the comprehensive update function ---
-            self.update_custom_buttons() 
-            
+            # Call the comprehensive update function (which re-creates buttons with new styles)
+            self.update_custom_buttons() # This method name is a bit misleading, it updates all buttons
+
             editor_window.destroy()
 
         ttk.Button(button_controls_frame, text="Save", command=save_main_button_changes, style="Accent.TButton").pack(side="right", padx=5)
@@ -2319,8 +2393,8 @@ class DataLoggerGUI:
 
         editor_window.protocol("WM_DELETE_WINDOW", editor_window.destroy)
         editor_window.wait_window(editor_window)
-        self.custom_inline_editor_window = None     
-
+        self.custom_inline_editor_window = None
+        
     def _add_new_custom_button(self):
         """Adds a new custom button configuration and updates the GUI."""
         if self.num_custom_buttons < self.MAX_CUSTOM_BUTTONS:
@@ -2562,38 +2636,46 @@ class DataLoggerGUI:
 
         frame = ttk.Frame(editor_window, padding="15")
         frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1) # Allow column 1 to expand for entry fields
+
+        # Get current colors
+        current_bg_color, current_font_color = self.button_colors.get(button_config.get("text"), (None, None))
 
         button_text_var = tk.StringVar(value=button_config.get("text", f"Custom {button_index+1}"))
         event_text_var = tk.StringVar(value=button_config.get("event_text", f"{button_config.get('text', f'Custom {button_index+1}')} Triggered"))
         txt_source_var = tk.StringVar(value=button_config.get("txt_source_key", "None"))
         tab_group_var = tk.StringVar(value=button_config.get("tab_group", "Main"))
         event_code_var = tk.StringVar(value=button_config.get("event_code", ""))
-        current_color = self.button_colors.get(button_config.get("text"), (None, None))[1]
-        button_color_var = tk.StringVar(value=current_color if current_color else "")
+        
+        button_bg_color_var = tk.StringVar(value=current_bg_color if current_bg_color else "")
+        button_font_color_var = tk.StringVar(value=current_font_color if current_font_color else "")
         
         row_idx = 0
+
+        # Button Text
         ttk.Label(frame, text="Button Text:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         text_entry = ttk.Entry(frame, textvariable=button_text_var, width=30)
         text_entry.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(text_entry, "Text displayed on the button.")
 
-        #... inside _edit_custom_button_inline
         row_idx += 1
+        # Event Text
         ttk.Label(frame, text="Event Text:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         event_entry = ttk.Entry(frame, textvariable=event_text_var, width=30)
         event_entry.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(event_entry, "Text written to the 'Event' column in the log.")
 
-        row_idx += 1 # FIX: Increment row index for the next set of widgets
+        row_idx += 1
+        # Event Code Combobox
         ttk.Label(frame, text="Event Code:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        # The list of available codes should include an empty option
         event_code_options = [""] + sorted(list(self.event_codes.keys()))
         event_code_combobox = ttk.Combobox(frame, textvariable=event_code_var, 
-                                            values=event_code_options, state="readonly", width=27)
+                                             values=event_code_options, state="readonly", width=27)
         event_code_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
 
         row_idx += 1
+        # Event Source Combobox
         ttk.Label(frame, text="Event Source:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         txt_source_options = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"]
         source_combobox = ttk.Combobox(frame, textvariable=txt_source_var,
@@ -2601,53 +2683,79 @@ class DataLoggerGUI:
         source_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(source_combobox, "Select which TXT file source this button should read data from. 'None' means no TXT data will be logged by this button.")
 
-        # Tab Group selection
         row_idx += 1
+        # Tab Group selection
         ttk.Label(frame, text="Tab Group:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        
-        # Use the master list of tab groups as the source of truth.
         all_tab_groups = sorted(self.custom_button_tab_groups[:])
-        
         tab_group_combobox = ttk.Combobox(frame, textvariable=tab_group_var,
-                                          values=all_tab_groups, width=27) # Not readonly, allows user to type new group
+                                            values=all_tab_groups, width=27) # Not readonly, allows user to type new group
         tab_group_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(tab_group_combobox, "Assign this button to a tab group. You can type a new group name or select an existing one.")
 
-
         row_idx += 1
-        ttk.Label(frame, text="Button Color:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
+        # Button Background Color Picker
+        ttk.Label(frame, text="Button Background:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         
-        color_display_label = tk.Label(frame, width=4, relief="solid", borderwidth=1,
-                                       background=button_color_var.get() if button_color_var.get() else 'SystemButtonFace')
-        color_display_label.grid(row=row_idx, column=1, sticky="w", pady=2, padx=5)
+        bg_color_widget_frame = ttk.Frame(frame)
+        bg_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=2, padx=5)
 
-        color_buttons_frame = ttk.Frame(frame)
-        color_buttons_frame.grid(row=row_idx, column=2, sticky="e", pady=2, padx=5)
+        bg_color_display_label = tk.Label(bg_color_widget_frame, width=4, relief="solid", borderwidth=1,
+                                            background=button_bg_color_var.get() if button_bg_color_var.get() else 'SystemButtonFace')
+        bg_color_display_label.pack(side="left", padx=(0, 5))
 
-        clear_btn = ttk.Button(color_buttons_frame, text="X", width=2, style="Toolbutton",
-                               command=lambda: self._set_color_on_widget(button_color_var, color_display_label, None, editor_window))
-        clear_btn.pack(side="left", padx=1)
-        ToolTip(clear_btn, "Clear button/row color (use default appearance).")
+        clear_bg_btn = ttk.Button(bg_color_widget_frame, text="X", width=2, style="Toolbutton",
+                                  command=lambda: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, None, editor_window))
+        clear_bg_btn.pack(side="left", padx=1)
+        ToolTip(clear_bg_btn, "Clear button background color (use default appearance).")
 
         pastel_colors_for_picker = ["#FFB3BA", "#FFDFBA", "#FFFFBA", "#BAFFC9", "#BAE1FF"]
         for p_color in pastel_colors_for_picker:
             try:
-                b = tk.Button(color_buttons_frame, bg=p_color, width=1, height=1, relief="raised", bd=1,
-                                      command=lambda c=p_color: self._set_color_on_widget(button_color_var, color_display_label, c, editor_window))
+                b = tk.Button(bg_color_widget_frame, bg=p_color, width=1, height=1, relief="raised", bd=1,
+                                command=lambda c=p_color: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, c, editor_window))
                 b.pack(side=tk.LEFT, padx=1)
             except tk.TclError: pass
 
-        choose_btn = ttk.Button(color_buttons_frame, text="...", width=3, style="Toolbutton",
-                                        command=lambda v=button_color_var, l=color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n))
-        choose_btn.pack(side="left", padx=1)
-        ToolTip(choose_btn, "Choose a custom color.")
+        choose_bg_btn = ttk.Button(bg_color_widget_frame, text="...", width=3, style="Toolbutton",
+                                  command=lambda v=button_bg_color_var, l=bg_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Background"))
+        choose_bg_btn.pack(side="left", padx=1)
+        ToolTip(choose_bg_btn, "Choose a custom background color.")
+
+        row_idx += 1
+        # Button Font Color Picker
+        ttk.Label(frame, text="Button Font Color:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
+        
+        font_color_widget_frame = ttk.Frame(frame)
+        font_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=2, padx=5)
+
+        font_color_display_label = tk.Label(font_color_widget_frame, width=4, relief="solid", borderwidth=1,
+                                            background=button_font_color_var.get() if button_font_color_var.get() else 'SystemButtonFace')
+        font_color_display_label.pack(side="left", padx=(0, 5))
+
+        clear_font_btn = ttk.Button(font_color_widget_frame, text="X", width=2, style="Toolbutton",
+                                   command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
+        clear_font_btn.pack(side="left", padx=1)
+        ToolTip(clear_font_btn, "Clear button font color (use default appearance).")
+
+        default_font_colors_for_picker = ["#000000", "#FFFFFF"] # Black, White
+        for f_color in default_font_colors_for_picker:
+            try:
+                b = tk.Button(font_color_widget_frame, bg=f_color, width=1, height=1, relief="raised", bd=1,
+                                fg='white' if f_color == '#000000' else 'black', # Make text visible on button
+                                command=lambda c=f_color: self._set_color_on_widget(button_font_color_var, font_color_display_label, c, editor_window))
+                b.pack(side=tk.LEFT, padx=1)
+            except tk.TclError: pass
+
+        choose_font_btn = ttk.Button(font_color_widget_frame, text="...", width=3, style="Toolbutton",
+                                    command=lambda v=button_font_color_var, l=font_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Font"))
+        choose_font_btn.pack(side="left", padx=1)
+        ToolTip(choose_font_btn, "Choose a custom font color.")
+
 
         row_idx += 1
         button_controls_frame = ttk.Frame(frame)
         button_controls_frame.grid(row=row_idx, column=0, columnspan=3, pady=(15,0), sticky="e")
 
-        # This is the inner function that was corrected in the previous step.
-        # It is now placed correctly inside the full method.
         def save_changes():
             old_button_text = button_config.get("text")
             
@@ -2657,21 +2765,20 @@ class DataLoggerGUI:
             button_config["event_code"] = event_code_var.get()
             button_config["tab_group"] = tab_group_var.get().strip() or "Main"
 
-            new_color_hex = button_color_var.get() if button_color_var.get() else None
+            new_bg_color_hex = button_bg_color_var.get() if button_bg_color_var.get() else None
+            new_font_color_hex = button_font_color_var.get() if button_font_color_var.get() else None
             
             if old_button_text in self.button_colors and old_button_text != button_config["text"]:
                 del self.button_colors[old_button_text]
             
-            self.button_colors[button_config["text"]] = (None, new_color_hex)
+            # Save the color as a tuple (background_color, font_color)
+            self.button_colors[button_config["text"]] = (new_bg_color_hex, new_font_color_hex)
 
             # Tab Saving Logic 
-            # If the user typed a new tab group name, add it to the master list.
-            # Do NOT rebuild the entire list from a hardcoded default.
             new_group = button_config["tab_group"]
             if new_group not in self.custom_button_tab_groups:
                 self.custom_button_tab_groups.append(new_group)
                 self.custom_button_tab_groups.sort()
-            # --- END OF CORRECTION ---
 
             self.save_settings()
             self.update_custom_buttons()
@@ -2684,28 +2791,28 @@ class DataLoggerGUI:
         editor_window.protocol("WM_DELETE_WINDOW", editor_window.destroy)
         editor_window.wait_window(editor_window)
         self.custom_inline_editor_window = None
-        
+
     def _set_color_on_widget(self, color_str_var, display_label, color_hex, parent_toplevel):
-        """Internal helper to validate and set the color for a color picker widget."""
+        """Internal helper to validate and set the color for a color picker display Label."""
         valid_color = None
         if color_hex:
-            temp_label = None
+            # Tkinter's Label widget supports direct background color setting
             try:
-                temp_label = tk.Label(parent_toplevel)
-                temp_label.config(background=color_hex)
+                # Test if the color is valid by trying to set it on a temporary widget
+                temp_label = tk.Label(parent_toplevel, background=color_hex)
                 valid_color = color_hex
+                temp_label.destroy() # Clean up temp widget
             except tk.TclError:
-                valid_color = None
-            finally:
-                if temp_label is not None:
-                    try: temp_label.destroy()
-                    except Exception: pass
-            
+                valid_color = None # Color was invalid
+        
         color_str_var.set(valid_color if valid_color else "")
+        
         try:
+            # Update the actual display label
             display_label.config(background=valid_color if valid_color else 'SystemButtonFace')
         except tk.TclError:
-            display_label.config(background='SystemButtonFace')
+            # If the widget is destroyed, just ignore
+            pass
 
     def _choose_color_dialog(self, color_str_var, display_label, parent_toplevel, name="Item"):
         """Opens color chooser dialog and updates the color_str_var and display_label."""
@@ -3651,9 +3758,10 @@ class SettingsWindow:
             ToolTip(new_day_check, "If checked, an event will be logged automatically at midnight.")
 
             # Color picker for New Day event
-            self.new_day_color_var, self.new_day_color_label = self._create_color_picker_row(
-                new_day_frame, 1, "Excel Row Color:", "New Day"
-            )
+            self.new_day_bg_color_var, self.new_day_bg_color_label, \
+            self.new_day_font_color_var, self.new_day_font_color_label = self._create_color_picker_row(
+                new_day_frame, 1, "Excel Row Colors:", "New Day" # Changed label text
+        )
 
             # --- "Hourly KP Log" Event Configuration ---
             hourly_frame = ttk.LabelFrame(tab, text="Hourly KP Log Event", padding=15)
@@ -3670,45 +3778,67 @@ class SettingsWindow:
             ToolTip(hourly_check, "If checked, the current KP will be logged automatically every hour.")
 
             # Color picker for Hourly event
-            self.hourly_color_var, self.hourly_color_label = self._create_color_picker_row(
-                hourly_frame, 1, "Excel Row Color:", "Hourly KP Log"
-            )
+            self.hourly_bg_color_var, self.hourly_bg_color_label, \
+            self.hourly_font_color_var, self.hourly_font_color_label = self._create_color_picker_row(
+                hourly_frame, 1, "Excel Row Colors:", "Hourly KP Log" # Changed label text
+        )
 
     def _create_color_picker_row(self, parent_frame, row, label_text, event_name):
-        """Helper to create a color picker widget row for the Auto Events tab."""
+        """Helper to create color picker widgets for both background and font colors for the Auto Events tab."""
         ttk.Label(parent_frame, text=label_text).grid(row=row, column=0, sticky='w', padx=5)
 
-        color_widget_frame = ttk.Frame(parent_frame)
-        color_widget_frame.grid(row=row, column=1, sticky='w', padx=5)
+        # Frame for Background Color picker
+        bg_color_frame = ttk.Frame(parent_frame)
+        bg_color_frame.grid(row=row, column=1, sticky='w', padx=5, pady=(2,0)) # Add some top padding
 
-        # Get the initial color from the master button_colors dictionary
-        initial_color = self.parent_gui.button_colors.get(event_name, (None, None))[1]
-        color_var = tk.StringVar(value=initial_color if initial_color else "")
-
-        display_label = tk.Label(color_widget_frame, width=4, relief="solid", borderwidth=1)
-        display_label.pack(side="left", padx=(0, 5))
-        try:
-            display_label.config(background=initial_color if initial_color else 'SystemButtonFace')
-        except tk.TclError:
-            display_label.config(background='SystemButtonFace')
-
-        # Close the color dialog
-        clear_btn = ttk.Button(
-            color_widget_frame, text="X", width=2, style="Toolbutton",
-            command=lambda: self.parent_gui._set_color_on_widget(color_var, display_label, None, self.master)
-        )
-        clear_btn.pack(side="left", padx=1)
-        ToolTip(clear_btn, f"Clear color for {event_name}.")
-
-        # Open the color dialog
-        choose_btn = ttk.Button(
-            color_widget_frame, text="...", width=3, style="Toolbutton",
-            command=lambda: self.parent_gui._choose_color_dialog(color_var, display_label, self.master, event_name)
-        )
-        choose_btn.pack(side="left", padx=1)
-        ToolTip(choose_btn, f"Choose a custom color for {event_name}.")
+        # Get initial colors from the master button_colors dictionary
+        initial_bg_color, initial_font_color = self.parent_gui.button_colors.get(event_name, (None, None))
         
-        return color_var, display_label  
+        bg_color_var = tk.StringVar(value=initial_bg_color if initial_bg_color else "")
+        bg_display_label = tk.Label(bg_color_frame, width=4, relief="solid", borderwidth=1,
+                                    background=bg_color_var.get() if bg_color_var.get() else 'SystemButtonFace')
+        bg_display_label.pack(side="left", padx=(0, 5))
+
+        # Background Clear button
+        clear_bg_btn = ttk.Button(bg_color_frame, text="X", width=2, style="Toolbutton",
+                                 command=lambda: self.parent_gui._set_color_on_widget(bg_color_var, bg_display_label, None, self.master))
+        clear_bg_btn.pack(side="left", padx=1)
+        ToolTip(clear_bg_btn, f"Clear background color for {event_name}.")
+
+        # Background Choose button
+        choose_bg_btn = ttk.Button(bg_color_frame, text="...", width=3, style="Toolbutton",
+                                  command=lambda: self.parent_gui._choose_color_dialog(bg_color_var, bg_display_label, self.master, f"{event_name} Background"))
+        choose_bg_btn.pack(side="left", padx=1)
+        ToolTip(choose_bg_btn, f"Choose a custom background color for {event_name}.")
+
+
+        # Frame for Font Color picker
+        font_color_frame = ttk.Frame(parent_frame)
+        font_color_frame.grid(row=row + 1, column=1, sticky='w', padx=5, pady=(0,2)) # Place below background, with some bottom padding
+
+        font_color_var = tk.StringVar(value=initial_font_color if initial_font_color else "")
+        font_display_label = tk.Label(font_color_frame, width=4, relief="solid", borderwidth=1,
+                                      background=font_color_var.get() if font_color_var.get() else 'SystemButtonFace')
+        font_display_label.pack(side="left", padx=(0, 5))
+
+        # Font Clear button
+        clear_font_btn = ttk.Button(font_color_frame, text="X", width=2, style="Toolbutton",
+                                   command=lambda: self.parent_gui._set_color_on_widget(font_color_var, font_display_label, None, self.master))
+        clear_font_btn.pack(side="left", padx=1)
+        ToolTip(clear_font_btn, f"Clear font color for {event_name}.")
+
+        # Font Choose button
+        choose_font_btn = ttk.Button(font_color_frame, text="...", width=3, style="Toolbutton",
+                                    command=lambda: self.parent_gui._choose_color_dialog(font_color_var, font_display_label, self.master, f"{event_name} Font"))
+        choose_font_btn.pack(side="left", padx=1)
+        ToolTip(choose_font_btn, f"Choose a custom font color for {event_name}.")
+        
+        # Adjust row span for the main label
+        parent_frame.grid_rowconfigure(row, weight=0) # Make sure the label row doesn't expand
+        parent_frame.grid_rowconfigure(row+1, weight=0) # Make sure the font color row doesn't expand
+
+
+        return bg_color_var, bg_display_label, font_color_var, font_display_label # Return all four  
 
     # --- Settings Save/Load Logic ---
     def save_settings(self):
@@ -3812,12 +3942,16 @@ class SettingsWindow:
         # Save the updated, sorted list
         self.parent_gui.custom_button_tab_groups = sorted(list(final_tab_groups))
 
-        # Get the colors from the new Auto Events tab and update the main colors dictionary
-        new_day_color_hex = self.new_day_color_var.get()
-        self.parent_gui.button_colors["New Day"] = (None, new_day_color_hex if new_day_color_hex else None)
+        # Save colors for the automatic events
+        new_day_bg_color_hex = self.new_day_bg_color_var.get()
+        new_day_font_color_hex = self.new_day_font_color_var.get()
+        self.parent_gui.button_colors["New Day"] = (new_day_bg_color_hex if new_day_bg_color_hex else None, 
+                                                    new_day_font_color_hex if new_day_font_color_hex else None)
 
-        hourly_color_hex = self.hourly_color_var.get()
-        self.parent_gui.button_colors["Hourly KP Log"] = (None, hourly_color_hex if hourly_color_hex else None)
+        hourly_bg_color_hex = self.hourly_bg_color_var.get()
+        hourly_font_color_hex = self.hourly_font_color_var.get()
+        self.parent_gui.button_colors["Hourly KP Log"] = (hourly_bg_color_hex if hourly_bg_color_hex else None,
+                                                          hourly_font_color_hex if hourly_font_color_hex else None)
         
 
         self.parent_gui.sqlite_enabled = self.sqlite_enabled_var.get()
@@ -3861,12 +3995,14 @@ class SettingsWindow:
         self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
         self.recreate_custom_button_settings()
         
-        # Load colors for the new Auto Events tab
-        new_day_color = self.parent_gui.button_colors.get("New Day", (None, None))[1]
-        self.parent_gui._set_color_on_widget(self.new_day_color_var, self.new_day_color_label, new_day_color, self.master)
+        # Load colors for the automatic events tab
+        new_day_bg_color, new_day_font_color = self.parent_gui.button_colors.get("New Day", (None, None))
+        self.parent_gui._set_color_on_widget(self.new_day_bg_color_var, self.new_day_bg_color_label, new_day_bg_color, self.master)
+        self.parent_gui._set_color_on_widget(self.new_day_font_color_var, self.new_day_font_color_label, new_day_font_color, self.master)
 
-        hourly_color = self.parent_gui.button_colors.get("Hourly KP Log", (None, None))[1]
-        self.parent_gui._set_color_on_widget(self.hourly_color_var, self.hourly_color_label, hourly_color, self.master)
+        hourly_bg_color, hourly_font_color = self.parent_gui.button_colors.get("Hourly KP Log", (None, None))
+        self.parent_gui._set_color_on_widget(self.hourly_bg_color_var, self.hourly_bg_color_label, hourly_bg_color, self.master)
+        self.parent_gui._set_color_on_widget(self.hourly_font_color_var, self.hourly_font_color_label, hourly_font_color, self.master)
         
 
         self.sqlite_enabled_var.set(self.parent_gui.sqlite_enabled)

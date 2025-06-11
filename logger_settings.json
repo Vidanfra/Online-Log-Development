@@ -136,8 +136,8 @@
         {
             "text": "Custom 7",
             "event_text": "Custom 7 Event",
-            "event_code": "",
-            "txt_source_key": "None",
+            "event_code": "LogON",
+            "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
@@ -237,22 +237,59 @@
         "ROV"
     ],
     "button_colors": {
-        "Log on": "#90EE90",
-        "Log off": "#FFB6C1",
-        "Event": "#FFFFE0",
-        "SVP": "#ADD8E6",
-        "New Day": "#80ffff",
-        "Custom Event 1": "#BAE1FF",
-        "ROV Off Deck": "#FFFFBA",
-        "sdvgdfvdsfc": "#BAE1FF",
-        "Custom 9": "#FFB3BA",
-        "Custom 12": "#FFFFBA",
-        "Hourly KP Log": "#00ffff"
+        "Log on": [
+            "#defe01",
+            "#0d00ff"
+        ],
+        "Log off": [
+            "#FFB6C1",
+            null
+        ],
+        "Event": [
+            "#FFFFE0",
+            "#ffffff"
+        ],
+        "SVP": [
+            "#ADD8E6",
+            null
+        ],
+        "New Day": [
+            "#80ffff",
+            null
+        ],
+        "Hourly KP Log": [
+            "#00ffff",
+            null
+        ],
+        "Custom Event 1": [
+            "#BAE1FF",
+            null
+        ],
+        "ROV Off Deck": [
+            "#FFFFBA",
+            null
+        ],
+        "sdvgdfvdsfc": [
+            "#BAFFC9",
+            "#ffffff"
+        ],
+        "Custom 7": [
+            "#BAE1FF",
+            "#ffff00"
+        ],
+        "Custom 9": [
+            "#FFB3BA",
+            null
+        ],
+        "Custom 12": [
+            "#FFFFBA",
+            null
+        ]
     },
-    "sqlite_enabled": true,
-    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL/RHM_600053_UXO_IDC.sqlite",
-    "sqlite_table": "fieldlog",
-    "always_on_top": true,
+    "sqlite_enabled": false,
+    "sqlite_db_path": "",
+    "sqlite_table": "EventLog",
+    "always_on_top": false,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
     "main_button_configs": {
