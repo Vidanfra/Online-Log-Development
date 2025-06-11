@@ -364,7 +364,7 @@ class DataLoggerGUI:
         self.folder_skips = {}
         self.monitors = {}
         self.num_custom_buttons = 3
-        self.MAX_CUSTOM_BUTTONS = 20 # Define the maximum number of custom buttons
+        self.MAX_CUSTOM_BUTTONS = 50 # Define the maximum number of custom buttons
         
         # Each custom button config now includes a 'txt_source_key'
         # This key maps to a folder path variable in the GUI instance
