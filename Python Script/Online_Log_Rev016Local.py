@@ -1477,7 +1477,7 @@ class DataLoggerGUI:
                 if app is None: raise Exception("No active Excel instance")
                 print("Connected to an existing Excel instance.") # DIAGNOSTIC
             except Exception:
-                print("No active Excel instance found, creating a new one.") # DIAGNOSTIC
+                print("No active Excel instance found, creating a new one.") # DIAGNOSTI
                 app = xw.App(visible=False)
                 opened_new_app = True
 
