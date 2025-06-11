@@ -1,6 +1,18 @@
 {
-    "OffDeck": "ROV Off deck",
-    "LogON": "Log On",
-    "Test": "Testing",
-    "test": "testete"
+    "R-ON": "ROV on Deck",
+    "R-OFF": "ROV off Deck",
+    "BGC": "TSS Background Compensation",
+    "STILL": "Still Picture",
+    "AF-S": "As-Found Start",
+    "AF-E": "As-Found End",
+    "AL-S": "As-Left Start",
+    "AL-E": "As-Left End",
+    "IDC-S": "ID&C Start",
+    "D-S": "Dredge Start",
+    "R-OTH": "ROV Other",
+    "VM": "Vessel Move",
+    "SVP": "SVP",
+    "R-TRM": "ROV Target Removal",
+    "MET": "Meteo Data",
+    "IDC-E": "ID&C End"
 }

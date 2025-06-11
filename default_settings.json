@@ -92,109 +92,109 @@
     "num_custom_buttons": 21,
     "custom_button_configs": [
         {
-            "text": "Custom Event 1",
-            "event_text": "Custom Event 1 Triggered",
-            "event_code": "",
+            "text": "ROV off Deck",
+            "event_text": "ROV off Deck",
+            "event_code": "R-OFF",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
-            "text": "Custom Event 2",
-            "event_text": "Custom Event 2 Triggered",
-            "event_code": "",
-            "txt_source_key": "None",
-            "tab_group": "Main"
-        },
-        {
-            "text": "Custom Event 3",
-            "event_text": "Custom Event 3 Triggered",
-            "event_code": "",
-            "txt_source_key": "None",
-            "tab_group": "Main"
-        },
-        {
-            "text": "ROV Off Deck",
-            "event_text": "ROV Off Deck",
-            "event_code": "OffDeck",
-            "txt_source_key": "TXT Source 2",
-            "tab_group": "ROV"
-        },
-        {
-            "text": "sdvgdfvdsfc",
-            "event_text": "cdfffsdf",
-            "event_code": "test",
+            "text": "ROV on Deck",
+            "event_text": "ROV on Deck",
+            "event_code": "R-ON",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
-            "text": "Custom 6",
-            "event_text": "Custom 6 Event",
-            "event_code": "",
-            "txt_source_key": "None",
-            "tab_group": "Main"
-        },
-        {
-            "text": "Custom 7",
-            "event_text": "Custom 7 Event",
-            "event_code": "LogON",
+            "text": "METEO",
+            "event_text": "Meteo data gathered",
+            "event_code": "MET",
             "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
-            "text": "Custom 8",
-            "event_text": "Custom 8 Event",
-            "event_code": "LogON",
-            "txt_source_key": "None",
+            "text": "TSS BGC",
+            "event_text": "TSS Background Compensation",
+            "event_code": "BGC",
+            "txt_source_key": "Main TXT",
             "tab_group": "Main"
         },
         {
-            "text": "Custom 9",
-            "event_text": "Custom 9 Event",
-            "event_code": "test",
+            "text": "STILL PICTURE",
+            "event_text": "Still picture taken:",
+            "event_code": "STILL",
             "txt_source_key": "Main TXT",
-            "tab_group": "ROV"
+            "tab_group": "Main"
         },
         {
-            "text": "Custom 10",
-            "event_text": "Custom 10 Event",
-            "event_code": "",
-            "txt_source_key": "None",
-            "tab_group": "ROV"
-        },
-        {
-            "text": "Custom 11",
-            "event_text": "Custom 11 Event",
-            "event_code": "",
-            "txt_source_key": "None",
-            "tab_group": "ROV"
-        },
-        {
-            "text": "Custom 12",
-            "event_text": "Custom 12 Event",
-            "event_code": "LogON",
-            "txt_source_key": "None",
-            "tab_group": "ROV"
-        },
-        {
-            "text": "Custom 13",
-            "event_text": "Custom 13 Event",
-            "event_code": "LogON",
+            "text": "As-Left Start",
+            "event_text": "As-Left Survey, Start of Line",
+            "event_code": "AL-S",
             "txt_source_key": "Main TXT",
-            "tab_group": "ROV"
+            "tab_group": "Main"
         },
         {
-            "text": "Custom 14",
-            "event_text": "Custom 14 Event",
-            "event_code": "OffDeck",
-            "txt_source_key": "TXT Source 2",
-            "tab_group": "ROV"
+            "text": "As-Left End",
+            "event_text": "As-Left Survey, End of Line",
+            "event_code": "AL-E",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
         },
         {
-            "text": "Custom 15",
-            "event_text": "Custom 15 Event",
-            "event_code": "",
-            "txt_source_key": "None",
-            "tab_group": "ROV"
+            "text": "As-Found Start",
+            "event_text": "As-Found Survey, Start of Line",
+            "event_code": "AF-S",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "As-Found End",
+            "event_text": "As-Found Survey, End of Line",
+            "event_code": "AF-E",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Dredge on Target",
+            "event_text": "Dredging Start",
+            "event_code": "D-S",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Vessel Move",
+            "event_text": "Vessel Move",
+            "event_code": "VM",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "ROV Other",
+            "event_text": "ROV Other:",
+            "event_code": "R-OTH",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "UXO Placed",
+            "event_text": "UXO placed:",
+            "event_code": "R-OTH",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "ID&C Start",
+            "event_text": "ID&C Start:",
+            "event_code": "IDC-S",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "ID&C Completed",
+            "event_text": "ID&C Completed:",
+            "event_code": "IDC-E",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
         },
         {
             "text": "Custom 16",
@@ -234,9 +234,9 @@
         {
             "text": "Custom 21",
             "event_text": "Custom 21 Event",
-            "event_code": "OffDeck",
-            "txt_source_key": "Main TXT",
-            "tab_group": "Main"
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
         }
     ],
     "custom_button_tab_groups": [
@@ -245,8 +245,8 @@
     ],
     "button_colors": {
         "Log on": [
-            "#000000",
-            "#ffffff"
+            "#80ff80",
+            "#000000"
         ],
         "Log off": [
             "#FFB6C1",
@@ -254,7 +254,7 @@
         ],
         "Event": [
             "#FFFFE0",
-            "#ffffff"
+            "#000000"
         ],
         "SVP": [
             "#ADD8E6",
@@ -299,12 +299,72 @@
         "Custom 21": [
             "#FFFFBA",
             "#FFFFFF"
+        ],
+        "ROV off Deck": [
+            "#d3a8ff",
+            null
+        ],
+        "ROV on Deck": [
+            "#d3a8ff",
+            null
+        ],
+        "METEO": [
+            null,
+            "#0080ff"
+        ],
+        "STILL PICTURE": [
+            "#dddddd",
+            null
+        ],
+        "TSS BGC": [
+            "#FFDFBA",
+            null
+        ],
+        "Dredge on Target": [
+            "#FFFFBA",
+            null
+        ],
+        "Vessel Move": [
+            "#ffffff",
+            null
+        ],
+        "UXO Placed": [
+            "#ffffff",
+            null
+        ],
+        "ROV Other": [
+            "#a8ffff",
+            null
+        ],
+        "As-Left Start": [
+            "#BAFFC9",
+            "#008000"
+        ],
+        "As-Left End": [
+            "#FFB3BA",
+            "#ff0000"
+        ],
+        "As-Found Start": [
+            "#598000",
+            "#FFFFFF"
+        ],
+        "As-Found End": [
+            "#a60000",
+            "#FFFFFF"
+        ],
+        "ID&C Completed": [
+            "#000000",
+            "#FFFFFF"
+        ],
+        "ID&C Start": [
+            "#000000",
+            "#FFFFFF"
         ]
     },
-    "sqlite_enabled": false,
-    "sqlite_db_path": "",
-    "sqlite_table": "EventLog",
-    "always_on_top": false,
+    "sqlite_enabled": true,
+    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/SQL/RHM_600053_UXO_IDC.sqlite",
+    "sqlite_table": "fieldlog",
+    "always_on_top": true,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
     "main_button_configs": {
@@ -317,7 +377,7 @@
             "event_code": "Test"
         },
         "Event": {
-            "event_text": "",
+            "event_text": "Event",
             "event_code": ""
         },
         "SVP": {
