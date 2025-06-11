@@ -1,0 +1,328 @@
+{
+    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
+    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/CSV",
+    "txt_folder_path_set2": "",
+    "txt_folder_path_set3": "",
+    "txt_field_columns_config": [
+        {
+            "field": "Date",
+            "column_name": "Date",
+            "db_column_name": "",
+            "skip": false
+        },
+        {
+            "field": "Time",
+            "column_name": "UTC Time",
+            "db_column_name": "",
+            "skip": false
+        },
+        {
+            "field": "KP",
+            "column_name": "KP",
+            "db_column_name": "kp",
+            "skip": false
+        },
+        {
+            "field": "DCC",
+            "column_name": "DCC",
+            "db_column_name": "coustom_value_3",
+            "skip": false
+        },
+        {
+            "field": "Line name",
+            "column_name": "Target",
+            "db_column_name": "",
+            "skip": false
+        },
+        {
+            "field": "Latitude",
+            "column_name": "Latitude",
+            "db_column_name": "",
+            "skip": false
+        },
+        {
+            "field": "Longitude",
+            "column_name": "Longitude",
+            "db_column_name": "",
+            "skip": false
+        },
+        {
+            "field": "Easting",
+            "column_name": "Easting [m]",
+            "db_column_name": "coustom_value_1",
+            "skip": false
+        },
+        {
+            "field": "Northing",
+            "column_name": "Northing [m]",
+            "db_column_name": "coustom_value_2",
+            "skip": false
+        },
+        {
+            "field": "Event",
+            "column_name": "Event",
+            "db_column_name": "event",
+            "skip": false
+        },
+        {
+            "field": "Code",
+            "column_name": "Code",
+            "db_column_name": "task_event",
+            "skip": false
+        },
+        {
+            "field": "Custom_Field_12",
+            "column_name": "Custom_Col_12",
+            "db_column_name": "",
+            "skip": false
+        }
+    ],
+    "folder_paths": {
+        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/CSV"
+    },
+    "folder_columns": {
+        "Main TXT File": "Main_TXT_File"
+    },
+    "file_extensions": {
+        "Main TXT File": "txt"
+    },
+    "folder_skips": {
+        "Main TXT File": false
+    },
+    "num_custom_buttons": 21,
+    "custom_button_configs": [
+        {
+            "text": "Custom Event 1",
+            "event_text": "Custom Event 1 Triggered",
+            "event_code": "",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom Event 2",
+            "event_text": "Custom Event 2 Triggered",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom Event 3",
+            "event_text": "Custom Event 3 Triggered",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "ROV Off Deck",
+            "event_text": "ROV Off Deck",
+            "event_code": "OffDeck",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "sdvgdfvdsfc",
+            "event_text": "cdfffsdf",
+            "event_code": "test",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 6",
+            "event_text": "Custom 6 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 7",
+            "event_text": "Custom 7 Event",
+            "event_code": "LogON",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 8",
+            "event_text": "Custom 8 Event",
+            "event_code": "LogON",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 9",
+            "event_text": "Custom 9 Event",
+            "event_code": "test",
+            "txt_source_key": "Main TXT",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 10",
+            "event_text": "Custom 10 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 11",
+            "event_text": "Custom 11 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 12",
+            "event_text": "Custom 12 Event",
+            "event_code": "LogON",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 13",
+            "event_text": "Custom 13 Event",
+            "event_code": "LogON",
+            "txt_source_key": "Main TXT",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 14",
+            "event_text": "Custom 14 Event",
+            "event_code": "OffDeck",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 15",
+            "event_text": "Custom 15 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 16",
+            "event_text": "Custom 16 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 17",
+            "event_text": "Custom 17 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 18",
+            "event_text": "Custom 18 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 19",
+            "event_text": "Custom 19 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 20",
+            "event_text": "Custom 20 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 21",
+            "event_text": "Custom 21 Event",
+            "event_code": "OffDeck",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main"
+        }
+    ],
+    "custom_button_tab_groups": [
+        "Main",
+        "ROV"
+    ],
+    "button_colors": {
+        "Log on": [
+            "#000000",
+            "#ffffff"
+        ],
+        "Log off": [
+            "#FFB6C1",
+            null
+        ],
+        "Event": [
+            "#FFFFE0",
+            "#ffffff"
+        ],
+        "SVP": [
+            "#ADD8E6",
+            null
+        ],
+        "New Day": [
+            "#80ffff",
+            null
+        ],
+        "Hourly KP Log": [
+            "#00ffff",
+            null
+        ],
+        "Custom Event 1": [
+            "#BAE1FF",
+            null
+        ],
+        "ROV Off Deck": [
+            "#FFFFBA",
+            null
+        ],
+        "sdvgdfvdsfc": [
+            "#BAFFC9",
+            "#ffffff"
+        ],
+        "Custom 7": [
+            "#BAE1FF",
+            "#ffff00"
+        ],
+        "Custom 8": [
+            "#408080",
+            null
+        ],
+        "Custom 9": [
+            "#FFB3BA",
+            null
+        ],
+        "Custom 12": [
+            "#FFFFBA",
+            null
+        ],
+        "Custom 21": [
+            "#FFFFBA",
+            "#FFFFFF"
+        ]
+    },
+    "sqlite_enabled": false,
+    "sqlite_db_path": "",
+    "sqlite_table": "EventLog",
+    "always_on_top": false,
+    "new_day_event_enabled": true,
+    "hourly_event_enabled": true,
+    "main_button_configs": {
+        "Log on": {
+            "event_text": "Log on event occurred",
+            "event_code": "LogON"
+        },
+        "Log off": {
+            "event_text": "Log off event occurred",
+            "event_code": "Test"
+        },
+        "Event": {
+            "event_text": "",
+            "event_code": ""
+        },
+        "SVP": {
+            "event_text": "SVP applied",
+            "event_code": ""
+        }
+    }
+}

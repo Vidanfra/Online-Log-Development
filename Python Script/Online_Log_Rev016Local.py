@@ -14,6 +14,16 @@ import uuid
 import pandas as pd
 import openpyxl
 
+# --- DEFINED CONSTANTS ---
+# PATHS
+DEFAULT_SETTINGS_FILE = "default_settings.json"
+CUSTOM_SETTINGS_FILE = "custom_settings.json"
+EVENT_CODES_FILE = "event_codes.json"
+
+# NUMERICAL CONSTANTS
+
+
+
 # Global cache
 folder_cache = {}
 
@@ -226,10 +236,10 @@ class DataLoggerGUI:
         master.title("Online Logger")
         master.geometry("1000x250")
         master.minsize(800, 200)
-        self.settings_file = "logger_settings.json"
+
         self.init_styles()
         self.init_variables()
-        self.load_settings()
+        self.init_settings()
 
         # --- Main Layout ---
         self.main_frame = ttk.Frame(self.master, padding="5")
@@ -312,8 +322,12 @@ class DataLoggerGUI:
         '''
         self.log_file_path = None
 
-       # Event Code Configuration ---
-        self.event_codes_file = "event_codes.json"
+        # Settings File Configuration
+        self.default_settings_file = DEFAULT_SETTINGS_FILE
+        self.settings_file = CUSTOM_SETTINGS_FILE           
+
+       # Event Code Configuration
+        self.event_codes_file = EVENT_CODES_FILE
         self.event_codes = {} # Will store {'code': 'description'}
 
         self.main_button_configs = {
@@ -412,6 +426,18 @@ class DataLoggerGUI:
         self.db_status_label = None
         self.settings_window_instance = None # Track settings window
         self.custom_inline_editor_window = None # To track the open inline editor
+
+    def init_settings(self):
+        ''' Check if the custom settings file exists and loads it. If not, it load the default settings file.'''
+        # Determine which settings file to load
+        if not os.path.exists(self.settings_file):
+            try:
+                print(f"Custom settings not found. Loading from default file: {self.default_settings_file}")
+                self.revert_to_defaults()
+            except Exception as e:
+                messagebox.showwarning("Error in the settings memory", "Paths for custom or default settings files not found", parent=self.master)
+        else:
+            self.load_settings()
 
     def load_event_codes(self):
         """Loads the event codes from its dedicated JSON file."""
@@ -1803,11 +1829,47 @@ class DataLoggerGUI:
             self.update_status("Error saving settings.")
         print("--- End Saving Settings ---") # DIAGNOSTIC
 
+    def revert_to_defaults(self):
+        """
+        Deletes the user settings file, then forces a reload from the default
+        settings file, updates the UI, and restarts services.
+        """
+        print("\n--- Reverting to Default Settings ---")
+
+        # Check if the default settings file exists before proceeding
+        if not os.path.exists(self.default_settings_file):
+            raise FileNotFoundError(f"The default settings file '{self.default_settings_file}' was not found. Cannot restore.")
+
+        # Delete the current user settings file if it exists
+        if os.path.exists(self.settings_file):
+            try:
+                os.remove(self.settings_file)
+            except OSError as e:
+                print(f"Error deleting user settings file: {e}")
+                raise e # Re-raise the exception to be caught by the caller
+            
+        # Define default settings file
+        self.settings_file = self.default_settings_file
+
+        # Reload settings (this will now use the defaults) and re-save
+        self.load_settings() # This will now load from default_settings.json
+
+        # Refresh the main GUI and restart monitoring
+        self.update_custom_buttons()
+
+        # Save a new custom_settings.json from the loaded defaults
+        self.settings_file = CUSTOM_SETTINGS_FILE
+        self.save_settings()
+
+        print("--- Default Settings Restored Successfully ---")
+
     def load_settings(self):
         '''Loads settings from the JSON file and updates the GUI variables accordingly.'''
-        print("\n--- Loading Settings ---") # DIAGNOSTIC
+        print("\n--- Loading Settings ---") 
+
         try:
             if os.path.exists(self.settings_file):
+                print("Loading Settings from: {self.settings_file}")
                 with open(self.settings_file, 'r') as f: settings = json.load(f)
                 self.log_file_path = settings.get("log_file_path")
 
@@ -1924,7 +1986,7 @@ class DataLoggerGUI:
                         always_on_top_setting = settings.get("always_on_top", False)
                         self.always_on_top_var.set(always_on_top_setting)
                         self.master.wm_attributes("-topmost", always_on_top_setting)
-                        self.sqlite_table = settings.get("sqlite_table", "EventLog")
+                        self.sqlite_table = settings.get("sqlite_table", "fieldlog")
                         self.always_on_top_var.set(settings.get("always_on_top", True))
                         self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
                         self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
@@ -1950,6 +2012,15 @@ class DataLoggerGUI:
     # --- Settings Window Interaction ---
     def open_settings(self):
         '''Open the settings window. If it already exists, bring it to the front.'''
+
+        # Determine which settings file to load
+        if not os.path.exists(self.settings_file):
+            try:
+                print(f"Custom settings not found. Loading from default file: {self.default_settings_file}")
+                self.revert_to_defaults()
+            except Exception as e:
+                messagebox.showwarning("Error in the settings memory", "Paths for custom or default settings files not found", parent=self.master)
+
 
         # Check if the settings window already exists and is open
         if hasattr(self, 'settings_window_instance') and self.settings_window_instance and self.settings_window_instance.winfo_exists():
@@ -2814,7 +2885,7 @@ class SettingsWindow:
         self.master = master
         self.parent_gui = parent_gui
         self.master.title("Settings")
-        self.master.geometry("1000x650")
+        self.master.geometry("1000x750")
         self.master.minsize(700, 500)
         self.style = parent_gui.style
 
@@ -3052,6 +3123,21 @@ class SettingsWindow:
         txt_browse_btn_set3.grid(row=0, column=2, padx=(5, 0), pady=5)
         ToolTip(txt_browse_btn_set3, "Select a third folder for navigation TXT files. Can be assigned to custom buttons."); ToolTip(self.txt_folder_entry_set3, "Path to a third folder for navigation TXT files.")
 
+        # Frame for restoring default settings ---
+        restore_frame = ttk.LabelFrame(tab, text="Restore Default Settings", padding=15)
+        restore_frame.pack(fill="x", pady=(20, 0), side="bottom") # Place it at the bottom
+        restore_frame.columnconfigure(0, weight=1)
+
+        restore_desc = ttk.Label(restore_frame, text="This will delete your current custom settings and restore the application's original defaults. This action cannot be undone.", wraplength=800)
+        restore_desc.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+
+        style = ttk.Style()
+        style.configure("Danger.TButton", foreground="white", background="red")
+        style.map("Danger.TButton", background=[("active", "#cc0000")], foreground=[("active", "white")])
+
+        restore_button = ttk.Button(restore_frame, text="Restore Default Settings", command=self.restore_default_settings, style="Danger.TButton")
+        restore_button.grid(row=1, column=0, sticky='w')
+        ToolTip(restore_button, "WARNING: Deletes 'custom_settings.json' and loads defaults from 'default_settings.json'.")
 
     def select_excel_file(self):
         initial_dir = os.path.dirname(self.log_file_entry.get()) if self.log_file_entry.get() else os.getcwd()
@@ -3063,6 +3149,35 @@ class SettingsWindow:
         initial_dir = current_path if os.path.isdir(current_path) else os.path.dirname(current_path) if current_path else os.getcwd()
         folder_path = filedialog.askdirectory(initialdir=initial_dir, parent=self.master, title="Select Navigation TXT Folder")
         if folder_path: entry_widget.delete(0, tk.END); entry_widget.insert(0, folder_path)
+
+    def restore_default_settings(self):
+        """
+        Handles the user confirmation and initiates the process of restoring default settings.
+        """
+        # Ask for user confirmation as this is a destructive action
+        is_confirmed = messagebox.askyesno(
+            "Confirm Restore Defaults",
+            "Are you sure you want to restore all settings to their defaults?\n\n"
+            "Your current 'custom_settings.json' file will be permanently deleted.",
+            parent=self.master
+        )
+
+        if is_confirmed:
+            try:
+                # Call the main GUI's method to perform the core logic
+                self.parent_gui.revert_to_defaults()
+
+                # Refresh the settings window UI with the newly loaded default values
+                self.load_settings()
+
+                messagebox.showinfo(
+                    "Success",
+                    "Default settings have been restored.\n\n"
+                    "Your custom settings file has been deleted. New settings will be saved to 'custom_settings.json'.",
+                    parent=self.master
+                )
+            except Exception as e:
+                messagebox.showerror("Error", f"An error occurred while restoring defaults:\n{e}", parent=self.master)
 
     def create_txt_column_mapping_tab(self):
         tab = ttk.Frame(self.notebook, padding=20)
@@ -3123,7 +3238,6 @@ class SettingsWindow:
         self.recreate_txt_field_rows() # Will be called by load_settings too
         self._update_txt_move_buttons_state() # Initial state of move buttons
 
-    # --- NEW: Method to preview TXT data ---
     def preview_txt_data(self):
         """Finds the latest TXT file, reads the last line, and displays the parts in the preview column."""
         txt_folder = self.parent_gui.txt_folder_path # Use the main TXT folder for preview
@@ -3171,7 +3285,6 @@ class SettingsWindow:
         except Exception as e:
             messagebox.showerror("Read Error", f"An error occurred while reading the file:\n{e}", parent=self.master)
 
-    # --- NEW: Method to clear the preview data ---
     def clear_txt_preview(self):
         """Clears the text from all preview labels."""
         for row_widgets in self.txt_field_row_widgets:
