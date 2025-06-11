@@ -89,7 +89,7 @@
     "folder_skips": {
         "Main TXT File": false
     },
-    "num_custom_buttons": 20,
+    "num_custom_buttons": 21,
     "custom_button_configs": [
         {
             "text": "Custom Event 1",
@@ -116,8 +116,8 @@
             "text": "ROV Off Deck",
             "event_text": "ROV Off Deck",
             "event_code": "OffDeck",
-            "txt_source_key": "Main TXT",
-            "tab_group": "Main"
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "ROV"
         },
         {
             "text": "sdvgdfvdsfc",
@@ -171,15 +171,15 @@
         {
             "text": "Custom 12",
             "event_text": "Custom 12 Event",
-            "event_code": "",
+            "event_code": "LogON",
             "txt_source_key": "None",
             "tab_group": "ROV"
         },
         {
             "text": "Custom 13",
             "event_text": "Custom 13 Event",
-            "event_code": "",
-            "txt_source_key": "None",
+            "event_code": "LogON",
+            "txt_source_key": "Main TXT",
             "tab_group": "ROV"
         },
         {
@@ -230,6 +230,13 @@
             "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 21",
+            "event_text": "Custom 21 Event",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main",
+            "event_code": "OffDeck"
         }
     ],
     "custom_button_tab_groups": [
@@ -238,8 +245,8 @@
     ],
     "button_colors": {
         "Log on": [
-            "#defe01",
-            "#0d00ff"
+            "#000000",
+            "#ffffff"
         ],
         "Log off": [
             "#FFB6C1",
@@ -284,12 +291,16 @@
         "Custom 12": [
             "#FFFFBA",
             null
+        ],
+        "Custom 21": [
+            "#FFFFBA",
+            "#FFFFFF"
         ]
     },
     "sqlite_enabled": false,
     "sqlite_db_path": "",
     "sqlite_table": "EventLog",
-    "always_on_top": false,
+    "always_on_top": true,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
     "main_button_configs": {

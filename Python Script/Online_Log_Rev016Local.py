@@ -1565,18 +1565,6 @@ class DataLoggerGUI:
                     except Exception as e_write:
                         print(f"Warning: Could not write to column '{col_name}'. Error: {e_write}")
 
-            # Helper function to convert Hex RGB to direct RGB integer (for font color)
-            def hex_rgb_to_direct_int(hex_color_string):
-                if not isinstance(hex_color_string, str) or not hex_color_string.startswith("#") or len(hex_color_string) != 7:
-                    return None
-                try:
-                    # Strip '#' and convert directly to integer (which is RGB)
-                    rgb_value = int(hex_color_string[1:], 16)
-                    print(f"  Font Color Conversion: HEX: {hex_color_string} -> Direct RGB Int: {rgb_value}")
-                    return rgb_value
-                except ValueError:
-                    print(f"  Font Color Conversion: Failed to convert hex string '{hex_color_string}' to integer.")
-                    return None
 
             # Apply background color to the row if specified
             if row_color and written_cols:
@@ -1590,17 +1578,13 @@ class DataLoggerGUI:
 
             # Apply font color to the row if specified
             if font_color and written_cols:
-                # For font color, explicitly convert to a direct RGB integer
-                excel_font_color_int = hex_rgb_to_direct_int(font_color)
-                if excel_font_color_int is not None:
-                    try:
-                        target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
-                        target_range.api.Font.Color = excel_font_color_int
-                        print(f"Applied font color {font_color} (Direct RGB: {excel_font_color_int}) to row {next_row}.")
-                    except Exception as e_font_color:
-                        print(f"Warning: Could not apply font color to row. Error: {e_font_color}")
-                else:
-                    print(f"Warning: Skipping invalid font color format: {font_color}")
+                try:
+                    target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
+                    target_range.font.color = font_color
+                except Exception as e_font_color:
+                    print(f"Warning: Could not apply font color to row. Error: {e_font_color}")
+            else:
+                print(f"Warning: Skipping invalid font color format: {font_color}")
 
 
             # --- CRITICAL SAVE OPERATION ---
