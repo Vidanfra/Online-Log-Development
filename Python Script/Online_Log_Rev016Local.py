@@ -20,8 +20,14 @@ DEFAULT_SETTINGS_FILE = "default_settings.json"
 CUSTOM_SETTINGS_FILE = "custom_settings.json"
 EVENT_CODES_FILE = "event_codes.json"
 
-# NUMERICAL CONSTANTS
+# DICCTIONARY KEYS
+EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'kp ref.', 'event', 'guid'}
 
+# DB SETTINGS
+DEFAULT_TABLE_NAME = "fieldlog"
+
+# NUMERICAL CONSTANTS
+MAX_HEADER_SEARCH_ROW = 30
 
 
 # Global cache
@@ -411,7 +417,7 @@ class DataLoggerGUI:
 
         self.sqlite_enabled = False
         self.sqlite_db_path = None
-        self.sqlite_table = "EventLog"
+        self.sqlite_table = DEFAULT_TABLE_NAME
 
         # Variables to control the automatic, timed events
         self.new_day_event_enabled_var = tk.BooleanVar(value=True)
@@ -1544,11 +1550,11 @@ class DataLoggerGUI:
             sheet = workbook.sheets[0]
 
             # --- 3. DYNAMIC HEADER SEARCH ---
-            required_columns = {'runline', 'kp', 'kp ref.', 'event', 'guid'}
+            required_columns = EXCEL_LOG_REQUIRED_COLS
             header_row_index = -1
             header_values = []
             
-            for i in range(1, 31):
+            for i in range(1, MAX_HEADER_SEARCH_ROW + 1):
                 row_values = sheet.range(f'A{i}').expand('right').value
                 if row_values is None:
                     continue
@@ -3799,7 +3805,7 @@ class SettingsWindow:
         
         ttk.Label(config_frame, text="Table Name:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.sqlite_table_entry = ttk.Entry(config_frame, width=40)
-        self.sqlite_table_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w"); ToolTip(self.sqlite_table_entry, "The name of the table within the database where logs will be written (e.g., 'EventLog'). This table must exist or be created by you.")
+        self.sqlite_table_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w"); ToolTip(self.sqlite_table_entry, "The name of the table within the database where logs will be written (e.g., 'fieldlog'). This table must exist or be created by you.")
         
         test_button = ttk.Button(config_frame, text="Test Connection & Table", command=self.test_sqlite_connection)
         test_button.grid(row=2, column=1, padx=5, pady=15, sticky="w"); ToolTip(test_button, "Verify connection to the database file and check if the specified table exists.")
@@ -3815,7 +3821,7 @@ class SettingsWindow:
         if hasattr(self, 'test_result_label'): self.test_result_label.config(text="")
 
     def test_sqlite_connection(self):
-        db_path = self.sqlite_db_path_entry.get().strip(); table_name = self.sqlite_table_entry.get().strip() or "EventLog"
+        db_path = self.sqlite_db_path_entry.get().strip(); table_name = self.sqlite_table_entry.get().strip() or DEFAULT_TABLE_NAME
         if not db_path: self.test_result_label.config(text="❌ Error: Database path is empty.", foreground="red"); return
         conn = None; result_text = ""; result_color = "red"
         try:
@@ -4053,7 +4059,7 @@ class SettingsWindow:
 
         self.parent_gui.sqlite_enabled = self.sqlite_enabled_var.get()
         self.parent_gui.sqlite_db_path = self.sqlite_db_path_entry.get().strip()
-        self.parent_gui.sqlite_table = self.sqlite_table_entry.get().strip() or "EventLog"
+        self.parent_gui.sqlite_table = self.sqlite_table_entry.get().strip() or DEFAULT_TABLE_NAME
 
         self.parent_gui.save_settings()
         self.parent_gui.update_custom_buttons()
@@ -4106,7 +4112,7 @@ class SettingsWindow:
         self.sqlite_db_path_entry.delete(0, tk.END)
         self.sqlite_db_path_entry.insert(0, self.parent_gui.sqlite_db_path or "")
         self.sqlite_table_entry.delete(0, tk.END)
-        self.sqlite_table_entry.insert(0, self.parent_gui.sqlite_table or "EventLog")
+        self.sqlite_table_entry.insert(0, self.parent_gui.sqlite_table or DEFAULT_TABLE_NAME)
         if hasattr(self, 'test_result_label'): self.test_result_label.config(text="")
     
 # --- Main Execution ---
