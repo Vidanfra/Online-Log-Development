@@ -669,7 +669,7 @@ class DataLoggerGUI:
             return
 
         sync_button = None
-        target_button_text = "Sync Excel->DB"
+        target_button_text = "Sync DB"
         try:
             # Searches the GUI for the button labeled "Sync DB"
             if hasattr(self, 'button_frame') and self.button_frame:
@@ -712,257 +712,227 @@ class DataLoggerGUI:
         sync_thread = threading.Thread(target=_sync_worker, daemon=True)
         sync_thread.start()
 
+    def _values_are_different(self, val1, val2):
+        """
+        Robustly compares two values, handling None, pandas NaT/NaN, and numeric types.
+        """
+        # If both are considered null, they are not different
+        if (pd.isna(val1) or val1 is None) and (pd.isna(val2) or val2 is None):
+            return False
+        # If one is null and the other is not, they are different
+        if (pd.isna(val1) or val1 is None) or (pd.isna(val2) or val2 is None):
+            return True
+        
+        # Try a numeric comparison for floats/ints
+        try:
+            # Compare with a small tolerance for floating point issues
+            if abs(float(val1) - float(val2)) < 0.00001:
+                return False
+        except (ValueError, TypeError):
+            # If they can't be converted to float, proceed to string comparison
+            pass
+
+        # Fallback to string comparison for all other types (dates, text, etc.)
+        return str(val1) != str(val2)
+
+    
+    #Find header for the SQL Update function
+    def _find_header_row(self, excel_file, engine, required_column='GUID', max_rows_to_scan=30):
+        """
+        Scans the top N rows of an Excel sheet to find the row index of the header.
+        The header is identified by the presence of a specific required column (e.g., 'GUID').
+
+        Args:
+            excel_file (str): Path to the Excel file.
+            engine (str): The pandas engine to use ('openpyxl' or 'pyxlsb').
+            required_column (str): A column name that MUST be in the header row.
+            max_rows_to_scan (int): The number of rows to scan from the top.
+
+        Returns:
+            int: The zero-based index of the header row.
+
+        Raises:
+            ValueError: If the required column is not found in the scanned rows.
+        """
+        # Read only the top part of the file without assuming any header
+        df_top = pd.read_excel(
+            excel_file,
+            engine=engine,
+            header=None,
+            nrows=max_rows_to_scan
+        )
+        for idx, row in df_top.iterrows():
+            # Check if the required column name is in the current row's values
+            # Comparing as lowercase strings for robustness
+            row_values = [str(v).lower() for v in row.values]
+            if required_column.lower() in row_values:
+                return idx  # Return the index of the found header row
+
+        # If the loop finishes, the header was not found
+        raise ValueError(f"Crucial '{required_column}' column not found in the first {max_rows_to_scan} rows.")
+
     def perform_excel_to_sqlite_sync(self):
         '''
-        This functions ensures the SQLite database reflects the latest data from the Excel log, without overwriting or duplicating unchanged records.
-        It performs the following steps:
-        * Reads the Excel file specified in self.log_file_path.
-        * Parses the data, ensuring date and time formats are handled correctly.
-        * Connects to the SQLite database specified in self.sqlite_db_path.
-        * Checks if the specified table exists, creating it if necessary.
-        * Compares the Excel data against existing records in the SQLite table using GUID.
-        * Inserts new records and updates existing ones based on GUID.
-        * Cleans up resources and returns success status.
+        This function ensures the SQLite database reflects the latest data from the Excel log.
+        It uses robust comparison and provides clear debugging output.
         '''
-        # Initialization
+        print("\n--- Starting Excel to SQLite Sync ---")
         excel_file = self.log_file_path
         db_file = self.sqlite_db_path
         db_table = self.sqlite_table
-        guid_column = "GUID"
-        date_col_name = "Date"
-        time_col_name = "Time"
+        guid_column_excel = "GUID"
 
-        if not excel_file or not db_file or not db_table:
+        if not all([excel_file, db_file, db_table]):
             return False, "Sync Error: Configuration paths or table missing."
 
-        excel_data = {}
-        app = None
-        wb = None
-        sheet = None
-        header = None
-        df_excel = None
-
         try:
-            # Open the Excel file using xlwings
-            app = xw.App(visible=False, add_book=False)
+            # --- 1. Read Excel Data ---
+            if excel_file.lower().endswith('.xlsb'): excel_engine = 'pyxlsb'
+            elif excel_file.lower().endswith('.xlsx'): excel_engine = 'openpyxl'
+            else: return False, "Sync Error: Unsupported file format. Please use .xlsx or .xlsb."
 
-            if not excel_file: raise ValueError("excel_file path is empty")
-            wb = app.books.open(excel_file, update_links=False, read_only=True)
-
-            if not wb.sheets: raise ValueError("Workbook has no sheets")
-            sheet = wb.sheets[0]
-
-            header_range = sheet.range('A1').expand('right')
-            if header_range is None: raise ValueError("Cannot find header range")
-            header = header_range.value
-            # Check if header is None or includes the GUID column
-            if header is None or guid_column not in header:
-                raise ValueError(f"Column '{guid_column}' not found in Excel header or header is empty.")
-
-            guid_col_index = header.index(guid_column) + 1
-            last_row = 1
-            try:
-                last_row = sheet.range(sheet.api.Rows.Count, guid_col_index).end('up').row
-            except Exception:
-                try:
-                    max_row = sheet.cells.last_cell.row
-                    last_row_A = sheet.range(f'A{max_row}').end('up').row
-                    last_row = max(1, last_row_A)
-                except Exception:
-                    last_row = 1
-
-            if last_row <= 1:
-                if wb: wb.close()
-                if app: app.quit()
-                wb = None; app = None
-                return True, "Sync Info: Excel sheet is empty, nothing to sync."
+            header_row = self._find_header_row(excel_file, excel_engine, required_column=guid_column_excel)
+            df_excel = pd.read_excel(excel_file, engine=excel_engine, header=header_row)
+            df_excel = df_excel.astype(object).where(pd.notnull(df_excel), None)
             
-            # Read data from the Excel sheet, starting from row 2 to skip header
-            data_range = sheet.range((2, 1), (last_row, len(header)))
-            # Convert the data range to a DataFrame
-            df_excel = pd.DataFrame(data_range.value, columns=header)
-
-            # Parse date and time columns if they exist
-            if date_col_name in df_excel.columns:
-                df_excel[date_col_name] = pd.to_datetime(df_excel[date_col_name], errors='coerce')
-            if time_col_name in df_excel.columns:
-                df_excel[time_col_name] = pd.to_numeric(df_excel[time_col_name], errors='coerce')
-
-            # Filter out rows where GUID is NaN, None, or empty
-            if guid_column in df_excel.columns:
-                df_excel[guid_column] = df_excel[guid_column].astype(str)
-                df_excel[guid_column] = df_excel[guid_column].replace({'nan': '', 'None': '', None: ''})
-                df_excel = df_excel[df_excel[guid_column].str.strip() != '']
-                df_excel = df_excel.dropna(subset=[guid_column])
-            else:
-                raise ValueError(f"'{guid_column}' column disappeared after initial read.")
-
+            if guid_column_excel not in df_excel.columns:
+                 return False, f"Sync Error: Crucial '{guid_column_excel}' column not found after loading."
+            
+            df_excel.dropna(subset=[guid_column_excel], inplace=True)
+            df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(str).str.strip()
+            df_excel = df_excel[df_excel[guid_column_excel] != '']
             if df_excel.empty:
-                if wb: wb.close()
-                if app: app.quit()
-                wb = None; app = None
-                return True, "Sync Info: No valid Excel rows found to sync."
+                print("Excel file has no valid data rows with GUIDs. Nothing to sync.")
+                return True, "Sync Info: No valid data found in Excel."
+            print(f"Found {len(df_excel)} valid data rows in Excel.")
 
-            # Set GUID as index and convert to dictionary:  Clean Excel data into a usable format keyed by GUID
-            df_excel = df_excel.set_index(guid_column, drop=False)
-            excel_data = df_excel.to_dict('index')
 
-            if wb: wb.close(); wb = None
-            if app: app.quit(); app = None
+            if 'time_fix' not in df_excel.columns:
+                date_col = self.txt_field_columns.get("Date")
+                time_col = self.txt_field_columns.get("Time")
 
-        except xw.XlwingsError as xw_err:
+                if date_col in df_excel.columns and time_col in df_excel.columns:
+                    try:
+                        # 1. Ensure columns are numeric, coercing errors to NaN (Not a Number)
+                        date_serial = pd.to_numeric(df_excel[date_col], errors='coerce')
+                        time_serial = pd.to_numeric(df_excel[time_col], errors='coerce')
+
+                        # 2. Add the date and time serial numbers together.
+                        #    Fill any potential NaN values with 0 before adding.
+                        excel_serial_datetime = date_serial.fillna(0) + time_serial.fillna(0)
+
+                        # 3. Convert the combined Excel serial number to a datetime object.
+                        #    The origin '1899-12-30' is used for Excel on Windows.
+                        df_excel['time_fix'] = pd.to_datetime(excel_serial_datetime, unit='D', origin='1899-12-30')
+                        df_excel['time_fix'] = df_excel['time_fix'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+                        print("Created 'time_fix' column by converting Excel serial numbers.")
+
+                    except Exception as e:
+                        return False, f"Sync Error: Could not process Excel serial numbers. Error: {e}"
+                else:
+                    return False, "Sync Error: 'Date' and 'Time' columns for serial conversion not found."
+        except Exception as e:
             traceback.print_exc()
-            try:
-                if wb is not None: wb.close()
-            except Exception: pass
-            try:
-                if app is not None: app.quit()
-            except Exception: pass
-            return False, f"Sync Error: Excel interaction failed ({type(xw_err).__name__})"
+            return False, f"Sync Error: Failed during Excel read/prep stage. ({e})"
 
-        except Exception as e_excel:
-            traceback.print_exc()
-            try:
-                if wb is not None: wb.close()
-            except Exception: pass
-            try:
-                if app is not None: app.quit()
-            except Exception: pass
-            return False, f"Sync Error: Reading Excel failed ({type(e_excel).__name__})"
-
-        sqlite_data = {}
+        # --- 3. Get DB Info and Build Column Map ---
         conn_sqlite = None
-        db_cols = []
         try:
-            # Connect to the SQLite database
             conn_sqlite = sqlite3.connect(db_file, timeout=10)
-            conn_sqlite.row_factory = sqlite3.Row
-
-            # Check if the table exists 
-            cursor = conn_sqlite.cursor()
-
-            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (db_table,))
-            if cursor.fetchone() is None:
-                conn_sqlite.close()
-                return False, f"Sync Error: SQLite table '{db_table}' does not exist."
+            db_cols_set = set(pd.read_sql_query(f"PRAGMA table_info('{db_table}')", conn_sqlite)['name'])
             
-            # Check if GUID exists as a column
-            cursor.execute(f"PRAGMA table_info([{db_table}])")
-            cols_info = cursor.fetchall()
-            db_cols = [col['name'] for col in cols_info]
-            if guid_column not in db_cols:
-                conn_sqlite.close()
-                return False, f"Sync Error: Column '{guid_column}' not found in SQLite table."
+            excel_to_db_map = {
+                item.get("column_name"): item.get("db_column_name")
+                for item in self.txt_field_columns_config
+                if item.get("column_name") and item.get("db_column_name")
+            }
+            # Manually ensure crucial columns are mapped if they exist in the DB
+            if 'GUID' in db_cols_set: excel_to_db_map[guid_column_excel] = 'GUID'
+            if 'time_fix' in db_cols_set: excel_to_db_map['time_fix'] = 'time_fix'
+            print(f"Constructed Excel-to-DB column map: {excel_to_db_map}")
+            
+            guid_db_col_name = excel_to_db_map.get(guid_column_excel)
+            if not guid_db_col_name or guid_db_col_name not in db_cols_set:
+                return False, f"Sync Error: GUID column '{guid_db_col_name}' not configured or not in DB."
 
-            # Read all rows from the database table into a dictionary (sqlite_data), keyed by GUID
-            quoted_db_cols = ", ".join([f"[{c}]" for c in db_cols])
-            cursor.execute(f"SELECT {quoted_db_cols} FROM [{db_table}]")
-            rows = cursor.fetchall()
-            for row in rows:
-                row_dict = dict(row)
-                rec_id = str(row_dict.get(guid_column, '')).strip()
-                if rec_id:
-                    sqlite_data[rec_id] = row_dict
+            df_sqlite = pd.read_sql_query(f'SELECT * FROM "{db_table}"', conn_sqlite)
+            df_sqlite = df_sqlite.astype(object).where(pd.notnull(df_sqlite), None)
+            print(f"Found {len(df_sqlite)} records in the SQLite database.")
 
-        except sqlite3.Error as e_sqlite:
-            traceback.print_exc()
-            if conn_sqlite: conn_sqlite.close()
-            return False, f"Sync Error: Reading SQLite failed - {type(e_sqlite).__name__}"
         except Exception as e:
             traceback.print_exc()
+            return False, f"Sync Error: Failed during SQLite read stage. ({e})"
+        finally:
             if conn_sqlite: conn_sqlite.close()
-            return False, f"Sync Error: Unexpected error reading SQLite - {type(e).__name__}"
 
-        # Compare Excel vs SQLite
-        updates_to_apply = [] # Store all update operations to perform
-        records_processed = 0 # Total Excel records examined
-        records_updated = 0 # How many rows were actually different (and need updating)
-        db_cols_set = set(db_cols) # Set of column names in the SQLite table (used for quick lookup)
+        # --- 4. Compare Datasets and Identify Changes ---
+        df_excel.set_index(guid_column_excel, inplace=True, drop=False)
+        if not df_sqlite.empty:
+            df_sqlite[guid_db_col_name] = df_sqlite[guid_db_col_name].astype(str)
+            df_sqlite.set_index(guid_db_col_name, inplace=True, drop=False)
+        
+        records_to_insert = [row.to_dict() for guid, row in df_excel.iterrows() if guid not in df_sqlite.index]
+        records_to_update = []
 
-        # Iterate over each row from Excel
-        for rec_id, excel_row_dict in excel_data.items():
-            records_processed += 1
-            if rec_id in sqlite_data:
-                sqlite_row_dict = sqlite_data[rec_id]
-                row_needs_update = False
+        common_guids = df_excel.index.intersection(df_sqlite.index)
+        for guid in common_guids:
+            excel_row = df_excel.loc[guid]
+            sqlite_row = df_sqlite.loc[guid]
+            is_different = False
+            for excel_col, excel_val in excel_row.items():
+                db_col = excel_to_db_map.get(excel_col)
+                if db_col in sqlite_row:
+                    sqlite_val = sqlite_row[db_col]
+                    if self._values_are_different(excel_val, sqlite_val):
+                        is_different = True
+                        break # Found a difference, no need to check other columns
+            if is_different:
+                records_to_update.append(excel_row.to_dict())
 
-                # Compare Column by Column
-                for excel_col_name, excel_val in excel_row_dict.items():
-                    if excel_col_name in db_cols_set and excel_col_name != guid_column:
-                        # Get the corresponding value from SQLite
-                        sqlite_val = sqlite_row_dict.get(excel_col_name)
-                        # Handle Special Formatting (Date/Time)
-                        formatted_excel_val = excel_val
-                        comparison_val = excel_val
+        print(f"Found {len(records_to_insert)} records to insert.")
+        print(f"Found {len(records_to_update)} records to update.")
 
-                        if excel_col_name == date_col_name and isinstance(excel_val, pd.Timestamp):
-                            try:
-                                # Normalize both values to strings
-                                formatted_excel_val = excel_val.strftime('%Y-%m-%d')
-                                comparison_val = formatted_excel_val
-                            except Exception: pass
-                        elif excel_col_name == time_col_name and isinstance(excel_val, float):
-                            try:
-                                total_seconds = int(excel_val * 24 * 60 * 60)
-                                hours = (total_seconds % (24 * 3600)) // 3600
-                                minutes = (total_seconds % 3600) // 60
-                                seconds = total_seconds % 60
-                                formatted_excel_val = f"{hours:02}:{minutes:02}:{seconds:02}"
-                                comparison_val = formatted_excel_val
-                            except Exception: pass
+        # --- 5. Apply Changes to the Database ---
+        if not records_to_insert and not records_to_update:
+            return True, "Sync complete. No changes detected."
 
-                        str_comparison_val = str(comparison_val) if comparison_val is not None else ""
-                        str_sqlite_val = str(sqlite_val) if sqlite_val is not None else ""
-                        # Compare: If they are not equal, add the field to the update dictionary
-                        if str_comparison_val != str_sqlite_val:
-                            updates_to_apply.append((rec_id, excel_col_name, formatted_excel_val))
-                            row_needs_update = True
-
-                # If Differences Found, Queue Update
-                if row_needs_update:
-                    records_updated += 1
-        #Applying Updates to SQLite
-
-        # If no updates are needed, return early
-        if not updates_to_apply:
-            if conn_sqlite: conn_sqlite.close()
-            return True, "Sync complete. No changes detected in {records_processed} Excel rows."
-
+        conn_sqlite = None
         try:
+            conn_sqlite = sqlite3.connect(db_file, timeout=10)
             cursor = conn_sqlite.cursor()
-            updates_by_record = {}
-            for rec_id, col, val in updates_to_apply:
-                if rec_id not in updates_by_record: updates_by_record[rec_id] = {}
-                updates_by_record[rec_id][col] = val
 
-            for rec_id, col_val_dict in updates_by_record.items():
-                set_clauses = []
-                values = []
-                for col, val in col_val_dict.items():
-                    set_clauses.append(f"[{col}] = ?")
-                    values.append(val)
-                if set_clauses:
-                    values.append(rec_id)
-                    sql_update = f"UPDATE [{db_table}] SET {', '.join(set_clauses)} WHERE [{guid_column}] = ?"
-                    cursor.execute(sql_update, values)
+            # Process Inserts
+            for record in records_to_insert:
+                cols_to_use = [excel_to_db_map[k] for k in record.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
+                vals_to_use = [record[k] for k in record.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
+                
+                placeholders = ', '.join(['?'] * len(cols_to_use))
+                sql = f"INSERT INTO \"{db_table}\" ({', '.join(f'\"{c}\"' for c in cols_to_use)}) VALUES ({placeholders})"
+                cursor.execute(sql, vals_to_use)
+
+            # Process Updates
+            for record in records_to_update:
+                guid_val = record[guid_column_excel]
+                updates = {excel_to_db_map[k]: v for k, v in record.items() if k in excel_to_db_map and k != guid_column_excel and excel_to_db_map[k] in db_cols_set}
+                if not updates: continue
+                
+                set_clauses = [f'"{col}" = ?' for col in updates.keys()]
+                values = list(updates.values()) + [guid_val]
+                
+                sql = f"UPDATE \"{db_table}\" SET {', '.join(set_clauses)} WHERE \"{guid_db_col_name}\" = ?"
+                cursor.execute(sql, values)
+
             conn_sqlite.commit()
-            if conn_sqlite: conn_sqlite.close()
-            return True, f"Sync successful. Updated {len(updates_by_record)} records ({cursor.rowcount} rows affected) in SQLite."
+            print(f"Successfully committed changes to the database.")
+            return True, f"Sync successful. Inserted: {len(records_to_insert)}. Updated: {len(records_to_update)}."
 
-        except sqlite3.Error as e_update:
-            traceback.print_exc()
-            if conn_sqlite:
-                try: conn_sqlite.rollback()
-                except Exception: pass
-                conn_sqlite.close()
-            return False, f"Sync Error: Updating SQLite failed - {type(e_update).__name__}"
         except Exception as e:
+            if conn_sqlite: conn_sqlite.rollback()
             traceback.print_exc()
-            if conn_sqlite:
-                try: conn_sqlite.rollback()
-                except Exception: pass
-                conn_sqlite.close()
-            return False, f"Sync Error: Unexpected error updating SQLite - {type(e).__name__}"
+            return False, f"Sync Error: Failed to write to SQLite. ({e})"
+        finally:
+            if conn_sqlite: conn_sqlite.close()
 
     def create_status_bar(self):
         '''

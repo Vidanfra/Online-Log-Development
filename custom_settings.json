@@ -1,6 +1,6 @@
 {
-    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
-    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV",
+    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
+    "txt_folder_path": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing",
     "txt_folder_path_set2": "",
     "txt_folder_path_set3": "",
     "txt_field_columns_config": [
@@ -72,31 +72,13 @@
         },
         {
             "field": "Custom_Field_12",
-            "column_name": "Depth",
-            "db_column_name": "depth",
-            "skip": false
-        },
-        {
-            "field": "Custom_Field_13",
-            "column_name": "Custom_Col_13",
-            "db_column_name": "",
-            "skip": false
-        },
-        {
-            "field": "Custom_Field_14",
-            "column_name": "Custom_Col_14",
-            "db_column_name": "",
-            "skip": false
-        },
-        {
-            "field": "Custom_Field_15",
-            "column_name": "Custom_Col_15",
+            "column_name": "Custom_Col_12",
             "db_column_name": "",
             "skip": false
         }
     ],
     "folder_paths": {
-        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV"
+        "Main TXT File": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File"
@@ -379,9 +361,9 @@
             null
         ]
     },
-    "sqlite_enabled": false,
-    "sqlite_db_path": "",
-    "sqlite_table": "EventLog",
+    "sqlite_enabled": true,
+    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL/RHM_600053_UXO_IDC.sqlite",
+    "sqlite_table": "fieldlog",
     "always_on_top": false,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,

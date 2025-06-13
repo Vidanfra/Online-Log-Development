@@ -27,3 +27,4 @@
 | 10/06/2025 | Update the Tkinter Custom Layout |   Makes GUI Better | Not prioritary | 
 | 10/06/2025 | Field Log Viewer   |   Ability to sync SQl DB to Field log viewer for offline | DONE |
 | 10/06/2025 | TXT, Excel Log, SQLite Headers mapping | User defined matching the columns from the columns in every file from the Settings menu| DONE |
+| 13/06/2025    |   GUID Duplication    |   If dupilicate or missing guid is found then prompt to generate new guid for conflicting cells | **TO DO**   |
