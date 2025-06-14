@@ -789,6 +789,21 @@ class DataLoggerGUI:
         before performing the main sync operation.
         '''
         # --- 1. Initial validation checks ---
+
+        # Inform user to save the file before proceeding
+        should_proceed = messagebox.askokcancel(
+            "Save Before Syncing",
+            "Please ensure the Excel log file has been saved before proceeding. You can save it now if you forgot it.\n\n"
+            "Click OK to continue with the sync.\n"
+            "Click Cancel to stop the operation.",
+            icon='warning',
+            parent=self.master
+        )
+
+        if not should_proceed:
+            self.update_status("Sync cancelled by user.")
+            return
+        
         if not self.sqlite_enabled:
             messagebox.showwarning("Sync Skipped", "SQLite logging is not enabled in Settings.", parent=self.master)
             return
@@ -983,20 +998,6 @@ class DataLoggerGUI:
 
         if not all([excel_file, db_file, db_table]):
             return False, "Sync Error: Configuration paths or table missing."
-        
-        # Inform user to save the file before proceeding
-        should_proceed = messagebox.askokcancel(
-            "Save Before Syncing",
-            "Please ensure the Excel log file has been saved before proceeding. You can save it now if you forgot it.\n\n"
-            "Click OK to continue with the sync.\n"
-            "Click Cancel to stop the operation.",
-            icon='warning',
-            parent=self.master
-        )
-
-        if not should_proceed:
-            self.update_status("Sync cancelled by user.")
-            return False, "Sync cancelled by user."
 
         try:
             # --- 1. Read and Prepare Excel Data ---
