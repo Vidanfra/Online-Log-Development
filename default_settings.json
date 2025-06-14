@@ -1,6 +1,6 @@
 {
-    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
-    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/CSV",
+    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
+    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV",
     "txt_folder_path_set2": "",
     "txt_folder_path_set3": "",
     "txt_field_columns_config": [
@@ -30,8 +30,8 @@
         },
         {
             "field": "Line name",
-            "column_name": "Target",
-            "db_column_name": "",
+            "column_name": "Runline",
+            "db_column_name": "runline",
             "skip": false
         },
         {
@@ -71,14 +71,110 @@
             "skip": false
         },
         {
-            "field": "Custom_Field_12",
-            "column_name": "Custom_Col_12",
-            "db_column_name": "",
+            "field": "Vessel",
+            "column_name": "='MON - 09.06'!H4",
+            "db_column_name": "vessel",
+            "skip": false
+        },
+        {
+            "field": "Project Manager",
+            "column_name": "='MON - 09.06'!B2",
+            "db_column_name": "isurvey_project_manager",
+            "skip": false
+        },
+        {
+            "field": "ROV",
+            "column_name": "='MON - 09.06'!B3",
+            "db_column_name": "rov",
+            "skip": false
+        },
+        {
+            "field": "Trencher",
+            "column_name": "='MON - 09.06'!B4",
+            "db_column_name": "trencher",
+            "skip": false
+        },
+        {
+            "field": "Job description",
+            "column_name": "='MON - 09.06'!H2",
+            "db_column_name": "job_description",
+            "skip": false
+        },
+        {
+            "field": "Reach OPCO",
+            "column_name": "='MON - 09.06'!H5",
+            "db_column_name": "isurvey_opco",
+            "skip": false
+        },
+        {
+            "field": "Client",
+            "column_name": "='MON - 09.06'!H1",
+            "db_column_name": "client_name",
+            "skip": false
+        },
+        {
+            "field": "OM",
+            "column_name": "='MON - 09.06'!H7",
+            "db_column_name": "client_offshore_manager",
+            "skip": false
+        },
+        {
+            "field": "Survey Rep.",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "client_survey_rep",
+            "skip": false
+        },
+        {
+            "field": "Proj. Engineer",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "client_project_engineer",
+            "skip": false
+        },
+        {
+            "field": "Senior Surveyor",
+            "column_name": "='MON - 09.06'!V2",
+            "db_column_name": "isurvey_party_chief",
+            "skip": false
+        },
+        {
+            "field": "Online Day",
+            "column_name": "='MON - 09.06'!V3",
+            "db_column_name": "isurvey_online_day",
+            "skip": false
+        },
+        {
+            "field": "Online Night",
+            "column_name": "='MON - 09.06'!V4",
+            "db_column_name": "isurvey_online_night",
+            "skip": false
+        },
+        {
+            "field": "Offline Day",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "isurvey_offline_day",
+            "skip": false
+        },
+        {
+            "field": "Offline Night",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "isurvey_offline_night",
+            "skip": false
+        },
+        {
+            "field": "Survey Tech",
+            "column_name": "='MON - 09.06'!V7",
+            "db_column_name": "isurvey_survey_tech",
+            "skip": false
+        },
+        {
+            "field": "Survey Other",
+            "column_name": "='MON - 09.06'!V8",
+            "db_column_name": "isurvey_other",
             "skip": false
         }
     ],
     "folder_paths": {
-        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/CSV"
+        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File"
@@ -268,6 +364,70 @@
             "#00ffff",
             null
         ],
+        "ROV off Deck": [
+            "#d3a8ff",
+            null
+        ],
+        "ROV on Deck": [
+            "#d3a8ff",
+            null
+        ],
+        "METEO": [
+            null,
+            "#0080ff"
+        ],
+        "TSS BGC": [
+            "#FFDFBA",
+            null
+        ],
+        "STILL PICTURE": [
+            "#dddddd",
+            null
+        ],
+        "As-Left Start": [
+            "#BAFFC9",
+            "#008000"
+        ],
+        "As-Left End": [
+            "#FFB3BA",
+            "#ff0000"
+        ],
+        "As-Found Start": [
+            "#598000",
+            "#FFFFFF"
+        ],
+        "As-Found End": [
+            "#a60000",
+            "#FFFFFF"
+        ],
+        "Dredge on Target": [
+            "#FFFFBA",
+            null
+        ],
+        "Vessel Move": [
+            "#ffffff",
+            null
+        ],
+        "ROV Other": [
+            "#a8ffff",
+            null
+        ],
+        "UXO Placed": [
+            "#ffffff",
+            null
+        ],
+        "ID&C Start": [
+            "#000000",
+            "#FFFFFF"
+        ],
+        "ID&C Completed": [
+            "#000000",
+            "#FFFFFF"
+        ],
+        "Custom 21": [
+            "#FFFFBA",
+            "#FFFFFF"
+        ],
         "Custom Event 1": [
             "#BAE1FF",
             null
@@ -295,70 +455,6 @@
         "Custom 12": [
             "#FFFFBA",
             null
-        ],
-        "Custom 21": [
-            "#FFFFBA",
-            "#FFFFFF"
-        ],
-        "ROV off Deck": [
-            "#d3a8ff",
-            null
-        ],
-        "ROV on Deck": [
-            "#d3a8ff",
-            null
-        ],
-        "METEO": [
-            null,
-            "#0080ff"
-        ],
-        "STILL PICTURE": [
-            "#dddddd",
-            null
-        ],
-        "TSS BGC": [
-            "#FFDFBA",
-            null
-        ],
-        "Dredge on Target": [
-            "#FFFFBA",
-            null
-        ],
-        "Vessel Move": [
-            "#ffffff",
-            null
-        ],
-        "UXO Placed": [
-            "#ffffff",
-            null
-        ],
-        "ROV Other": [
-            "#a8ffff",
-            null
-        ],
-        "As-Left Start": [
-            "#BAFFC9",
-            "#008000"
-        ],
-        "As-Left End": [
-            "#FFB3BA",
-            "#ff0000"
-        ],
-        "As-Found Start": [
-            "#598000",
-            "#FFFFFF"
-        ],
-        "As-Found End": [
-            "#a60000",
-            "#FFFFFF"
-        ],
-        "ID&C Completed": [
-            "#000000",
-            "#FFFFFF"
-        ],
-        "ID&C Start": [
-            "#000000",
-            "#FFFFFF"
         ]
     },
     "sqlite_enabled": true,
@@ -369,7 +465,7 @@
     "hourly_event_enabled": true,
     "main_button_configs": {
         "Log on": {
-            "event_text": "Log on event occurred",
+            "event_text": "Log on ",
             "event_code": "LogON"
         },
         "Log off": {

@@ -1,12 +1,12 @@
 | Date       | Feature                       | Description                                    | Status      |
 | :--------- | :---------------------------- | :--------------------------------------------- | :---------- |
-| 12/06/2025 | Excel Log Data | The user should define in the Data Columns menu a command to look for a certain field in the Excel Log wb. For example: Project Manager -> =SHEET2,F4 (Sheet 2, Cell F4)  | **To Do** |
+| 12/06/2025 | Excel Log Data | The user should define in the Data Columns menu a command to look for a certain field in the Excel Log wb. For example: Project Manager -> =SHEET2,F4 (Sheet 2, Cell F4)  | DONE |
 | 12/06/2025 | Fix the bug with DB Sync | Something was broken in the Excel Log - SQL DB review process. Needs to be repaired  | DONE |
 | 12/06/2025 | Reorganize button layout | Now the buttons distribuite in columns in the GUI according to the order in the Settings list. They should distribuite in rows | **To Do** |
 | 12/06/2025 | Add Up and Down buttons in the Custom Buttons list | This would make easier for the user to reorganize the position of the buttons in the layout | **To Do** |
 | 12/06/2025 | Vehicle input field in File path menu | This will assign a value (Vessel, ROV, etc) for the KP Ref column  | **To Do** |
 | 12/06/2025 | Adapt settings for Igor Log Excel Template| Map the new headers in the Data Columns Menu  | **To Do** |
-| 12/06/2025 | Sequential number in Data Column tab | Display in the left a fix column of numbers to indicate the positions of the columns in the TXT file  | **To Do** |
+| 12/06/2025 | Sequential number in Data Column tab | Display in the left a fix column of numbers to indicate the positions of the columns in the TXT file  | DONE |
 | 12/06/2025 | Fix bug with selected buttons Data Columns | When a row is added. moved up or down or modified. the REMOVE button makes bigger to indicate it has been selected. The problem is that the button keeps this size even when it is no longer selected. This makes the layout ugly and confusing  | **To Do** |
 | 09/06/2025 | Automatic updates defined by user based on value in text file | script should be able to look at the text file and create an event when a value is reached, for example ROV depth at 15m | **To Do** |
 | 05/06/2025 | Hotkeys                       | Keyboard shortcuts for various functions       | **To Do**       |

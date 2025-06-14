@@ -13,6 +13,7 @@ import sqlite3 # Use Python's built-in SQLite module
 import uuid
 import pandas as pd
 import openpyxl
+import re
 
 # --- DEFINED CONSTANTS ---
 # PATHS
@@ -984,7 +985,7 @@ class DataLoggerGUI:
         # If the loop finishes, the header was not found
         raise ValueError(f"Crucial '{required_column}' column not found in the first {max_rows_to_scan} rows.")
 
-    def perform_excel_to_sqlite_sync(self):
+    def perform_excel_to_sqlite_sync(self, static_data=None):
         '''
         This function ensures the SQLite database reflects the latest data from the Excel log.
         It uses a robust, time-based matching system to prevent duplicate records when
@@ -1011,6 +1012,7 @@ class DataLoggerGUI:
             
             if guid_column_excel not in df_excel.columns:
                 return False, f"Sync Error: Crucial '{guid_column_excel}' column not found."
+            
     
             df_excel.dropna(subset=[guid_column_excel], inplace=True)
             df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(str).str.strip().str.upper()
@@ -1115,8 +1117,9 @@ class DataLoggerGUI:
 
             # Process records with new GUIDs using the intelligent function
             for record in records_with_new_guid:
-                # Note: The `update_or_insert_record` function is part of the previous response. 
-                # Ensure it is also present in your class.
+                # Before processing, merge the static data into this specific new record.
+                if static_data:
+                    record.update(static_data)
                 action = self.update_or_insert_record(record, cursor, db_table, excel_to_db_map, db_cols_set, orphaned_records_df)
                 if action == "REPLACE":
                     replaced_count += 1
@@ -1126,7 +1129,17 @@ class DataLoggerGUI:
             # Process Updates for existing GUIDs
             for record in records_to_update:
                 guid_val = record[guid_column_excel]
+
+                # Build the dictionary of updates for this record
                 updates = {excel_to_db_map[k]: v for k, v in record.items() if k in excel_to_db_map and k != guid_column_excel and excel_to_db_map[k] in db_cols_set}
+                
+                # Now, add the static data to the dictionary of updates.
+                # This ensures it's included in the SQL UPDATE statement.
+                if static_data:
+                    for excel_formula_key, value in static_data.items():
+                        db_col_name = excel_to_db_map.get(excel_formula_key)
+                        if db_col_name:
+                            updates[db_col_name] = value
                 if not updates: continue
                 if 'event' in updates and updates['event'] is None: updates['event'] = ''
                 
@@ -1402,6 +1415,18 @@ class DataLoggerGUI:
                     print(f"txt_source_key is 'None' or empty, skipping TXT data collection.")  # DIAGNOSTIC
                 # --- End TXT Data Collection ---
 
+                # --- Collect Static Data from Excel Cells ---
+                try:
+                    print("Attempting to get static data from Excel cells...")
+                    static_data_from_cells = self._get_static_excel_data()
+                    if static_data_from_cells:
+                        # Merge the static data into the main data dictionary.
+                        # The keys will be the formula strings (e.g., "='Sheet1'!F4")
+                        row_data.update(static_data_from_cells)
+                        print(f"Successfully merged static data: {static_data_from_cells}")
+                except Exception as e_static:
+                    print(f"Error getting static data from Excel cells: {e_static}")
+
                 if not skip_latest_files:
                     try:
                         latest_files_data = self.get_latest_files_data()
@@ -1478,8 +1503,14 @@ class DataLoggerGUI:
                     # 2. If Excel save was successful AND SQLite is enabled, trigger the sync
                     if excel_success and self.sqlite_enabled:
                         print("Excel write successful, now syncing to SQLite...")
-                        # REPLACED a direct INSERT with the full, robust sync function
-                        sqlite_success, sync_message = self.perform_excel_to_sqlite_sync()
+                        # The static data was already gathered into the 'row_data' dictionary.
+                        # We need to extract just the part that came from static cells to pass it.
+                        static_data_to_pass = {
+                            key: val for key, val in row_data.items() if str(key).startswith('=')
+                        }
+
+                        # Call the sync function and pass the static data to it.
+                        sqlite_success, sync_message = self.perform_excel_to_sqlite_sync(static_data=static_data_to_pass)
 
                         # Update status based on sync result
                         if sqlite_success:
@@ -1690,6 +1721,76 @@ class DataLoggerGUI:
             return max(files, key=os.path.getmtime) if files else None
         except FileNotFoundError: return None
         except Exception: return None
+
+    def _get_static_excel_data(self):
+        """
+        Reads data from specific cells in the Excel log file based on the
+        "='SheetName'!Cell" syntax in the data mapping configuration.
+        """
+        static_data = {}
+        # Filter for configs that use the static cell lookup syntax
+        cell_lookup_configs = [
+            item for item in self.txt_field_columns_config
+            if str(item.get("column_name")).startswith('=') and not item.get("skip")
+        ]
+
+        if not cell_lookup_configs:
+            return static_data  # Return empty if no lookups are configured
+
+        app, workbook, opened_new_app = None, None, False
+        try:
+            print("Connecting to Excel to read static cell data...")
+            # This logic connects to an existing instance or opens a new one
+            target_norm_path = os.path.normcase(os.path.abspath(self.log_file_path))
+            for running_app in xw.apps:
+                for wb in running_app.books:
+                    try:
+                        if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
+                            workbook, app = wb, running_app
+                            break
+                    except Exception: continue
+                if workbook: break
+            
+            if workbook is None:
+                app = xw.App(visible=False)
+                opened_new_app = True
+                workbook = app.books.open(self.log_file_path, read_only=True)
+
+            # Process each defined cell lookup
+            for config in cell_lookup_configs:
+                lookup_str = config["column_name"]
+                # The key for the returned dictionary is the "Excel Column" name itself,
+                # as this is what the rest of the pipeline expects.
+                excel_col_key = config["column_name"]
+                try:
+                    # Parse the syntax: ='SheetName'!CellRef
+                    # Using a more robust regex for parsing
+                    match = re.match(r"='?([^'!]+)'?!([A-Z]+\d+)", lookup_str, re.IGNORECASE)
+                    if not match:
+                        print(f"Warning: Invalid cell lookup syntax '{lookup_str}'. Skipping.")
+                        continue
+                    
+                    sheet_name, cell_ref = match.groups()
+                    sheet = workbook.sheets[sheet_name]
+                    value = sheet.range(cell_ref).value
+                    
+                    static_data[excel_col_key] = value
+                    print(f"Read '{value}' from {sheet_name}!{cell_ref} for mapping '{excel_col_key}'")
+
+                except Exception as e:
+                    print(f"Error reading from Excel cell for lookup '{lookup_str}': {e}")
+            
+            return static_data
+
+        except Exception as e:
+            print(f"Could not open or connect to Excel to read static data: {e}")
+            return {} # Return empty on major error
+        finally:
+            # Only quit the app if this function started it
+            if app is not None and opened_new_app:
+                try:
+                    app.quit()
+                except Exception: pass
 
     def save_to_excel(self, row_data, row_color=None, font_color=None, next_row=None): # Added font_color parameter
         '''Saves the provided row_data to the specified Excel log file.'''
@@ -3458,7 +3559,7 @@ class SettingsWindow:
         ttk.Label(header_frame, text="Order", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
         ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w')
         ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=8, sticky='w')
-        ttk.Label(header_frame, text="Excel Column/Cell", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Excel Column / Cell", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
         ttk.Label(header_frame, text="DB Column", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
         ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
         ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=6, padx=6, sticky='w')
@@ -3622,7 +3723,7 @@ class SettingsWindow:
             column_entry = ttk.Entry(parent_frame)
             column_entry.insert(0, config.get("column_name", config["field"]))
             column_entry.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky="ew")
-            ToolTip(column_entry, "Enter the column name for the Excel Log.")
+            ToolTip(column_entry, "Enter the column header for the Excel Log, OR a static cell reference using the format: ='SheetName'!A1")
             widgets_in_row.append(column_entry)
 
 

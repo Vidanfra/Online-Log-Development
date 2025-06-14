@@ -71,9 +71,105 @@
             "skip": false
         },
         {
-            "field": "Custom_Field_12",
-            "column_name": "Custom_Col_12",
-            "db_column_name": "",
+            "field": "Vessel",
+            "column_name": "='MON - 09.06'!H4",
+            "db_column_name": "vessel",
+            "skip": false
+        },
+        {
+            "field": "Project Manager",
+            "column_name": "='MON - 09.06'!B2",
+            "db_column_name": "isurvey_project_manager",
+            "skip": false
+        },
+        {
+            "field": "ROV",
+            "column_name": "='MON - 09.06'!B3",
+            "db_column_name": "rov",
+            "skip": false
+        },
+        {
+            "field": "Trencher",
+            "column_name": "='MON - 09.06'!B4",
+            "db_column_name": "trencher",
+            "skip": false
+        },
+        {
+            "field": "Job description",
+            "column_name": "='MON - 09.06'!H2",
+            "db_column_name": "job_description",
+            "skip": false
+        },
+        {
+            "field": "Reach OPCO",
+            "column_name": "='MON - 09.06'!H5",
+            "db_column_name": "isurvey_opco",
+            "skip": false
+        },
+        {
+            "field": "Client",
+            "column_name": "='MON - 09.06'!H1",
+            "db_column_name": "client_name",
+            "skip": false
+        },
+        {
+            "field": "OM",
+            "column_name": "='MON - 09.06'!H7",
+            "db_column_name": "client_offshore_manager",
+            "skip": false
+        },
+        {
+            "field": "Survey Rep.",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "client_survey_rep",
+            "skip": false
+        },
+        {
+            "field": "Proj. Engineer",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "client_project_engineer",
+            "skip": false
+        },
+        {
+            "field": "Senior Surveyor",
+            "column_name": "='MON - 09.06'!V2",
+            "db_column_name": "isurvey_party_chief",
+            "skip": false
+        },
+        {
+            "field": "Online Day",
+            "column_name": "='MON - 09.06'!V3",
+            "db_column_name": "isurvey_online_day",
+            "skip": false
+        },
+        {
+            "field": "Online Night",
+            "column_name": "='MON - 09.06'!V4",
+            "db_column_name": "isurvey_online_night",
+            "skip": false
+        },
+        {
+            "field": "Offline Day",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "isurvey_offline_day",
+            "skip": false
+        },
+        {
+            "field": "Offline Night",
+            "column_name": "='MON - 09.06'!D1",
+            "db_column_name": "isurvey_offline_night",
+            "skip": false
+        },
+        {
+            "field": "Survey Tech",
+            "column_name": "='MON - 09.06'!V7",
+            "db_column_name": "isurvey_survey_tech",
+            "skip": false
+        },
+        {
+            "field": "Survey Other",
+            "column_name": "='MON - 09.06'!V8",
+            "db_column_name": "isurvey_other",
             "skip": false
         }
     ],
