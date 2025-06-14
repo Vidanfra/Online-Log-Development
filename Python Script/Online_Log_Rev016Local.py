@@ -3443,23 +3443,25 @@ class SettingsWindow:
         """Adds a header row to the TXT field mapping section."""
         
         # Apply column configuration to the single, shared parent frame
-        parent.grid_columnconfigure(0, weight=2, minsize=150) # TXT Field Name
-        parent.grid_columnconfigure(1, weight=2, minsize=150) # Target Excel Column
-        parent.grid_columnconfigure(2, weight=2, minsize=150) # Target DB Column
-        parent.grid_columnconfigure(3, weight=2, minsize=150) # Preview Data
-        parent.grid_columnconfigure(4, weight=0, minsize=50)  # Skip
-        parent.grid_columnconfigure(5, weight=0, minsize=80)  # Actions
+        parent.grid_columnconfigure(0, weight=2, minsize=50) # TXT Field Name
+        parent.grid_columnconfigure(1, weight=2, minsize=150) # TXT Field Name
+        parent.grid_columnconfigure(2, weight=2, minsize=150) # Target Excel Column
+        parent.grid_columnconfigure(3, weight=2, minsize=150) # Target DB Column
+        parent.grid_columnconfigure(4, weight=2, minsize=150) # Preview Data
+        parent.grid_columnconfigure(5, weight=0, minsize=50)  # Skip
+        parent.grid_columnconfigure(6, weight=0, minsize=80)  # Actions
 
         header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
         header_frame.grid(row=0, column=0, columnspan=8, sticky="ew") # Span all columns
 
         # Place labels inside the header_frame, but they will align because the parent of header_frame has the config
-        ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=8, sticky='w')
-        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=6, sticky='w')
-        ttk.Label(header_frame, text="DB Column", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Order", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
+        ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=8, sticky='w')
+        ttk.Label(header_frame, text="Excel Column/Cell", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
+        ttk.Label(header_frame, text="DB Column", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=6, padx=6, sticky='w')
 
         # Also apply the same column configure to the header_frame itself so its internal labels space out correctly
         for i in range(6):
@@ -3594,28 +3596,32 @@ class SettingsWindow:
             # Create a list to hold all widgets for this row for easy selection/styling
             widgets_in_row = []
 
+            order_label = ttk.Label(parent_frame, text=str(i + 1), anchor='center')
+            order_label.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
+            widgets_in_row.append(order_label)
+
             # TXT Field Label/Entry
             current_field_entry_widget = None
             if config["field"] in default_fixed_fields:
                 field_widget = ttk.Label(parent_frame, text=f"{config['field']}:", anchor='w')
-                field_widget.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
+                field_widget.grid(row=grid_row_index, column=1, padx=5, pady=2, sticky='ew')
             else:
                 field_widget = ttk.Entry(parent_frame)
                 field_widget.insert(0, config["field"])
-                field_widget.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
+                field_widget.grid(row=grid_row_index, column=1, padx=5, pady=2, sticky='ew')
                 ToolTip(field_widget, "Enter the exact name of the field as it appears in the TXT file.")
                 current_field_entry_widget = field_widget
             widgets_in_row.append(field_widget)
 
             # Preview Data Label
             preview_label = ttk.Label(parent_frame, text="", anchor='w', foreground="blue")
-            preview_label.grid(row=grid_row_index, column=1, padx=5, pady=2, sticky='ew')
+            preview_label.grid(row=grid_row_index, column=2, padx=5, pady=2, sticky='ew')
             widgets_in_row.append(preview_label)
 
             # Target Excel Column Name
             column_entry = ttk.Entry(parent_frame)
             column_entry.insert(0, config.get("column_name", config["field"]))
-            column_entry.grid(row=grid_row_index, column=2, padx=5, pady=2, sticky="ew")
+            column_entry.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky="ew")
             ToolTip(column_entry, "Enter the column name for the Excel Log.")
             widgets_in_row.append(column_entry)
 
@@ -3624,7 +3630,7 @@ class SettingsWindow:
             # Target DB Column Name
             db_column_entry = ttk.Entry(parent_frame)
             db_column_entry.insert(0, config.get("db_column_name", ""))
-            db_column_entry.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky="ew")
+            db_column_entry.grid(row=grid_row_index, column=4, padx=5, pady=2, sticky="ew")
             ToolTip(db_column_entry, "Enter the target column name for the SQLite Database.")
             widgets_in_row.append(db_column_entry)
 
@@ -3632,7 +3638,7 @@ class SettingsWindow:
             # Skip Checkbox
             skip_var = tk.BooleanVar(value=config.get("skip", False))
             skip_checkbox = ttk.Checkbutton(parent_frame, variable=skip_var)
-            skip_checkbox.grid(row=grid_row_index, column=4, padx=(15,5), pady=2, sticky='w')
+            skip_checkbox.grid(row=grid_row_index, column=5, padx=(15,5), pady=2, sticky='w')
             widgets_in_row.append(skip_checkbox)
 
             # Remove Button
@@ -3640,7 +3646,7 @@ class SettingsWindow:
                                      command=lambda idx=i: self.remove_txt_field_row(idx))
             if config["field"] in default_fixed_fields:
                 remove_btn.config(state=tk.DISABLED)
-            remove_btn.grid(row=grid_row_index, column=5, padx=5, pady=2, sticky='w')
+            remove_btn.grid(row=grid_row_index, column=6, padx=5, pady=2, sticky='w')
             widgets_in_row.append(remove_btn)
 
             # Bind click event to all widgets in the row for selection
