@@ -983,10 +983,27 @@ class DataLoggerGUI:
 
         if not all([excel_file, db_file, db_table]):
             return False, "Sync Error: Configuration paths or table missing."
+        
+        # Inform user to save the file before proceeding
+        should_proceed = messagebox.askokcancel(
+            "Save Before Syncing",
+            "Please ensure the Excel log file has been saved before proceeding. You can save it now if you forgot it.\n\n"
+            "Click OK to continue with the sync.\n"
+            "Click Cancel to stop the operation.",
+            icon='warning',
+            parent=self.master
+        )
+
+        if not should_proceed:
+            self.update_status("Sync cancelled by user.")
+            return False, "Sync cancelled by user."
 
         try:
             # --- 1. Read and Prepare Excel Data ---
-            excel_engine = 'pyxlsb' if excel_file.lower().endswith('.xlsb') else 'openpyxl'
+            if excel_file.lower().endswith('.xlsb'): excel_engine = 'pyxlsb'
+            elif excel_file.lower().endswith('.xlsx'): excel_engine = 'openpyxl'
+            else: return False, "Sync Error: Unsupported file format. Please use .xlsx or .xlsb."
+
             header_row = self._find_header_row(excel_file, excel_engine, required_column=guid_column_excel)
             df_excel = pd.read_excel(excel_file, engine=excel_engine, header=header_row)
             df_excel = df_excel.astype(object).where(pd.notnull(df_excel), None)

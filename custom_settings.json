@@ -1,6 +1,6 @@
 {
-    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
-    "txt_folder_path": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing",
+    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
+    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV",
     "txt_folder_path_set2": "",
     "txt_folder_path_set3": "",
     "txt_field_columns_config": [
@@ -78,7 +78,7 @@
         }
     ],
     "folder_paths": {
-        "Main TXT File": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing"
+        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File"
@@ -362,9 +362,9 @@
         ]
     },
     "sqlite_enabled": true,
-    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL/RHM_600053_UXO_IDC.sqlite",
+    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/SQL/RHM_600053_UXO_IDC.sqlite",
     "sqlite_table": "fieldlog",
-    "always_on_top": false,
+    "always_on_top": true,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
     "main_button_configs": {
