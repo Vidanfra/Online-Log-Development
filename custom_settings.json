@@ -30,8 +30,8 @@
         },
         {
             "field": "Line name",
-            "column_name": "Target",
-            "db_column_name": "",
+            "column_name": "Runline",
+            "db_column_name": "runline",
             "skip": false
         },
         {
@@ -369,7 +369,7 @@
     "hourly_event_enabled": true,
     "main_button_configs": {
         "Log on": {
-            "event_text": "Log on event occurred",
+            "event_text": "Log on ",
             "event_code": "LogON"
         },
         "Log off": {

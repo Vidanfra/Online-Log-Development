@@ -635,6 +635,147 @@ class DataLoggerGUI:
 
         self.update_db_indicator()
 
+    def _write_guids_to_excel(self, updates: dict, excel_file: str, header_row_index: int):
+        """
+        Connects to an Excel instance and writes GUIDs to specific rows.
+
+        Args:
+            updates (dict): A dictionary mapping {excel_row_number: guid_to_write}.
+            excel_file (str): The full path to the target Excel file.
+            header_row_index (int): The zero-based index of the header row.
+        """
+        app, workbook, opened_new_app = None, None, False
+        guid_column_excel = "GUID"
+        try:
+            target_norm_path = os.path.normcase(os.path.abspath(excel_file))
+            # Find an existing Excel instance holding the workbook
+            for running_app in xw.apps:
+                for wb in running_app.books:
+                    try:
+                        if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
+                            workbook, app = wb, running_app
+                            break
+                    except Exception:
+                        continue
+                if workbook:
+                    break
+            
+            # If not found, open a new invisible instance
+            if workbook is None:
+                app = xw.App(visible=False)
+                opened_new_app = True
+                workbook = app.books.open(excel_file, read_only=False)
+
+            ws = workbook.sheets[0]
+            # Find the GUID column index based on the header row
+            header_values = ws.range(f'A{header_row_index + 1}').expand('right').value
+            guid_col_index = next((i + 1 for i, h in enumerate(header_values) if str(h).lower() == guid_column_excel.lower()), None)
+            
+            if guid_col_index is None:
+                raise ValueError(f"Could not find GUID column in the Excel header.")
+
+            # Write the updates
+            for row_num, guid_to_write in updates.items():
+                target_cell = ws.range(row_num, guid_col_index)
+                target_cell.number_format = '@' # Set format to Text
+                target_cell.value = guid_to_write
+            
+            workbook.save()
+            self.update_status("Successfully saved GUID repairs to Excel.")
+
+        except Exception as e:
+            traceback.print_exc()
+            messagebox.showerror("File Write Error", f"Failed to save repaired GUIDs to Excel.\n\nError: {e}", parent=self.master)
+            # Re-raise to be handled by the calling function
+            raise e
+        finally:
+            if app is not None and opened_new_app:
+                try:
+                    app.quit()
+                except Exception:
+                    pass
+
+    def update_or_insert_record(self, record_to_process, cursor, db_table, excel_to_db_map, db_cols_set, orphaned_guids_df):
+        """
+        Intelligently updates an existing orphaned record or inserts a new one.
+
+        This function checks if a new record from Excel matches an 'orphaned'
+        record in the database (based on a matching timestamp and event type).
+        If a unique match is found, it DELETES the old record and INSERTS the new one,
+        effectively replacing it while preserving the new GUID.
+        If no match is found, it performs a standard INSERT.
+
+        Args:
+            record_to_process (dict): The data dictionary for the new row from Excel.
+            cursor (sqlite3.Cursor): The database cursor for executing commands.
+            db_table (str): The name of the SQLite table.
+            excel_to_db_map (dict): Mapping from Excel column names to DB column names.
+            db_cols_set (set): A set of valid column names in the DB table.
+            orphaned_guids_df (pd.DataFrame): DataFrame containing DB records not present in Excel.
+
+        Returns:
+            str: A status indicating the action taken ('INSERT', 'REPLACE', or 'SKIP').
+        """
+        guid_val = record_to_process.get("GUID") 
+        time_fix_val = record_to_process.get('time_fix')
+        
+        # --- FIX ---
+        # 1. Look up the Excel column name for the "Event" field from the config.
+        excel_event_col = self.txt_field_columns.get("Event")
+        # 2. Get the event value from the incoming record using that Excel column name.
+        event_val = record_to_process.get(excel_event_col, "") if excel_event_col else ""
+        # 3. Look up the corresponding Database column name from the map.
+        db_event_col = excel_to_db_map.get(excel_event_col) if excel_event_col else None
+
+        # Find a potential match in the orphaned records
+        match = None
+        if time_fix_val and not orphaned_guids_df.empty:
+            # 4. Use the correct DB column name to build the match condition.
+            # Also check if the column actually exists in the orphaned DataFrame to prevent KeyErrors.
+            if db_event_col and db_event_col in orphaned_guids_df.columns:
+                match_mask = (orphaned_guids_df['time_fix'] == time_fix_val) & \
+                             (orphaned_guids_df[db_event_col].fillna('') == (event_val or ''))
+            else:
+                # Fallback to matching only on time if the Event column isn't in the DB
+                match_mask = (orphaned_guids_df['time_fix'] == time_fix_val)
+
+            potential_matches = orphaned_guids_df[match_mask]
+            if len(potential_matches) == 1:
+                match = potential_matches.iloc[0]
+
+        # Prepare the data for insertion, ensuring columns are valid
+        cols_to_use = [excel_to_db_map[k] for k in record_to_process.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
+        vals_to_use = [record_to_process[k] for k in record_to_process.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
+        
+        # Ensure 'event' (or its mapped name) is not None if it exists
+        if db_event_col in cols_to_use:
+            try:
+                event_col_index = cols_to_use.index(db_event_col)
+                if vals_to_use[event_col_index] is None:
+                    vals_to_use[event_col_index] = ''
+            except (ValueError, IndexError):
+                pass
+
+        placeholders = ', '.join(['?'] * len(cols_to_use))
+        sql_insert = f"INSERT INTO \"{db_table}\" ({', '.join(f'\"{c}\"' for c in cols_to_use)}) VALUES ({placeholders})"
+        guid_db_col_name = excel_to_db_map.get("GUID")
+
+        if match is not None:
+            # --- REPLACE action ---
+            # We found a unique orphan to replace. Delete the old one, insert the new one.
+            old_guid_to_delete = match[guid_db_col_name]
+            sql_delete = f"DELETE FROM \"{db_table}\" WHERE \"{guid_db_col_name}\" = ?"
+            
+            cursor.execute(sql_delete, (old_guid_to_delete,))
+            cursor.execute(sql_insert, vals_to_use)
+            return "REPLACE"
+        else:
+            # --- INSERT action ---
+            # No unique orphan found, proceed with a normal insert.
+            cursor.execute(sql_insert, vals_to_use)
+            return "INSERT"
+        
+
     # Function for always on top
     def toggle_always_on_top(self):
         """Toggles the 'always on top' state of the main window based on the checkbox."""
@@ -643,75 +784,132 @@ class DataLoggerGUI:
 
     def sync_excel_to_sqlite_triggered(self):
         '''
-        This function is triggered when the "Sync Excel->DB" button is pressed in the GUI.
-        Its job is to:
-        * Check if SQLite logging is enabled.
-        * Validate that the Excel file and SQLite DB paths are properly configured.
-        * Disable the button during syncing to avoid repeated clicks.
-        * Run the sync operation in a background thread (non-blocking).
-        * Re-enable the button and update the status when done.
+        This function is triggered by the "Sync DB" button. It now includes logic to
+        automatically repair duplicate GUIDs and re-link rows with missing GUIDs
+        before performing the main sync operation.
         '''
-
-        # Check if SQLite logging is enabled
+        # --- 1. Initial validation checks ---
         if not self.sqlite_enabled:
             messagebox.showwarning("Sync Skipped", "SQLite logging is not enabled in Settings.", parent=self.master)
-            self.update_status("Sync Error: SQLite disabled.")
             return
-        # Validate paths for Excel log file
         if not self.log_file_path or not os.path.exists(self.log_file_path):
             messagebox.showerror("Sync Error", "Excel log file path is not set or the file does not exist.", parent=self.master)
-            self.update_status("Sync Error: Excel file path invalid.")
             return
-        # Validate SQLite database path
         if not self.sqlite_db_path:
             messagebox.showerror("Sync Error", "SQLite database path is not set.", parent=self.master)
-            self.update_status("Sync Error: SQLite DB path missing.")
             return
 
-        sync_button = None
-        target_button_text = "Sync DB"
+        # --- 2. Read data and prepare for checking ---
         try:
-            # Searches the GUI for the button labeled "Sync DB"
-            if hasattr(self, 'button_frame') and self.button_frame:
-                # Iterate through child frames, then their children
-                for parent_frame_child in self.button_frame.winfo_children():
-                    if isinstance(parent_frame_child, ttk.Frame):
-                        for btn in parent_frame_child.winfo_children():
-                            if isinstance(btn, ttk.Button) and btn.cget('text') == target_button_text:
-                                sync_button = btn
-                                break
-                    if sync_button: break # Found it, exit outer loop
-        except Exception: pass
+            excel_file = self.log_file_path
+            guid_column_excel = "GUID"
+            excel_engine = 'pyxlsb' if excel_file.lower().endswith('.xlsb') else 'openpyxl'
 
-        original_text = None
+            header_row = self._find_header_row(excel_file, excel_engine, required_column=guid_column_excel)
+            df_excel = pd.read_excel(excel_file, engine=excel_engine, header=header_row)
+            df_excel['original_excel_row'] = df_excel.index + header_row + 2 # Get physical row number
+            df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(object).where(pd.notnull(df_excel[guid_column_excel]), None)
+
+            # --- 3. NEW: DUPLICATE GUID REPAIR LOGIC ---
+            # Standardize GUIDs for accurate detection
+            if guid_column_excel in df_excel.columns:
+                df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(str).str.upper().str.strip().replace('NONE', None)
+                valid_guids_mask = df_excel[guid_column_excel].notna() & (df_excel[guid_column_excel] != "")
+                duplicates_mask = df_excel.duplicated(subset=[guid_column_excel], keep='first') & valid_guids_mask
+
+                if duplicates_mask.any():
+                    num_duplicates = duplicates_mask.sum()
+                    prompt = (f"Found {num_duplicates} row(s) with duplicate GUIDs in the Excel file.\n\n"
+                              "This can happen if you copy/paste rows. To maintain data integrity, each row must have a unique GUID.\n\n"
+                              "Do you want to automatically generate new, unique GUIDs for the copied rows?")
+                    
+                    if messagebox.askyesno("Repair Duplicate GUIDs?", prompt, parent=self.master):
+                        rows_to_fix = df_excel[duplicates_mask]
+                        new_guids = [str(uuid.uuid4()).upper() for _ in range(num_duplicates)]
+                        df_excel.loc[duplicates_mask, guid_column_excel] = new_guids
+                        
+                        updates_to_write = {row['original_excel_row']: df_excel.loc[idx, guid_column_excel] for idx, row in rows_to_fix.iterrows()}
+                        self._write_guids_to_excel(updates_to_write, excel_file, header_row)
+                        messagebox.showinfo("Repair Complete", f"Successfully assigned {num_duplicates} new GUIDs.", parent=self.master)
+                    else:
+                        messagebox.showwarning("Sync Cancelled", "Please manually resolve the duplicate GUIDs before syncing.", parent=self.master)
+                        return
+
+            # --- 4. EXISTING: SMART RE-LINKING FOR MISSING GUIDS ---
+            conn_sqlite = sqlite3.connect(self.sqlite_db_path)
+            df_sqlite = pd.read_sql_query(f'SELECT * FROM "{self.sqlite_table}"', conn_sqlite)
+            conn_sqlite.close()
+            df_sqlite = df_sqlite.astype(object).where(pd.notnull(df_sqlite), None)
+
+            missing_guid_mask = (df_excel[guid_column_excel].isnull()) | (df_excel[guid_column_excel] == '')
+            rows_to_fix = df_excel[missing_guid_mask]
+            guids_were_repaired = False
+            
+            if not rows_to_fix.empty:
+                self.update_status(f"Found {len(rows_to_fix)} rows with missing GUIDs. Attempting to re-link...")
+                excel_guids = set(df_excel[guid_column_excel].dropna())
+                db_guids = set(df_sqlite['GUID'].dropna().astype(str).str.upper())
+                orphaned_db_guids = db_guids - excel_guids
+                df_orphans = df_sqlite[df_sqlite['GUID'].isin(orphaned_db_guids)]
+                
+                updates_to_write = {}
+                key_cols = ['KP', 'Event', 'Line name'] 
+
+                if all(col in df_excel.columns and col in df_orphans.columns for col in key_cols):
+                    for idx, row_to_fix in rows_to_fix.iterrows():
+                        match_mask = (df_orphans[key_cols[0]].fillna('') == row_to_fix[key_cols[0]].fillna('')) & \
+                                     (df_orphans[key_cols[1]].fillna('') == row_to_fix[key_cols[1]].fillna('')) & \
+                                     (df_orphans[key_cols[2]].fillna('') == row_to_fix[key_cols[2]].fillna(''))
+                        match = df_orphans[match_mask]
+                        
+                        if len(match) == 1:
+                            matched_guid = match.iloc[0]['GUID']
+                            excel_row_num = row_to_fix['original_excel_row']
+                            prompt = (f"Excel row {excel_row_num} is missing a GUID but a unique match was found in the database.\n\n"
+                                      "Do you want to repair the Excel file by re-linking this row with its original GUID?")
+                            if messagebox.askyesno("Re-link GUID?", prompt, parent=self.master):
+                                updates_to_write[excel_row_num] = matched_guid
+                                df_excel.loc[idx, guid_column_excel] = matched_guid
+                                guids_were_repaired = True
+
+                still_missing_mask = (df_excel[guid_column_excel].isnull()) | (df_excel[guid_column_excel] == '')
+                rows_needing_new_guid = df_excel[still_missing_mask]
+                if not rows_needing_new_guid.empty:
+                    prompt_new = (f"{len(rows_needing_new_guid)} row(s) could not be re-linked.\n\n"
+                                  "Do you want to generate NEW, unique GUIDs for them?")
+                    if messagebox.askyesno("Generate New GUIDs?", prompt_new, parent=self.master):
+                        for idx, row in rows_needing_new_guid.iterrows():
+                            new_guid = str(uuid.uuid4()).upper()
+                            df_excel.loc[idx, guid_column_excel] = new_guid
+                            updates_to_write[row['original_excel_row']] = new_guid
+                            guids_were_repaired = True
+
+                if guids_were_repaired:
+                    self._write_guids_to_excel(updates_to_write, excel_file, header_row)
+
+        except Exception as e_check:
+            traceback.print_exc()
+            messagebox.showerror("Pre-check Error", f"An unexpected error occurred while checking the file:\n{e_check}", parent=self.master)
+            return
+
+        # --- 5. Find and disable button, then start the background sync worker ---
+        sync_button = next((btn for lf in self.config_frame.winfo_children() if isinstance(lf, ttk.LabelFrame) for btn in lf.winfo_children() if isinstance(btn, ttk.Button) and btn.cget('text') == "Sync DB"), None)
+        
         if sync_button:
-            try:
-                if sync_button.winfo_exists():
-                    original_text = sync_button['text']
-                    sync_button.config(state=tk.DISABLED, text="Syncing...")
-            except tk.TclError:
-                sync_button = None
+            original_text = sync_button['text']
+            sync_button.config(state=tk.DISABLED, text="Syncing...")
 
         self.update_status("Starting sync from Excel to SQLite...")
 
         def _sync_worker():
-            nonlocal original_text 
             success, message = self.perform_excel_to_sqlite_sync()
-
             self.master.after(0, self.update_status, message)
-
             if sync_button:
-                def re_enable_sync_button(btn=sync_button, txt=original_text):
-                    try:
-                        if btn and btn.winfo_exists():
-                            btn.config(state=tk.NORMAL)
-                            if txt: btn.config(text=txt)
-                    except tk.TclError: pass
-                self.master.after(0, re_enable_sync_button)
+                self.master.after(0, lambda: sync_button.config(state=tk.NORMAL, text=original_text))
 
-        sync_thread = threading.Thread(target=_sync_worker, daemon=True)
-        sync_thread.start()
+        threading.Thread(target=_sync_worker, daemon=True).start()
 
+      
     def _values_are_different(self, val1, val2):
         """
         Robustly compares two values, handling None, pandas NaT/NaN, and numeric types.
@@ -774,7 +972,8 @@ class DataLoggerGUI:
     def perform_excel_to_sqlite_sync(self):
         '''
         This function ensures the SQLite database reflects the latest data from the Excel log.
-        It uses robust comparison and provides clear debugging output.
+        It uses a robust, time-based matching system to prevent duplicate records when
+        GUIDs have been regenerated and handles pre-existing duplicate GUIDs to prevent crashes.
         '''
         print("\n--- Starting Excel to SQLite Sync ---")
         excel_file = self.log_file_path
@@ -786,52 +985,33 @@ class DataLoggerGUI:
             return False, "Sync Error: Configuration paths or table missing."
 
         try:
-            # --- 1. Read Excel Data ---
-            if excel_file.lower().endswith('.xlsb'): excel_engine = 'pyxlsb'
-            elif excel_file.lower().endswith('.xlsx'): excel_engine = 'openpyxl'
-            else: return False, "Sync Error: Unsupported file format. Please use .xlsx or .xlsb."
-
+            # --- 1. Read and Prepare Excel Data ---
+            excel_engine = 'pyxlsb' if excel_file.lower().endswith('.xlsb') else 'openpyxl'
             header_row = self._find_header_row(excel_file, excel_engine, required_column=guid_column_excel)
             df_excel = pd.read_excel(excel_file, engine=excel_engine, header=header_row)
             df_excel = df_excel.astype(object).where(pd.notnull(df_excel), None)
             
             if guid_column_excel not in df_excel.columns:
-                 return False, f"Sync Error: Crucial '{guid_column_excel}' column not found after loading."
-            
+                return False, f"Sync Error: Crucial '{guid_column_excel}' column not found."
+    
             df_excel.dropna(subset=[guid_column_excel], inplace=True)
-            df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(str).str.strip()
-            df_excel = df_excel[df_excel[guid_column_excel] != '']
+            df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(str).str.strip().str.upper()
+            if '' in df_excel[guid_column_excel].unique():
+                return False, "Sync Error: Blank GUIDs were found in the data."
             if df_excel.empty:
-                print("Excel file has no valid data rows with GUIDs. Nothing to sync.")
                 return True, "Sync Info: No valid data found in Excel."
-            print(f"Found {len(df_excel)} valid data rows in Excel.")
 
+            # --- 2. Create 'time_fix' column for reliable matching ---
+            date_col, time_col = self.txt_field_columns.get("Date"), self.txt_field_columns.get("Time")
+            if date_col in df_excel.columns and time_col in df_excel.columns:
+                try:
+                    date_serial = pd.to_numeric(df_excel[date_col], errors='coerce')
+                    time_serial = pd.to_numeric(df_excel[time_col], errors='coerce')
+                    excel_serial_datetime = date_serial.fillna(0) + time_serial.fillna(0)
+                    df_excel['time_fix'] = pd.to_datetime(excel_serial_datetime, unit='D', origin='1899-12-30').dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception as e:
+                    return False, f"Sync Error: Could not process Excel date/time. Error: {e}"
 
-            if 'time_fix' not in df_excel.columns:
-                date_col = self.txt_field_columns.get("Date")
-                time_col = self.txt_field_columns.get("Time")
-
-                if date_col in df_excel.columns and time_col in df_excel.columns:
-                    try:
-                        # 1. Ensure columns are numeric, coercing errors to NaN (Not a Number)
-                        date_serial = pd.to_numeric(df_excel[date_col], errors='coerce')
-                        time_serial = pd.to_numeric(df_excel[time_col], errors='coerce')
-
-                        # 2. Add the date and time serial numbers together.
-                        #    Fill any potential NaN values with 0 before adding.
-                        excel_serial_datetime = date_serial.fillna(0) + time_serial.fillna(0)
-
-                        # 3. Convert the combined Excel serial number to a datetime object.
-                        #    The origin '1899-12-30' is used for Excel on Windows.
-                        df_excel['time_fix'] = pd.to_datetime(excel_serial_datetime, unit='D', origin='1899-12-30')
-                        df_excel['time_fix'] = df_excel['time_fix'].dt.strftime('%Y-%m-%d %H:%M:%S')
-
-                        print("Created 'time_fix' column by converting Excel serial numbers.")
-
-                    except Exception as e:
-                        return False, f"Sync Error: Could not process Excel serial numbers. Error: {e}"
-                else:
-                    return False, "Sync Error: 'Date' and 'Time' columns for serial conversion not found."
         except Exception as e:
             traceback.print_exc()
             return False, f"Sync Error: Failed during Excel read/prep stage. ({e})"
@@ -842,23 +1022,18 @@ class DataLoggerGUI:
             conn_sqlite = sqlite3.connect(db_file, timeout=10)
             db_cols_set = set(pd.read_sql_query(f"PRAGMA table_info('{db_table}')", conn_sqlite)['name'])
             
-            excel_to_db_map = {
-                item.get("column_name"): item.get("db_column_name")
-                for item in self.txt_field_columns_config
-                if item.get("column_name") and item.get("db_column_name")
-            }
-            # Manually ensure crucial columns are mapped if they exist in the DB
+            excel_to_db_map = {item.get("column_name"): item.get("db_column_name") for item in self.txt_field_columns_config if item.get("column_name") and item.get("db_column_name")}
             if 'GUID' in db_cols_set: excel_to_db_map[guid_column_excel] = 'GUID'
             if 'time_fix' in db_cols_set: excel_to_db_map['time_fix'] = 'time_fix'
-            print(f"Constructed Excel-to-DB column map: {excel_to_db_map}")
             
             guid_db_col_name = excel_to_db_map.get(guid_column_excel)
             if not guid_db_col_name or guid_db_col_name not in db_cols_set:
                 return False, f"Sync Error: GUID column '{guid_db_col_name}' not configured or not in DB."
-
+            
             df_sqlite = pd.read_sql_query(f'SELECT * FROM "{db_table}"', conn_sqlite)
             df_sqlite = df_sqlite.astype(object).where(pd.notnull(df_sqlite), None)
-            print(f"Found {len(df_sqlite)} records in the SQLite database.")
+            if not df_sqlite.empty:
+                df_sqlite[guid_db_col_name] = df_sqlite[guid_db_col_name].astype(str).str.upper()
 
         except Exception as e:
             traceback.print_exc()
@@ -869,32 +1044,48 @@ class DataLoggerGUI:
         # --- 4. Compare Datasets and Identify Changes ---
         df_excel.set_index(guid_column_excel, inplace=True, drop=False)
         if not df_sqlite.empty:
-            df_sqlite[guid_db_col_name] = df_sqlite[guid_db_col_name].astype(str)
             df_sqlite.set_index(guid_db_col_name, inplace=True, drop=False)
         
-        records_to_insert = [row.to_dict() for guid, row in df_excel.iterrows() if guid not in df_sqlite.index]
-        records_to_update = []
+        excel_guids = set(df_excel.index)
+        db_guids = set(df_sqlite.index) if not df_sqlite.empty else set()
 
-        common_guids = df_excel.index.intersection(df_sqlite.index)
+        records_to_update = []
+        common_guids = excel_guids.intersection(db_guids)
         for guid in common_guids:
-            excel_row = df_excel.loc[guid]
-            sqlite_row = df_sqlite.loc[guid]
+            # --- SAFEGUARD FOR DUPLICATE GUIDS ---
+            # Handle potential duplicates from Excel
+            excel_row_data = df_excel.loc[guid]
+            if isinstance(excel_row_data, pd.DataFrame):
+                print(f"WARNING: Duplicate GUID '{guid}' found in Excel data. Using the first row for comparison.")
+                excel_row = excel_row_data.iloc[0]
+            else:
+                excel_row = excel_row_data
+
+            # Handle potential duplicates from SQLite
+            sqlite_row_data = df_sqlite.loc[guid]
+            if isinstance(sqlite_row_data, pd.DataFrame):
+                print(f"WARNING: Duplicate GUID '{guid}' found in SQLite data. Using the first row for comparison.")
+                sqlite_row = sqlite_row_data.iloc[0]
+            else:
+                sqlite_row = sqlite_row_data
+            # --- END SAFEGUARD ---
+
             is_different = False
             for excel_col, excel_val in excel_row.items():
                 db_col = excel_to_db_map.get(excel_col)
-                if db_col in sqlite_row:
-                    sqlite_val = sqlite_row[db_col]
-                    if self._values_are_different(excel_val, sqlite_val):
-                        is_different = True
-                        break # Found a difference, no need to check other columns
+                if db_col in sqlite_row and self._values_are_different(excel_val, sqlite_row[db_col]):
+                    is_different = True
+                    break
             if is_different:
                 records_to_update.append(excel_row.to_dict())
 
-        print(f"Found {len(records_to_insert)} records to insert.")
-        print(f"Found {len(records_to_update)} records to update.")
+        # Identify records with new GUIDs and orphaned records in the DB
+        records_with_new_guid = [row.to_dict() for guid, row in df_excel.iterrows() if guid in (excel_guids - db_guids)]
+        orphaned_records_df = df_sqlite[df_sqlite.index.isin(db_guids - excel_guids)] if not df_sqlite.empty else pd.DataFrame()
+
 
         # --- 5. Apply Changes to the Database ---
-        if not records_to_insert and not records_to_update:
+        if not records_with_new_guid and not records_to_update:
             return True, "Sync complete. No changes detected."
 
         conn_sqlite = None
@@ -902,30 +1093,33 @@ class DataLoggerGUI:
             conn_sqlite = sqlite3.connect(db_file, timeout=10)
             cursor = conn_sqlite.cursor()
 
-            # Process Inserts
-            for record in records_to_insert:
-                cols_to_use = [excel_to_db_map[k] for k in record.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
-                vals_to_use = [record[k] for k in record.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
-                
-                placeholders = ', '.join(['?'] * len(cols_to_use))
-                sql = f"INSERT INTO \"{db_table}\" ({', '.join(f'\"{c}\"' for c in cols_to_use)}) VALUES ({placeholders})"
-                cursor.execute(sql, vals_to_use)
+            inserted_count, replaced_count, updated_count = 0, 0, 0
 
-            # Process Updates
+            # Process records with new GUIDs using the intelligent function
+            for record in records_with_new_guid:
+                # Note: The `update_or_insert_record` function is part of the previous response. 
+                # Ensure it is also present in your class.
+                action = self.update_or_insert_record(record, cursor, db_table, excel_to_db_map, db_cols_set, orphaned_records_df)
+                if action == "REPLACE":
+                    replaced_count += 1
+                elif action == "INSERT":
+                    inserted_count += 1
+
+            # Process Updates for existing GUIDs
             for record in records_to_update:
                 guid_val = record[guid_column_excel]
                 updates = {excel_to_db_map[k]: v for k, v in record.items() if k in excel_to_db_map and k != guid_column_excel and excel_to_db_map[k] in db_cols_set}
                 if not updates: continue
+                if 'event' in updates and updates['event'] is None: updates['event'] = ''
                 
                 set_clauses = [f'"{col}" = ?' for col in updates.keys()]
                 values = list(updates.values()) + [guid_val]
-                
                 sql = f"UPDATE \"{db_table}\" SET {', '.join(set_clauses)} WHERE \"{guid_db_col_name}\" = ?"
                 cursor.execute(sql, values)
+                updated_count += 1
 
             conn_sqlite.commit()
-            print(f"Successfully committed changes to the database.")
-            return True, f"Sync successful. Inserted: {len(records_to_insert)}. Updated: {len(records_to_update)}."
+            return True, f"Sync successful. Replaced: {replaced_count}. Inserted: {inserted_count}. Updated: {updated_count}."
 
         except Exception as e:
             if conn_sqlite: conn_sqlite.rollback()
@@ -1100,10 +1294,10 @@ class DataLoggerGUI:
                                  txt_source_key=txt_source_key) # Changed to pass txt_source_key
 
     def _perform_log_action(self, event_type, event_text_for_excel, skip_latest_files=False, svp_specific_handling=False, triggering_button=None, txt_source_key="Main TXT"):
-        '''This is the main entry point for handling an event (e.g., button press). 
-        It collects all necessary data (from TXT files and folder monitors), 
+        '''This is the main entry point for handling an event (e.g., button press).
+        It collects all necessary data (from TXT files and folder monitors),
         then logs the event to Excel and/or SQLite in a background thread.
-        
+
         Arguments:
         * event_type: The label of the event, e.g., "Log on", "Event", "Custom Event 1".
         * event_text_for_excel: The actual text that goes into the "Event" column in Excel.
@@ -1118,7 +1312,7 @@ class DataLoggerGUI:
         * It calls helper methods to get the latest data.
         * Then it logs everything to:
         * Excel: with optional row color
-        * SQLite: if enabled
+        * SQLite: if enabled, by triggering the full sync logic.
         * Updates the GUI status with success/failure feedback.
         '''
         self.update_status(f"Processing '{event_type}'...")
@@ -1143,7 +1337,7 @@ class DataLoggerGUI:
             excel_success = False
             sqlite_logged = False
             excel_save_exception = None
-            sqlite_save_exception_type = None
+            sqlite_save_exception_type = None # Renamed for clarity
             status_msg = f"'{event_type}' processed with errors."
 
             try:
@@ -1156,7 +1350,7 @@ class DataLoggerGUI:
                 if txt_source_key and txt_source_key != "None": # To change: hardcoded key
                     source_folder_path = None
                     if txt_source_key == "Main TXT": # To change: hardcoded key
-                        source_folder_path = self.txt_folder_path 
+                        source_folder_path = self.txt_folder_path
                     elif txt_source_key == "TXT Source 2": # To change: hardcoded key
                         source_folder_path = self.txt_folder_path_set2
                     elif txt_source_key == "TXT Source 3": # To change: hardcoded key
@@ -1177,17 +1371,17 @@ class DataLoggerGUI:
                             self.master.after(0, lambda e=e_txt: messagebox.showerror("Error", f"Failed to read TXT data from {txt_source_key}:\n{e}", parent=self.master))
                     else:
                         print(f"Source folder path is invalid or empty for {txt_source_key}: {source_folder_path}")  # DIAGNOSTIC
+                        error_title = "Configuration Error"
+                        # Debugging to highlight if a text file has not been assigned to a button
+                        error_message = (
+                            f"The button '{event_type}' could not get data from its text file source.\n\n"
+                            f"Reason: The folder path for source '{txt_source_key}' has not been assigned or is invalid.\n\n"
+                            "To fix this, go to 'Settings' -> 'File Paths' and assign a valid folder for this source."
+                        )
+                        # Schedule the message box to be shown safely in the main GUI thread.
+                        self.master.after(0, lambda: messagebox.showwarning(error_title, error_message, parent=self.master))
                 else:
                     print(f"txt_source_key is 'None' or empty, skipping TXT data collection.")  # DIAGNOSTIC
-                    error_title = "Configuration Error"
-                    # Debugging to highlight if a text file has not been assigned to a button
-                    error_message = (
-                        f"The button '{event_type}' could not get data from its text file source.\n\n"
-                        f"Reason: The folder path for source '{txt_source_key}' has not been assigned or is invalid.\n\n"
-                        "To fix this, go to 'Settings' -> 'File Paths' and assign a valid folder for this source."
-                    )
-                    # Schedule the message box to be shown safely in the main GUI thread.
-                    self.master.after(0, lambda: messagebox.showwarning(error_title, error_message, parent=self.master))
                 # --- End TXT Data Collection ---
 
                 if not skip_latest_files:
@@ -1240,16 +1434,13 @@ class DataLoggerGUI:
 
                 if row_data:
                     # Get the color for the row based on the event type
-                    # We store (background_color, font_color)
                     color_tuple = self.button_colors.get(event_type, (None, None))
-                    # Only pass the background color to save_to_excel
                     row_color_for_excel = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
-                    
-                    # Pass font_color to save_to_excel
                     font_color_for_excel = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
 
                     excel_data = {k: v for k, v in row_data.items() if k != 'EventType'}
 
+                    # 1. Save to Excel first
                     try:
                         print(f"Attempting to save to Excel. Log file: {self.log_file_path}")  # DIAGNOSTIC
                         if not self.log_file_path:
@@ -1257,7 +1448,6 @@ class DataLoggerGUI:
                         elif not os.path.exists(self.log_file_path):
                             excel_save_exception = FileNotFoundError("Excel file missing")
                         else:
-                            # Pass both background and font color
                             self.save_to_excel(excel_data, row_color=row_color_for_excel, font_color=font_color_for_excel)
                             excel_success = True
                             print("Excel save: SUCCESS")  # DIAGNOSTIC
@@ -1267,10 +1457,22 @@ class DataLoggerGUI:
                         print(f"Excel save: FAILED with error: {e_excel}")  # DIAGNOSTIC
                         self.master.after(0, lambda e=e_excel: messagebox.showerror("Error", f"Failed to save to Excel:\n{e}", parent=self.master))
 
+                    # 2. If Excel save was successful AND SQLite is enabled, trigger the sync
+                    if excel_success and self.sqlite_enabled:
+                        print("Excel write successful, now syncing to SQLite...")
+                        # REPLACED a direct INSERT with the full, robust sync function
+                        sqlite_success, sync_message = self.perform_excel_to_sqlite_sync()
 
-                    # Log to SQLite
-                    sqlite_logged, sqlite_save_exception_type = self.log_to_sqlite(row_data)
-                    print(f"SQLite log result: Success={sqlite_logged}, Error={sqlite_save_exception_type}")  # DIAGNOSTIC
+                        # Update status based on sync result
+                        if sqlite_success:
+                            sqlite_logged = True
+                            print(f"SQLite sync result: {sync_message}")
+                        else:
+                            sqlite_logged = False
+                            sqlite_save_exception_type = "SyncFailed"
+                            print(f"SQLite sync FAILED: {sync_message}")
+                            # Optionally show a non-blocking error to the user
+                            self.master.after(0, lambda msg=sync_message: messagebox.showwarning("Sync Warning", f"Could not sync to SQLite:\n{msg}", parent=self.master))
 
                     # Constructs a status message to show whether Excel and SQLite logging succeeded or failed.
                     status_parts = []
@@ -1472,86 +1674,66 @@ class DataLoggerGUI:
         except Exception: return None
 
     def save_to_excel(self, row_data, row_color=None, font_color=None, next_row=None): # Added font_color parameter
-        '''Saves the provided row_data to the specified Excel log file.
-        Arguments:
-        * row_data: A dictionary containing the data to log, where keys are column names and values are the data to insert.
-        * row_color: An optional RGB hex string (e.g., "#RRGGBB") to apply as the background color for the row in Excel.
-        * font_color: An optional RGB hex string (e.g., "#RRGGBB") to apply as the font color for the text in Excel.
-        * next_row: The row number where the data should be written. If None, finds the next empty row automatically.
-        Returns:
-        * None if successful, raises an exception if there is an error.
-        '''
+        '''Saves the provided row_data to the specified Excel log file.'''
         print(f"Entering save_to_excel. Data: {row_data}")
         if not self.log_file_path or not os.path.exists(self.log_file_path):
             raise FileNotFoundError("Excel log file path is invalid or file does not exist.")
 
-        app = None
-        workbook = None
-        opened_new_app = False
-        opened_workbook = False
-
+        app, workbook, opened_new_app = None, None, False
         try:
-            # --- 1. Connect to Excel ---
-            try:
-                app = xw.apps.active
-                if app is None: raise Exception("No active Excel instance")
-                print("Connected to an existing Excel instance.")
-            except Exception:
-                print("No active Excel instance found, creating a new one.")
+            target_norm_path = os.path.normcase(os.path.abspath(self.log_file_path))
+
+            # 1. Search ALL running Excel instances for the target workbook
+            for running_app in xw.apps:
+                for wb in running_app.books:
+                    try:
+                        if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
+                            workbook = wb
+                            app = running_app
+                            break
+                    except Exception:
+                        continue
+                if workbook:
+                    break
+            
+            # 2. If not found, start a new, dedicated instance
+            if workbook is None:
                 app = xw.App(visible=False) # Keep it invisible
                 opened_new_app = True
-
-            # --- 2. Open the Workbook ---
-            target_norm_path = os.path.normcase(os.path.abspath(self.log_file_path))
-            for wb in app.books:
-                try:
-                    if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
-                        workbook = wb
-                        print(f"Workbook '{wb.name}' is already open.")
-                        break
-                except Exception:
-                    continue
-            
-            if workbook is None:
-                print(f"Opening workbook: '{self.log_file_path}'")
                 workbook = app.books.open(self.log_file_path, read_only=False)
-                opened_workbook = True
 
             sheet = workbook.sheets[0]
 
-            # --- 3. DYNAMIC HEADER SEARCH ---
+            # 3. DYNAMIC HEADER SEARCH
             required_columns = EXCEL_LOG_REQUIRED_COLS
             header_row_index = -1
             header_values = []
             
             for i in range(1, MAX_HEADER_SEARCH_ROW + 1):
-                row_values = sheet.range(f'A{i}').expand('right').value
-                if row_values is None:
+                row_values_list = sheet.range(f'A{i}').expand('right').value
+                if row_values_list is None:
                     continue
-                current_row_headers = {str(h).lower() for h in row_values if h is not None}
+                current_row_headers = {str(h).lower() for h in row_values_list if h is not None}
                 if required_columns.issubset(current_row_headers):
                     header_row_index = i
-                    header_values = row_values
+                    header_values = row_values_list
                     print(f"Header found in row: {header_row_index}")
                     break
             
             if header_row_index == -1:
                 raise ValueError("Could not find the header row with required columns in the Excel file.")
 
-            # --- 4. COLUMN MAPPING ---
+            # 4. COLUMN MAPPING
             header_map_lower = {str(h).lower(): i + 1 for i, h in enumerate(header_values) if h is not None}
             last_header_col_index = max(header_map_lower.values()) if header_map_lower else 1
 
-            # --- 5. FIND NEXT EMPTY ROW ---
+            # 5. FIND NEXT EMPTY ROW
             if next_row is None:
                 last_row_with_data = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
-                if last_row_with_data < header_row_index:
-                    next_row = header_row_index + 1
-                else:
-                    next_row = last_row_with_data + 1
+                next_row = max(last_row_with_data, header_row_index) + 1
                 print(f"Next available row in Excel: {next_row}")
 
-            # --- 6. WRITE DATA ---
+            # 6. WRITE DATA
             written_cols = []
             for col_name, value in row_data.items():
                 col_name_lower = str(col_name).lower()
@@ -1563,69 +1745,39 @@ class DataLoggerGUI:
                             target_cell.number_format = '@'
                         target_cell.value = value
                         written_cols.append(col_index)
-                        print(f"Wrote '{value}' to cell R{next_row}C{col_index} (Column '{col_name}').")
                     except Exception as e_write:
                         print(f"Warning: Could not write to column '{col_name}'. Error: {e_write}")
 
-
-            # Apply background color to the row if specified
-            if row_color and written_cols:
-                try:
-                    # Keep using the direct hex string for background, as you confirmed it works
-                    target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
-                    target_range.color = row_color
-                    print(f"Applied background color {row_color} to row {next_row}.")
-                except Exception as e_color:
-                    print(f"Warning: Could not apply background color to row. Error: {e_color}")
-
-            # Apply font color to the row if specified
-            if font_color and written_cols:
-                try:
-                    target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
-                    target_range.font.color = font_color
-                except Exception as e_font_color:
-                    print(f"Warning: Could not apply font color to row. Error: {e_font_color}")
-            else:
-                print(f"Warning: Skipping invalid font color format: {font_color}")
-
-
-            # --- CRITICAL SAVE OPERATION ---
-            try:
-                print("Attempting to save workbook...")
-                workbook.save()
-                print("Workbook saved successfully.")
-            except Exception as e_save:
-                traceback.print_exc()
-                error_msg = (
-                    "Failed to save the Excel file. This is usually because the file is locked.\n\n"
-                    "1. Check Task Manager for any lingering 'EXCEL.EXE' processes and end them.\n"
-                    "2. Ensure you have permissions to write to the file.\n\n"
-                    f"(Details: {e_save})"
-                )
-                print(f"Excel SAVE FAILED: {error_msg}")
-                self.master.after(0, lambda: messagebox.showerror("Excel Save Conflict", error_msg, parent=self.master))
-                raise IOError(f"Failed to save Excel workbook: {e_save}")
+            # 7. Apply Formatting
+            if written_cols:
+                target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
+                if row_color:
+                    try:
+                        target_range.color = row_color
+                    except Exception as e_color:
+                        print(f"Warning: Could not apply background color. Error: {e_color}")
+                if font_color:
+                    try:
+                        target_range.font.color = font_color
+                    except Exception as e_font_color:
+                        print(f"Warning: Could not apply font color. Error: {e_font_color}")
+            
+            # 8. CRITICAL SAVE OPERATION
+            workbook.save()
+            print("Workbook saved successfully.")
 
         except Exception as e:
             traceback.print_exc()
             print(f"Unhandled error in save_to_excel: {e}")
+            # Re-raise the exception to be handled by the calling thread
             raise e
         finally:
-            print("Executing finally block in save_to_excel.")
-            if workbook is not None and opened_workbook:
-                try:
-                    print("Closing workbook (that was opened by this script).")
-                    workbook.close(save_changes=False)
-                except Exception as e_close:
-                    print(f"Error closing workbook: {e_close}")
-                    pass
+            # 9. Clean up ONLY if we started a new Excel instance
             if app is not None and opened_new_app:
                 try:
-                    print("Quitting Excel application (that was started by this script).")
                     app.quit()
                 except Exception as e_quit:
                     print(f"Error quitting Excel app: {e_quit}")
-                    pass
             print("Exiting save_to_excel.")
 
     def log_to_sqlite(self, row_data):
