@@ -2109,15 +2109,15 @@ class DataLoggerGUI:
                         self.button_colors[key] = (color_value, None) # Assume it's a background color, no font color
                     else:
                         self.button_colors[key] = (None, None) # Fallback for unknown formats
-                        self.sqlite_enabled = settings.get("sqlite_enabled", False)
-                        self.sqlite_db_path = settings.get("sqlite_db_path")
-                        always_on_top_setting = settings.get("always_on_top", False)
-                        self.always_on_top_var.set(always_on_top_setting)
-                        self.master.wm_attributes("-topmost", always_on_top_setting)
-                        self.sqlite_table = settings.get("sqlite_table", "fieldlog")
-                        self.always_on_top_var.set(settings.get("always_on_top", True))
-                        self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
-                        self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
+                self.sqlite_enabled = settings.get("sqlite_enabled", False)
+                self.sqlite_db_path = settings.get("sqlite_db_path")
+                always_on_top_setting = settings.get("always_on_top", False)
+                self.always_on_top_var.set(always_on_top_setting)
+                self.master.wm_attributes("-topmost", always_on_top_setting)
+                self.sqlite_table = settings.get("sqlite_table", "fieldlog")
+                self.always_on_top_var.set(settings.get("always_on_top", True))
+                self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
+                self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
                     
                 self.update_status("Settings loaded.")
             else:
