@@ -71,6 +71,12 @@
             "skip": false
         },
         {
+            "field": "KP Ref.",
+            "column_name": "KP Ref.",
+            "db_column_name": "kp_ref",
+            "skip": false
+        },
+        {
             "field": "Vessel",
             "column_name": "='MON - 09.06'!H4",
             "db_column_name": "vessel",
@@ -191,14 +197,14 @@
             "text": "ROV off Deck",
             "event_text": "ROV off Deck",
             "event_code": "R-OFF",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "ROV on Deck",
             "event_text": "ROV on Deck",
             "event_code": "R-ON",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
@@ -275,7 +281,7 @@
             "text": "UXO Placed",
             "event_text": "UXO placed:",
             "event_code": "R-OTH",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "None",
             "tab_group": "Main"
         },
         {
@@ -454,5 +460,10 @@
             "event_text": "SVP applied",
             "event_code": ""
         }
+    },
+    "txt_source_aliases": {
+        "Main TXT": "Vessel",
+        "TXT Source 2": "WROV",
+        "TXT Source 3": "SROV"
     }
 }

@@ -350,6 +350,13 @@ class DataLoggerGUI:
         self.txt_folder_path_set2 = None
         self.txt_folder_path_set3 = None
 
+        # Dictionary to hold user-defined aliases for TXT sources
+        self.txt_source_aliases = {
+            "Main TXT": "Main TXT",
+            "TXT Source 2": "TXT Source 2",
+            "TXT Source 3": "TXT Source 3"
+        }
+
         self.source_based_colors = {
             "Main TXT": "#BAE1FF",    # Light Blue
             "TXT Source 2": "#BAFFC9",    # Light Green
@@ -1385,13 +1392,13 @@ class DataLoggerGUI:
                 row_data["GUID"] = guid
 
                 # --- TXT Data Collection ---
-                if txt_source_key and txt_source_key != "None": # To change: hardcoded key
+                if txt_source_key and txt_source_key != "None":
                     source_folder_path = None
-                    if txt_source_key == "Main TXT": # To change: hardcoded key
+                    if txt_source_key == "Main TXT":
                         source_folder_path = self.txt_folder_path
-                    elif txt_source_key == "TXT Source 2": # To change: hardcoded key
+                    elif txt_source_key == "TXT Source 2":
                         source_folder_path = self.txt_folder_path_set2
-                    elif txt_source_key == "TXT Source 3": # To change: hardcoded key
+                    elif txt_source_key == "TXT Source 3": 
                         source_folder_path = self.txt_folder_path_set3
 
                     # Ensure path exists and is a directory before attempting to read
@@ -1457,6 +1464,16 @@ class DataLoggerGUI:
                         print(f"SVP column config error: {svp_col_name}")  # DIAGNOSTIC
 
                 print(f"Final row_data before processing event text/code: {row_data}")  # DIAGNOSTIC
+
+                if self.txt_source_aliases:
+                    # If aliases are configured, add them to the row_data.
+                    kp_ref = self.txt_source_aliases.get(txt_source_key)
+                    kp_ref_column_name = self.txt_field_columns.get("KP Ref.")
+                    if kp_ref and kp_ref_column_name:
+                        row_data[kp_ref_column_name] = kp_ref
+                        print(f"KP Ref. added: {kp_ref_column_name}: {kp_ref}") # DIAGNOSTIC
+                else:
+                    print("No KP Ref. aliases configured, skipping...")
 
                 # Find the column name configured for the "Event" data.
                 event_column_name = self.txt_field_columns.get("Event")
@@ -1594,6 +1611,8 @@ class DataLoggerGUI:
         latest_txt_file_path = None
         if folder_path and os.path.exists(folder_path):
             latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".txt")
+            if not latest_txt_file_path:
+                latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".csv") # Try CSV as fallback
             print(f"Latest TXT file found: {latest_txt_file_path}") # DIAGNOSTIC
         else:
             print(f"TXT folder path is invalid or empty: {folder_path}") # DIAGNOSTIC
@@ -2065,7 +2084,8 @@ class DataLoggerGUI:
             "always_on_top": self.always_on_top_var.get(),
             "new_day_event_enabled": self.new_day_event_enabled_var.get(),
             "hourly_event_enabled": self.hourly_event_enabled_var.get(),
-            "main_button_configs": self.main_button_configs 
+            "main_button_configs": self.main_button_configs,
+            "txt_source_aliases": self.txt_source_aliases
         }
         try:
             with open(self.settings_file, 'w') as f: 
@@ -2244,7 +2264,13 @@ class DataLoggerGUI:
                 self.always_on_top_var.set(settings.get("always_on_top", True))
                 self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
                 self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
-                    
+
+                self.txt_source_aliases = settings.get("txt_source_aliases", {
+                    "Main TXT": "Main TXT",
+                    "TXT Source 2": "TXT Source 2",
+                    "TXT Source 3": "TXT Source 3"
+                })
+                                
                 self.update_status("Settings loaded.")
             else:
                 self.update_status("Settings file not found. Using defaults.")
@@ -2952,7 +2978,6 @@ class DataLoggerGUI:
 
         button_text_var = tk.StringVar(value=button_config.get("text", f"Custom {button_index+1}"))
         event_text_var = tk.StringVar(value=button_config.get("event_text", f"{button_config.get('text', f'Custom {button_index+1}')} Triggered"))
-        txt_source_var = tk.StringVar(value=button_config.get("txt_source_key", "None"))
         tab_group_var = tk.StringVar(value=button_config.get("tab_group", "Main"))
         event_code_var = tk.StringVar(value=button_config.get("event_code", ""))
         
@@ -2984,13 +3009,29 @@ class DataLoggerGUI:
         ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
 
         row_idx += 1
-        # Event Source Combobox
+        # --- Event Source Combobox (Now Dynamic) ---
         ttk.Label(frame, text="Event Source:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        txt_source_options = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"]
-        source_combobox = ttk.Combobox(frame, textvariable=txt_source_var,
-                                        values=txt_source_options, state="readonly", width=27)
+
+        # 1. Get the aliases and build the lists for the dropdown
+        aliases = self.txt_source_aliases
+        internal_keys = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"]
+        
+        # This list will be shown to the user in the dropdown
+        display_names = ["None"] + [aliases.get(key, key) for key in internal_keys[1:]]
+
+        # 2. Create translation maps to go between the display name and internal key
+        display_to_internal_map = {display: internal for display, internal in zip(display_names, internal_keys)}
+        internal_to_display_map = {internal: display for display, internal in zip(display_names, internal_keys)}
+
+        # 3. Set the combobox's initial value based on the current configuration
+        current_internal_key = button_config.get("txt_source_key", "None")
+        txt_source_display_var = tk.StringVar(value=internal_to_display_map.get(current_internal_key, "None"))
+        
+        source_combobox = ttk.Combobox(frame, textvariable=txt_source_display_var,
+                                        values=display_names, state="readonly", width=27)
         source_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
-        ToolTip(source_combobox, "Select which TXT file source this button should read data from. 'None' means no TXT data will be logged by this button.")
+        ToolTip(source_combobox, "Select which data source this button should use. Names are configured in Settings -> File Paths.")
+
 
         row_idx += 1
         # Tab Group selection
@@ -3070,9 +3111,13 @@ class DataLoggerGUI:
             
             button_config["text"] = button_text_var.get().strip() or f"Custom {button_index+1}"
             button_config["event_text"] = event_text_var.get().strip() or f"{button_config['text']} Triggered"
-            button_config["txt_source_key"] = txt_source_var.get()
             button_config["event_code"] = event_code_var.get()
             button_config["tab_group"] = tab_group_var.get().strip() or "Main"
+
+            # Translate the selected display name back to its internal key before saving
+            selected_display_name = txt_source_display_var.get()
+            button_config["txt_source_key"] = display_to_internal_map.get(selected_display_name, "None")
+            
 
             new_bg_color_hex = button_bg_color_var.get() if button_bg_color_var.get() else None
             new_font_color_hex = button_font_color_var.get() if button_font_color_var.get() else None
@@ -3139,7 +3184,7 @@ class SettingsWindow:
         self.master = master
         self.parent_gui = parent_gui
         self.master.title("Settings")
-        self.master.geometry("1000x750")
+        self.master.geometry("1000x850")
         self.master.minsize(700, 500)
         self.style = parent_gui.style
 
@@ -3345,38 +3390,44 @@ class SettingsWindow:
         txt_main_frame = ttk.LabelFrame(tab, text="Main Navigation TXT Data Folder (for general events)", padding=15)
         txt_main_frame.pack(fill="x", pady=(0, 15))
         txt_main_frame.columnconfigure(1, weight=1)
-        self.txt_folder_label_main = ttk.Label(txt_main_frame, text="Folder:", anchor='e')
-        self.txt_folder_label_main.grid(row=0, column=0, padx=(0, 5), pady=5, sticky='w')
-        self.txt_folder_entry_main = ttk.Entry(txt_main_frame, width=80)
-        self.txt_folder_entry_main.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
-        txt_browse_btn_main = ttk.Button(txt_main_frame, text="Browse...", command=lambda: self.select_txt_folder(self.txt_folder_entry_main))
-        txt_browse_btn_main.grid(row=0, column=2, padx=(5, 0), pady=5)
-        ToolTip(txt_browse_btn_main, "Select the primary folder containing navigation TXT files. Used by 'Event' button and can be selected by custom buttons."); ToolTip(self.txt_folder_entry_main, "Path to the main folder containing navigation TXT files.")
+        # --- Main Container for TXT Sources ---
+        txt_sources_container = ttk.Frame(tab)
+        txt_sources_container.pack(fill='x', expand=True, anchor='n')
+        txt_sources_container.columnconfigure(0, weight=1)
 
-        # Navigation TXT Data Folder - Source 2
-        txt_set2_frame = ttk.LabelFrame(tab, text="Additional TXT Data Folder - Source 2 (for custom buttons)", padding=15)
-        txt_set2_frame.pack(fill="x", pady=(0, 15))
-        txt_set2_frame.columnconfigure(1, weight=1)
-        self.txt_folder_label_set2 = ttk.Label(txt_set2_frame, text="Folder:", anchor='e')
-        self.txt_folder_label_set2.grid(row=0, column=0, padx=(0, 5), pady=5, sticky='w')
-        self.txt_folder_entry_set2 = ttk.Entry(txt_set2_frame, width=80)
-        self.txt_folder_entry_set2.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
-        txt_browse_btn_set2 = ttk.Button(txt_set2_frame, text="Browse...", command=lambda: self.select_txt_folder(self.txt_folder_entry_set2))
-        txt_browse_btn_set2.grid(row=0, column=2, padx=(5, 0), pady=5)
-        ToolTip(txt_browse_btn_set2, "Select a secondary folder for navigation TXT files. Can be assigned to custom buttons."); ToolTip(self.txt_folder_entry_set2, "Path to a secondary folder for navigation TXT files.")
+        # --- Helper function to create each TXT source entry ---
+        def create_txt_source_frame(parent, title, name_entry_var, path_entry_var):
+            frame = ttk.LabelFrame(parent, text=title, padding=15)
+            frame.grid(sticky='ew', pady=(0, 15))
+            parent.columnconfigure(0, weight=1)
+            frame.columnconfigure(1, weight=1) # Allow path entry to expand
 
-        # Navigation TXT Data Folder - Source 3
-        txt_set3_frame = ttk.LabelFrame(tab, text="Additional TXT Data Folder - Source 3 (for custom buttons)", padding=15)
-        txt_set3_frame.pack(fill="x", pady=(0, 0))
-        txt_set3_frame.columnconfigure(1, weight=1)
-        self.txt_folder_label_set3 = ttk.Label(txt_set3_frame, text="Folder:", anchor='e')
-        self.txt_folder_label_set3.grid(row=0, column=0, padx=(0, 5), pady=5, sticky='w')
-        self.txt_folder_entry_set3 = ttk.Entry(txt_set3_frame, width=80)
-        self.txt_folder_entry_set3.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
-        txt_browse_btn_set3 = ttk.Button(txt_set3_frame, text="Browse...", command=lambda: self.select_txt_folder(self.txt_folder_entry_set3))
-        txt_browse_btn_set3.grid(row=0, column=2, padx=(5, 0), pady=5)
-        ToolTip(txt_browse_btn_set3, "Select a third folder for navigation TXT files. Can be assigned to custom buttons."); ToolTip(self.txt_folder_entry_set3, "Path to a third folder for navigation TXT files.")
+            ttk.Label(frame, text="Source Name:").grid(row=0, column=0, padx=(0, 5), pady=5, sticky='w')
+            name_entry = ttk.Entry(frame, textvariable=name_entry_var, width=25)
+            name_entry.grid(row=0, column=1, padx=5, pady=5, sticky='w')
+            ToolTip(name_entry, "Set a custom, user-friendly name for this data source (e.g., 'Vessel', 'WROV').")
 
+            ttk.Label(frame, text="Folder Path:").grid(row=1, column=0, padx=(0, 5), pady=5, sticky='w')
+            path_entry = ttk.Entry(frame, textvariable=path_entry_var, width=80)
+            path_entry.grid(row=1, column=1, padx=5, pady=5, sticky='ew')
+            browse_btn = ttk.Button(frame, text="Browse...", command=lambda: self.select_txt_folder(path_entry))
+            browse_btn.grid(row=1, column=2, padx=(5, 0), pady=5)
+            ToolTip(browse_btn, "Select the folder containing the navigation TXT files for this source.")
+            return name_entry, path_entry
+
+        # Create StringVars to hold the UI data
+        self.txt_name_main_var = tk.StringVar()
+        self.txt_path_main_var = tk.StringVar()
+        self.txt_name_set2_var = tk.StringVar()
+        self.txt_path_set2_var = tk.StringVar()
+        self.txt_name_set3_var = tk.StringVar()
+        self.txt_path_set3_var = tk.StringVar()
+
+        # Create the three source blocks using the helper
+        create_txt_source_frame(txt_sources_container, "Main Vehicle Navigation (Main TXT Data)", self.txt_name_main_var, self.txt_path_main_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 2)", self.txt_name_set2_var, self.txt_path_set2_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 3)", self.txt_name_set3_var, self.txt_path_set3_var)
+   
         # Frame for restoring default settings ---
         restore_frame = ttk.LabelFrame(tab, text="Restore Default Settings", padding=15)
         restore_frame.pack(fill="x", pady=(20, 0), side="bottom") # Place it at the bottom
@@ -4200,9 +4251,14 @@ class SettingsWindow:
     # --- Settings Save/Load Logic ---
     def save_settings(self):
         self.parent_gui.log_file_path = self.log_file_entry.get().strip()
-        self.parent_gui.txt_folder_path = self.txt_folder_entry_main.get().strip()
-        self.parent_gui.txt_folder_path_set2 = self.txt_folder_entry_set2.get().strip()
-        self.parent_gui.txt_folder_path_set3 = self.txt_folder_entry_set3.get().strip()
+        self.parent_gui.txt_source_aliases["Main TXT"] = self.txt_name_main_var.get().strip()
+        self.parent_gui.txt_folder_path = self.txt_path_main_var.get().strip()
+
+        self.parent_gui.txt_source_aliases["TXT Source 2"] = self.txt_name_set2_var.get().strip()
+        self.parent_gui.txt_folder_path_set2 = self.txt_path_set2_var.get().strip()
+
+        self.parent_gui.txt_source_aliases["TXT Source 3"] = self.txt_name_set3_var.get().strip()
+        self.parent_gui.txt_folder_path_set3 = self.txt_path_set3_var.get().strip()
 
         # Save TXT field columns from the UI
         new_txt_field_configs = []
@@ -4325,12 +4381,16 @@ class SettingsWindow:
         self.populate_event_codes_tree()
         self.log_file_entry.insert(0, self.parent_gui.log_file_path or "")
         
-        self.txt_folder_entry_main.delete(0, tk.END)
-        self.txt_folder_entry_main.insert(0, self.parent_gui.txt_folder_path or "")
-        self.txt_folder_entry_set2.delete(0, tk.END)
-        self.txt_folder_entry_set2.insert(0, self.parent_gui.txt_folder_path_set2 or "")
-        self.txt_folder_entry_set3.delete(0, tk.END)
-        self.txt_folder_entry_set3.insert(0, self.parent_gui.txt_folder_path_set3 or "")
+        # Load the custom names into the new entry fields
+        aliases = self.parent_gui.txt_source_aliases
+        self.txt_name_main_var.set(aliases.get("Main TXT", "Main TXT"))
+        self.txt_name_set2_var.set(aliases.get("TXT Source 2", "TXT Source 2"))
+        self.txt_name_set3_var.set(aliases.get("TXT Source 3", "TXT Source 3"))
+
+        # Load the paths into the path entry fields
+        self.txt_path_main_var.set(self.parent_gui.txt_folder_path or "")
+        self.txt_path_set2_var.set(self.parent_gui.txt_folder_path_set2 or "")
+        self.txt_path_set3_var.set(self.parent_gui.txt_folder_path_set3 or "")
 
         # Reload TXT field rows based on the (potentially newly loaded) config
         self.recreate_txt_field_rows()
