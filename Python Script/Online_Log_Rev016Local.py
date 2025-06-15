@@ -241,7 +241,7 @@ class DataLoggerGUI:
         '''
         self.master = master
         master.title("Online Logger")
-        master.geometry("1000x250")
+        master.geometry("1400x250")
         master.minsize(800, 200)
 
         self.init_styles()
