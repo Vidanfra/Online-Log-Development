@@ -534,8 +534,15 @@ class DataLoggerGUI:
                     # Corrected: lambda function for command
                     button.config(command=lambda c=config, b=button: self.log_custom_event(c, b))
                     
-                    row = i % 2
-                    col = i // 2
+                    # --- New (Row-First) Logic ---
+
+                    # Define how many columns you want in each row
+                    num_columns = 5 
+
+                    # Calculate row and column based on the number of columns
+                    row = i // num_columns
+                    col = i % num_columns
+
                     button.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
                     
                     tab_frame.columnconfigure(col, weight=1)

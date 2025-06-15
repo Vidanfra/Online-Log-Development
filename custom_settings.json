@@ -185,7 +185,7 @@
     "folder_skips": {
         "Main TXT File": false
     },
-    "num_custom_buttons": 21,
+    "num_custom_buttons": 20,
     "custom_button_configs": [
         {
             "text": "ROV off Deck",
@@ -279,20 +279,6 @@
             "tab_group": "Main"
         },
         {
-            "text": "ID&C Start",
-            "event_text": "ID&C Start:",
-            "event_code": "IDC-S",
-            "txt_source_key": "Main TXT",
-            "tab_group": "Main"
-        },
-        {
-            "text": "ID&C Completed",
-            "event_text": "ID&C Completed:",
-            "event_code": "IDC-E",
-            "txt_source_key": "Main TXT",
-            "tab_group": "Main"
-        },
-        {
             "text": "Custom 16",
             "event_text": "Custom 16 Event",
             "event_code": "",
@@ -333,6 +319,13 @@
             "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 20",
+            "event_text": "Custom 20 Event",
+            "txt_source_key": "None",
+            "tab_group": "Main",
+            "event_code": ""
         }
     ],
     "custom_button_tab_groups": [
@@ -415,18 +408,6 @@
         "UXO Placed": [
             "#ffffff",
             null
-        ],
-        "ID&C Start": [
-            "#000000",
-            "#FFFFFF"
-        ],
-        "ID&C Completed": [
-            "#000000",
-            "#FFFFFF"
-        ],
-        "Custom 21": [
-            "#FFFFBA",
-            "#FFFFFF"
         ],
         "Custom Event 1": [
             "#BAE1FF",
