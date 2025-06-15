@@ -3795,12 +3795,12 @@ class SettingsWindow:
         header_frame.pack(anchor='w', pady=(15,5))
         
         # Configure columns for the header frame to match the rows
-        header_frame.grid_columnconfigure(0, weight=0) # Button #
-        header_frame.grid_columnconfigure(1, weight=1) # Button Text
-        header_frame.grid_columnconfigure(2, weight=2) # Event Text (longer)
-        header_frame.grid_columnconfigure(3, weight=0) # Event Code
-        header_frame.grid_columnconfigure(4, weight=0) # Event Source
-        header_frame.grid_columnconfigure(5, weight=0) # Tab Group
+        header_frame.grid_columnconfigure(0, weight=0, minsize=40) # Button #
+        header_frame.grid_columnconfigure(1, weight=1, minsize=135) # Button Text
+        header_frame.grid_columnconfigure(2, weight=2, minsize=200) # Event Text (longer)
+        header_frame.grid_columnconfigure(3, weight=0, minsize=80) # Event Code
+        header_frame.grid_columnconfigure(4, weight=0, minsize=80) # Event Source
+        header_frame.grid_columnconfigure(5, weight=0, minsize=80) # Tab Group
 
         ttk.Label(header_frame, text="Button #", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=(5,0), sticky='w')
         ttk.Label(header_frame, text="Button Text", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=5, sticky='ew')

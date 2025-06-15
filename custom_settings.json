@@ -120,13 +120,13 @@
         },
         {
             "field": "Survey Rep.",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "Survey Rep.",
             "db_column_name": "client_survey_rep",
             "skip": false
         },
         {
             "field": "Proj. Engineer",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "Proj. Engineer",
             "db_column_name": "client_project_engineer",
             "skip": false
         },
@@ -150,13 +150,13 @@
         },
         {
             "field": "Offline Day",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "Offline Day",
             "db_column_name": "isurvey_offline_day",
             "skip": false
         },
         {
             "field": "Offline Night",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "Offline Night",
             "db_column_name": "isurvey_offline_night",
             "skip": false
         },
@@ -185,7 +185,7 @@
     "folder_skips": {
         "Main TXT File": false
     },
-    "num_custom_buttons": 20,
+    "num_custom_buttons": 19,
     "custom_button_configs": [
         {
             "text": "ROV off Deck",
@@ -319,13 +319,6 @@
             "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
-        },
-        {
-            "text": "Custom 20",
-            "event_text": "Custom 20 Event",
-            "txt_source_key": "None",
-            "tab_group": "Main",
-            "event_code": ""
         }
     ],
     "custom_button_tab_groups": [
