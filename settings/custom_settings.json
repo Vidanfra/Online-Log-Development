@@ -1,5 +1,5 @@
 {
-    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Excel Template/600053_Daily_Log-Week24.xlsb",
+    "log_file_path": "C:/reachsubsea/HorizonLogbook/DailyLog-Horizon_v8.xlsb",
     "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
     "txt_folder_path_set2": "",
     "txt_folder_path_set3": "",
@@ -78,49 +78,31 @@
         },
         {
             "field": "Vessel",
-            "column_name": "='MON - 09.06'!H4",
+            "column_name": "='Settings'!B2",
             "db_column_name": "vessel",
             "skip": false
         },
         {
-            "field": "Project Manager",
-            "column_name": "='MON - 09.06'!B2",
-            "db_column_name": "isurvey_project_manager",
-            "skip": false
-        },
-        {
-            "field": "ROV",
-            "column_name": "='MON - 09.06'!B3",
-            "db_column_name": "rov",
-            "skip": false
-        },
-        {
-            "field": "Trencher",
-            "column_name": "='MON - 09.06'!B4",
-            "db_column_name": "trencher",
-            "skip": false
-        },
-        {
             "field": "Job description",
-            "column_name": "='MON - 09.06'!H2",
+            "column_name": "='Settings'!B7",
             "db_column_name": "job_description",
             "skip": false
         },
         {
             "field": "Reach OPCO",
-            "column_name": "='MON - 09.06'!H5",
+            "column_name": "='Settings'!B9",
             "db_column_name": "isurvey_opco",
             "skip": false
         },
         {
             "field": "Client",
-            "column_name": "='MON - 09.06'!H1",
+            "column_name": "='Settings'!B6",
             "db_column_name": "client_name",
             "skip": false
         },
         {
             "field": "OM",
-            "column_name": "='MON - 09.06'!H7",
+            "column_name": "='Resources'!C17",
             "db_column_name": "client_offshore_manager",
             "skip": false
         },
@@ -138,44 +120,50 @@
         },
         {
             "field": "Senior Surveyor",
-            "column_name": "='MON - 09.06'!V2",
+            "column_name": "='Resources'!E17",
             "db_column_name": "isurvey_party_chief",
             "skip": false
         },
         {
             "field": "Online Day",
-            "column_name": "='MON - 09.06'!V3",
+            "column_name": "='Resources'!F17",
             "db_column_name": "isurvey_online_day",
             "skip": false
         },
         {
             "field": "Online Night",
-            "column_name": "='MON - 09.06'!V4",
+            "column_name": "='Resources'!G17",
             "db_column_name": "isurvey_online_night",
             "skip": false
         },
         {
             "field": "Offline Day",
-            "column_name": "Offline Day",
+            "column_name": "='Resources'!H17",
             "db_column_name": "isurvey_offline_day",
             "skip": false
         },
         {
             "field": "Offline Night",
-            "column_name": "Offline Night",
+            "column_name": "='Resources'!I17",
             "db_column_name": "isurvey_offline_night",
             "skip": false
         },
         {
-            "field": "Survey Tech",
-            "column_name": "='MON - 09.06'!V7",
-            "db_column_name": "isurvey_survey_tech",
+            "field": "ROV 1",
+            "column_name": "='Settings'!B3",
+            "db_column_name": "rov",
             "skip": false
         },
         {
-            "field": "Survey Other",
-            "column_name": "='MON - 09.06'!V8",
-            "db_column_name": "isurvey_other",
+            "field": "ROV 2",
+            "column_name": "='Settings'!B4",
+            "db_column_name": "",
+            "skip": false
+        },
+        {
+            "field": "Project Manager",
+            "column_name": "='Resources'!B17",
+            "db_column_name": "isurvey_project_manager",
             "skip": false
         }
     ],
