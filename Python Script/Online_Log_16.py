@@ -1858,7 +1858,7 @@ class DataLoggerGUI:
                 row_values_list = sheet.range(f'A{i}').expand('right').value
                 if row_values_list is None:
                     continue
-                current_row_headers = {str(h).lower() for h in row_values_list if h is not None}
+                current_row_headers = {str(h).lower().strip() for h in row_values_list if h is not None}
                 if required_columns.issubset(current_row_headers):
                     header_row_index = i
                     header_values = row_values_list
