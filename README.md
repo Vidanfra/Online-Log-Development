@@ -5,18 +5,21 @@
 
 This application is a **GUI-based event logger** built with **Tkinter**, used for logging operational events onboard vessels. It supports **logging events to both an Excel workbook and an SQLite database**, with customizable buttons and real-time file monitoring.
 
-It is especially useful for survey/data acquisition operations that require precise logging of onboard actions, vessel states, or file timestamps.
+It allows an operator to log events with a single button click, capturing dynamic data from navigation systems (via TXT files) and static data from a project-specific Excel workbook.
+
+Logged events are simultaneously written to a daily Excel log and inserted into a robust SQLite database. The application features a synchronization engine to reconcile the Excel log with the database, ensuring data integrity even when unique identifiers are missing or have been duplicated.
 
 ---
 
 ## ⚙️ Features
 
 - Monitor `.txt` files and folders in real-time.
-- Log events to Excel and SQLite.
-- Two customizable tabs for user-defined event buttons.
+- Log events to Excel and SQLite in real-time.
+- Customizable user-defined event buttons organized in tabs.
 - Color-coded entries in Excel.
 - Sync button to update SQLite based on Excel data.
 - GUI configuration for log paths and settings.
+- Capture of static data from Log workbook directily from cells using Excel commands (e.g., ='Settings'!B2)
 
 ---
 
@@ -25,20 +28,21 @@ It is especially useful for survey/data acquisition operations that require prec
 1. **Run the Script**  
    Launch the script using Python:
    ```bash
-   python Online_Log_Rev014_2Tab.py
+   python Online_Log_16.py
    ```
 
 2. **Set Up Configuration**  
    Click the `Settings` button to configure:
-   - Excel log file path.
+   - Excel log and navigation file paths.
    - SQLite database path.
    - Monitored folders.
    - Custom button names and associated actions.
+   - Custom event codes
 
 3. **Log Events**  
    Use the provided buttons:
-   - `Log on`, `Log off`, `Event`, `New Day`, `SVP`, and your own custom buttons.
-   - Right-click tabs to **add/edit/remove** custom buttons.
+   - Default layout of custom buttons based on the FLA Layout of the project 600013 Rheinmetall.
+   - Right-click tabs to **add/edit/remove** custom buttons or edit in the Settings menu.
 
 4. **Sync Data**  
    Use `Sync Excel->DB` to update the SQLite database with the latest Excel data.
@@ -50,13 +54,13 @@ It is especially useful for survey/data acquisition operations that require prec
 
 ## 📦 Requirements
 
-- Python 3.x
+- Python 3.13 (or newer)
 - Required packages:
   ```
-  pip install xlwings pandas watchdog
+ pip install pandas openpyxl pyxlsb xlwings watchdog
   ```
 
-- Microsoft Excel installed (for `xlwings` to work properly)
+- Microsoft Excel installed (for `xlwings`and `pyxlsb` to work properly)
 
 ---
 
@@ -67,4 +71,4 @@ It is especially useful for survey/data acquisition operations that require prec
 - Designed for stability on field operations with auto-recovery for most common errors.
 
 ## ✍🏻 Authors
-- Program developed by Pierre Lowe with contributions of Vicente Danvila
+- Program developed by Pierre Lowe and Vicente Danvila

@@ -1,7 +1,7 @@
 {
-    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Excel Log FLA Tool/600053_Daily_Log-Week24.xlsb",
-    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV",
-    "txt_folder_path_set2": "",
+    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Excel Template/DailyLog-Horizon_v8.xlsb",
+    "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
+    "txt_folder_path_set2": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
     "txt_folder_path_set3": "",
     "txt_field_columns_config": [
         {
@@ -71,134 +71,144 @@
             "skip": false
         },
         {
+            "field": "KP Ref.",
+            "column_name": "KP Ref.",
+            "db_column_name": "kp_ref",
+            "skip": false
+        },
+        {
             "field": "Vessel",
-            "column_name": "='MON - 09.06'!H4",
+            "column_name": "='Settings'!B2",
             "db_column_name": "vessel",
             "skip": false
         },
         {
-            "field": "Project Manager",
-            "column_name": "='MON - 09.06'!B2",
-            "db_column_name": "isurvey_project_manager",
-            "skip": false
-        },
-        {
-            "field": "ROV",
-            "column_name": "='MON - 09.06'!B3",
-            "db_column_name": "rov",
-            "skip": false
-        },
-        {
-            "field": "Trencher",
-            "column_name": "='MON - 09.06'!B4",
-            "db_column_name": "trencher",
-            "skip": false
-        },
-        {
             "field": "Job description",
-            "column_name": "='MON - 09.06'!H2",
+            "column_name": "='Settings'!B7",
             "db_column_name": "job_description",
             "skip": false
         },
         {
             "field": "Reach OPCO",
-            "column_name": "='MON - 09.06'!H5",
+            "column_name": "='Settings'!B9",
             "db_column_name": "isurvey_opco",
             "skip": false
         },
         {
             "field": "Client",
-            "column_name": "='MON - 09.06'!H1",
+            "column_name": "='Settings'!B6",
             "db_column_name": "client_name",
             "skip": false
         },
         {
             "field": "OM",
-            "column_name": "='MON - 09.06'!H7",
+            "column_name": "='Resources'!C17",
             "db_column_name": "client_offshore_manager",
             "skip": false
         },
         {
             "field": "Survey Rep.",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "Survey Rep.",
             "db_column_name": "client_survey_rep",
             "skip": false
         },
         {
             "field": "Proj. Engineer",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "Proj. Engineer",
             "db_column_name": "client_project_engineer",
             "skip": false
         },
         {
             "field": "Senior Surveyor",
-            "column_name": "='MON - 09.06'!V2",
+            "column_name": "='Resources'!E17",
             "db_column_name": "isurvey_party_chief",
             "skip": false
         },
         {
             "field": "Online Day",
-            "column_name": "='MON - 09.06'!V3",
+            "column_name": "='Resources'!F17",
             "db_column_name": "isurvey_online_day",
             "skip": false
         },
         {
             "field": "Online Night",
-            "column_name": "='MON - 09.06'!V4",
+            "column_name": "='Resources'!G17",
             "db_column_name": "isurvey_online_night",
             "skip": false
         },
         {
             "field": "Offline Day",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "='Resources'!H17",
             "db_column_name": "isurvey_offline_day",
             "skip": false
         },
         {
             "field": "Offline Night",
-            "column_name": "='MON - 09.06'!D1",
+            "column_name": "='Resources'!I17",
             "db_column_name": "isurvey_offline_night",
             "skip": false
         },
         {
-            "field": "Survey Tech",
-            "column_name": "='MON - 09.06'!V7",
-            "db_column_name": "isurvey_survey_tech",
+            "field": "ROV 1",
+            "column_name": "='Settings'!B3",
+            "db_column_name": "rov",
             "skip": false
         },
         {
-            "field": "Survey Other",
-            "column_name": "='MON - 09.06'!V8",
-            "db_column_name": "isurvey_other",
+            "field": "ROV 2",
+            "column_name": "='Settings'!B4",
+            "db_column_name": "",
+            "skip": false
+        },
+        {
+            "field": "Project Manager",
+            "column_name": "='Resources'!B17",
+            "db_column_name": "isurvey_project_manager",
             "skip": false
         }
     ],
     "folder_paths": {
-        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/CSV"
+        "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
+        "TXT Source 2": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
+        "Naviscan": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "SSS": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "SVP": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/CTD_Logs"
     },
     "folder_columns": {
-        "Main TXT File": "Main_TXT_File"
+        "Main TXT File": "Main_TXT_File",
+        "TXT Source 2": "TXT_Source_2",
+        "Naviscan": "SBD Files",
+        "SSS": "ROV SSS",
+        "SVP": "SVP"
     },
     "file_extensions": {
-        "Main TXT File": "txt"
+        "Main TXT File": "txt",
+        "TXT Source 2": "txt",
+        "Naviscan": "",
+        "SSS": "",
+        "SVP": ""
     },
     "folder_skips": {
-        "Main TXT File": false
+        "Main TXT File": false,
+        "TXT Source 2": false,
+        "Naviscan": false,
+        "SSS": false,
+        "SVP": false
     },
-    "num_custom_buttons": 21,
+    "num_custom_buttons": 19,
     "custom_button_configs": [
         {
             "text": "ROV off Deck",
             "event_text": "ROV off Deck",
             "event_code": "R-OFF",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "ROV on Deck",
             "event_text": "ROV on Deck",
             "event_code": "R-ON",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
@@ -212,49 +222,49 @@
             "text": "TSS BGC",
             "event_text": "TSS Background Compensation",
             "event_code": "BGC",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "STILL PICTURE",
             "event_text": "Still picture taken:",
             "event_code": "STILL",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Left Start",
             "event_text": "As-Left Survey, Start of Line",
             "event_code": "AL-S",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Left End",
             "event_text": "As-Left Survey, End of Line",
             "event_code": "AL-E",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Found Start",
             "event_text": "As-Found Survey, Start of Line",
             "event_code": "AF-S",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Found End",
             "event_text": "As-Found Survey, End of Line",
             "event_code": "AF-E",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "Dredge on Target",
             "event_text": "Dredging Start",
             "event_code": "D-S",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
@@ -268,28 +278,14 @@
             "text": "ROV Other",
             "event_text": "ROV Other:",
             "event_code": "R-OTH",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "UXO Placed",
             "event_text": "UXO placed:",
             "event_code": "R-OTH",
-            "txt_source_key": "Main TXT",
-            "tab_group": "Main"
-        },
-        {
-            "text": "ID&C Start",
-            "event_text": "ID&C Start:",
-            "event_code": "IDC-S",
-            "txt_source_key": "Main TXT",
-            "tab_group": "Main"
-        },
-        {
-            "text": "ID&C Completed",
-            "event_text": "ID&C Completed:",
-            "event_code": "IDC-E",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
@@ -416,18 +412,6 @@
             "#ffffff",
             null
         ],
-        "ID&C Start": [
-            "#000000",
-            "#FFFFFF"
-        ],
-        "ID&C Completed": [
-            "#000000",
-            "#FFFFFF"
-        ],
-        "Custom 21": [
-            "#FFFFBA",
-            "#FFFFFF"
-        ],
         "Custom Event 1": [
             "#BAE1FF",
             null
@@ -458,9 +442,9 @@
         ]
     },
     "sqlite_enabled": true,
-    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/SQL/RHM_600053_UXO_IDC.sqlite",
+    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/SQL Database/RHM_600053_UXO_IDC.sqlite",
     "sqlite_table": "fieldlog",
-    "always_on_top": true,
+    "always_on_top": false,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
     "main_button_configs": {
@@ -480,5 +464,10 @@
             "event_text": "SVP applied",
             "event_code": ""
         }
+    },
+    "txt_source_aliases": {
+        "Main TXT": "Vessel",
+        "TXT Source 2": "WROV",
+        "TXT Source 3": "SROV"
     }
 }

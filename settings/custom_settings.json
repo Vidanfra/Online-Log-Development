@@ -1,7 +1,7 @@
 {
     "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Excel Template/DailyLog-Horizon_v8.xlsb",
     "txt_folder_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
-    "txt_folder_path_set2": "",
+    "txt_folder_path_set2": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
     "txt_folder_path_set3": "",
     "txt_field_columns_config": [
         {
@@ -169,24 +169,28 @@
     ],
     "folder_paths": {
         "Main TXT File": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
+        "TXT Source 2": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/Vessel Navigation",
         "Naviscan": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
         "SSS": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
         "SVP": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/CTD_Logs"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File",
+        "TXT Source 2": "TXT_Source_2",
         "Naviscan": "SBD Files",
         "SSS": "ROV SSS",
         "SVP": "SVP"
     },
     "file_extensions": {
         "Main TXT File": "txt",
+        "TXT Source 2": "txt",
         "Naviscan": "",
         "SSS": "",
         "SVP": ""
     },
     "folder_skips": {
         "Main TXT File": false,
+        "TXT Source 2": false,
         "Naviscan": false,
         "SSS": false,
         "SVP": false
@@ -218,49 +222,49 @@
             "text": "TSS BGC",
             "event_text": "TSS Background Compensation",
             "event_code": "BGC",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "STILL PICTURE",
             "event_text": "Still picture taken:",
             "event_code": "STILL",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Left Start",
             "event_text": "As-Left Survey, Start of Line",
             "event_code": "AL-S",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Left End",
             "event_text": "As-Left Survey, End of Line",
             "event_code": "AL-E",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Found Start",
             "event_text": "As-Found Survey, Start of Line",
             "event_code": "AF-S",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "As-Found End",
             "event_text": "As-Found Survey, End of Line",
             "event_code": "AF-E",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "Dredge on Target",
             "event_text": "Dredging Start",
             "event_code": "D-S",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
@@ -274,14 +278,14 @@
             "text": "ROV Other",
             "event_text": "ROV Other:",
             "event_code": "R-OTH",
-            "txt_source_key": "Main TXT",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
             "text": "UXO Placed",
             "event_text": "UXO placed:",
             "event_code": "R-OTH",
-            "txt_source_key": "None",
+            "txt_source_key": "TXT Source 2",
             "tab_group": "Main"
         },
         {
@@ -440,7 +444,7 @@
     "sqlite_enabled": true,
     "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Vicente/Online-Log-Development/SQL Database/RHM_600053_UXO_IDC.sqlite",
     "sqlite_table": "fieldlog",
-    "always_on_top": true,
+    "always_on_top": false,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
     "main_button_configs": {
