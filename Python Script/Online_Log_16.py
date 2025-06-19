@@ -4059,9 +4059,9 @@ class SettingsWindow:
         
         ttk.Label(config_frame, text="Database File (.db):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.sqlite_db_path_entry = ttk.Entry(config_frame, width=70)
-        self.sqlite_db_path_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew"); ToolTip(self.sqlite_db_path_entry, "Full path to the SQLite database file. It will be created if it doesn't exist.")
-        db_browse_btn = ttk.Button(config_frame, text="Browse/Create...", command=self.select_sqlite_file)
-        db_browse_btn.grid(row=0, column=2, padx=5, pady=5); ToolTip(db_browse_btn, "Browse for an existing SQLite file or specify a name/location for a new one.")
+        self.sqlite_db_path_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew"); ToolTip(self.sqlite_db_path_entry, "Full path to the SQLite database file")
+        db_browse_btn = ttk.Button(config_frame, text="Browse", command=self.select_sqlite_file)
+        db_browse_btn.grid(row=0, column=2, padx=5, pady=5); ToolTip(db_browse_btn, "Browse for an existing SQLite file")
         
         ttk.Label(config_frame, text="Table Name:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.sqlite_table_entry = ttk.Entry(config_frame, width=40)
@@ -4075,10 +4075,14 @@ class SettingsWindow:
 
     def select_sqlite_file(self):
         filetypes = [("SQLite Database", "*.db"), ("SQLite Database", "*.sqlite"), ("SQLite3 Database", "*.sqlite3"), ("All Files", "*.*")]
-        current_path = self.sqlite_db_path_entry.get(); initial_dir = os.path.dirname(current_path) if current_path else os.getcwd()
-        filepath = filedialog.asksaveasfilename(parent=self.master, title="Select or Create SQLite Database File", initialdir=initial_dir, initialfile="DataLoggerLog.db", filetypes=filetypes, defaultextension=".db")
-        if filepath: self.sqlite_db_path_entry.delete(0, tk.END); self.sqlite_db_path_entry.insert(0, filepath)
-        if hasattr(self, 'test_result_label'): self.test_result_label.config(text="")
+        current_path = self.sqlite_db_path_entry.get()
+        initial_dir = os.path.dirname(current_path) if current_path else os.getcwd()
+        filepath = filedialog.askopenfilename(parent=self.master, title="Select SQLite Database File", initialdir=initial_dir, filetypes=filetypes, defaultextension="*.sqlite")
+        if filepath: 
+            self.sqlite_db_path_entry.delete(0, tk.END)
+            self.sqlite_db_path_entry.insert(0, filepath)
+        if hasattr(self, 'test_result_label'): 
+            self.test_result_label.config(text="")
 
     def test_sqlite_connection(self):
         db_path = self.sqlite_db_path_entry.get().strip()
@@ -4094,7 +4098,7 @@ class SettingsWindow:
             cursor = conn.cursor()
             result_text = f"✔️ Connection to '{os.path.basename(db_path)}' successful.\n"
             try:
-                cursor.execute(f"SELECT 1 FROM [{table_name}] LIMIT 1;");
+                cursor.execute(f"SELECT 1 FROM [{table_name}] LIMIT 1;")
                 result_text += f"✔️ Table '{table_name}' found."
                 result_color = "green"
             except sqlite3.OperationalError as e_table:
