@@ -67,7 +67,7 @@ Logged events are simultaneously written to a daily Excel log and inserted into 
 ## 🛟 Notes
 
 - All button presses log data from the latest `.txt` file and add it to the Excel log and/or SQLite.
-- Uses a JSON config file (`logger_settings.json`) to store settings persistently.
+- Uses a JSON config file (`custom_settings.json`) to store settings persistently. Default settings can be restored pressing the Restore Default Settings button.
 - Designed for stability on field operations with auto-recovery for most common errors.
 
 ## ✍🏻 Authors
