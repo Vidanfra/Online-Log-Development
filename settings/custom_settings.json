@@ -450,11 +450,11 @@
     "main_button_configs": {
         "Log on": {
             "event_text": "Log on ",
-            "event_code": "LogON"
+            "event_code": "IDC-S"
         },
         "Log off": {
-            "event_text": "Log off event occurred",
-            "event_code": "Test"
+            "event_text": "Log off",
+            "event_code": "IDC-S"
         },
         "Event": {
             "event_text": "Event",
@@ -462,7 +462,7 @@
         },
         "SVP": {
             "event_text": "SVP applied",
-            "event_code": ""
+            "event_code": "SVP"
         }
     },
     "txt_source_aliases": {
