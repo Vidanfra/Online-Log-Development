@@ -56,9 +56,9 @@ Logged events are simultaneously written to a daily Excel log and inserted into 
 
 - Python 3.13 (or newer)
 - Required packages:
-  ```
+```bash
  pip install pandas openpyxl pyxlsb xlwings watchdog
-  ```
+```
 
 - Microsoft Excel installed (for `xlwings`and `pyxlsb` to work properly)
 

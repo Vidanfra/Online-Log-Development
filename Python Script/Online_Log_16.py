@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, colorchooser, Toplevel, Label
+from tkinter import ttk, filedialog, messagebox, colorchooser, Toplevel, Label, simpledialog
 import os
 import xlwings as xw # Keep xlwings for Excel interaction
 import threading
@@ -21,20 +21,23 @@ DEFAULT_SETTINGS_FILE = "settings/default_settings.json"
 CUSTOM_SETTINGS_FILE = "settings/custom_settings.json"
 EVENT_CODES_FILE = "settings/event_codes.json"
 
-# DICCTIONARY KEYS
-EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'kp ref.', 'event', 'guid'}
+# DICCTIONARY KEYS #NEEDS TO BE REVIEWED
+EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'event', 'guid'} 
+DEFAULT_DATA_FIELDS = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code"} 
+TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"] 
+DEFAULT_MONITORED_FOLDERS = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
 
 # DB SETTINGS
-DEFAULT_TABLE_NAME = "fieldlog"
+DEFAULT_TABLE_NAME = "fieldlog" #NEEDS TO BE REVIEWED
 
 # NUMERICAL CONSTANTS
 MAX_HEADER_SEARCH_ROW = 30
-
+LAYOUT_BUTTON_COLUMNS = 5
 
 # Global cache
 folder_cache = {}
 
-# --- Tooltip Class (IMPROVED with Delays) ---
+# --- Tooltip Class ---
 class ToolTip:
     """
     Create a tooltip for a given widget with hover delays.
@@ -138,7 +141,7 @@ class ToolTip:
             except tk.TclError:
                 pass # Ignore if already destroyed
 
-
+# --- FolderMonitor Class ---
 class FolderMonitor(FileSystemEventHandler):
     '''
     A custom event handler for watchdog that monitors a specified folder for new or modified files
@@ -231,7 +234,7 @@ class DataLoggerGUI:
         * main_frame: The main frame containing all widgets.
         '''
 
-
+    # --- Initialization ---
     def __init__(self, master):
         '''
         Initializes the main GUI application.
@@ -239,6 +242,10 @@ class DataLoggerGUI:
         Arguments:
         * master: The root Tkinter window or parent widget.
         '''
+
+        print("\n--- Starting Online Logger ---\n")
+
+        # Initialize the main window
         self.master = master
         master.title("Online Logger")
         master.geometry("1400x250")
@@ -274,6 +281,8 @@ class DataLoggerGUI:
         self.config_frame.rowconfigure(0, weight=1) # Buttons will be at the top
         self.config_frame.rowconfigure(1, weight=0) # Indicators will be at the bottom
 
+        
+        print("-> Initializing GUI components...")
         # Create all buttons and place them in the correct frames
         self.create_main_buttons()
 
@@ -453,22 +462,7 @@ class DataLoggerGUI:
         else:
             self.load_settings()
 
-    def load_event_codes(self):
-        """Loads the event codes from its dedicated JSON file."""
-        print(f"--- Loading Event Codes from {self.event_codes_file} ---")
-        if os.path.exists(self.event_codes_file):
-            try:
-                with open(self.event_codes_file, 'r') as f:
-                    self.event_codes = json.load(f)
-                print(f"Loaded {len(self.event_codes)} event codes.")
-            except (json.JSONDecodeError, Exception) as e:
-                print(f"Error loading event codes file: {e}")
-                self.event_codes = {} # Reset to empty on error
-                messagebox.showerror("Load Error", f"Could not load or parse the event codes file:\n{self.event_codes_file}\n\nError: {e}", parent=self.master)
-        else:
-            print("Event codes file not found. Using empty set.")
-            self.event_codes = {}
-
+    # --- GUI Creation ---
     def create_main_buttons(self):
         '''
         Builds and renders all the buttons in the GUI dynamically, grouped for better intuitiveness.
@@ -541,12 +535,9 @@ class DataLoggerGUI:
                     # Corrected: lambda function for command
                     button.config(command=lambda c=config, b=button: self.log_custom_event(c, b))
                     
-                    # --- New (Row-First) Logic ---
-
-                    # Define how many columns you want in each row
-                    num_columns = 5 
 
                     # Calculate row and column based on the number of columns
+                    num_columns = LAYOUT_BUTTON_COLUMNS
                     row = i // num_columns
                     col = i % num_columns
 
@@ -600,7 +591,7 @@ class DataLoggerGUI:
         create_main_button(general_lf, "Log on", lambda b=None: self.log_event("Log on", b, "Main TXT"), "Record a 'Log on' marker.", 0, 0)
         create_main_button(general_lf, "Log off", lambda b=None: self.log_event("Log off", b, "Main TXT"), "Record a 'Log off' marker.", 1, 0)
         create_main_button(general_lf, "Event", lambda b=None: self.log_event("Event", b, "Main TXT"), "Record data from the Main TXT source.", 0, 1)
-        create_main_button(general_lf, "SVP", lambda b=None: self.apply_svp(b, "Main TXT"), "Record data and insert latest SVP filename.", 1, 1)
+        create_main_button(general_lf, "SVP", lambda b=None: self.log_svp("SVP", b, "Main TXT"), "Record data and insert latest SVP filename.", 1, 1)
 
 
         # --- Section 3: Configuration Buttons (Right Side) ---
@@ -616,7 +607,6 @@ class DataLoggerGUI:
         btn_sync = ttk.Button(config_lf, text="Sync DB", style="Small.TButton", command=self.sync_excel_to_sqlite_triggered)
         btn_sync.grid(row=1, column=0, sticky="ew", padx=4, pady=2)
         ToolTip(btn_sync, "Update SQLite DB from the Excel log.")
-
 
     def create_status_indicators(self):
         '''
@@ -649,6 +639,73 @@ class DataLoggerGUI:
         ToolTip(always_on_top_check, "If checked, this window will always stay on top.")
 
         self.update_db_indicator()
+
+    def create_status_bar(self):
+        '''
+        Creates a status bar at the bottom of the main window to display status messages.
+        This method initializes a label that will show the current status of the application, such as monitoring status, database connection status, and other messages.
+        '''
+        self.status_var.set("Status: Ready")
+        status_bar = ttk.Label(self.main_frame, textvariable=self.status_var, style="StatusBar.TLabel", anchor='w')
+        status_bar.grid(row=1, column=0, columnspan=3, sticky="ew")
+    
+    # --- Synchronization Excel Log to SQLite Database ---
+    def _find_header_row(self, excel_file, engine, required_column='GUID', max_rows_to_scan=MAX_HEADER_SEARCH_ROW):
+        """
+        Scans the top N rows of an Excel sheet to find the row index of the header.
+        The header is identified by the presence of a specific required column (e.g., 'GUID').
+
+        Args:
+            excel_file (str): Path to the Excel file.
+            engine (str): The pandas engine to use ('openpyxl' or 'pyxlsb').
+            required_column (str): A column name that MUST be in the header row.
+            max_rows_to_scan (int): The number of rows to scan from the top.
+
+        Returns:
+            int: The zero-based index of the header row.
+
+        Raises:
+            ValueError: If the required column is not found in the scanned rows.
+        """
+        # Read only the top part of the file without assuming any header
+        df_top = pd.read_excel(
+            excel_file,
+            engine=engine,
+            header=None,
+            nrows=max_rows_to_scan
+        )
+        for idx, row in df_top.iterrows():
+            # Check if the required column name is in the current row's values
+            # Comparing as lowercase strings for robustness
+            row_values = [str(v).lower() for v in row.values]
+            if required_column.lower() in row_values:
+                return idx  # Return the index of the found header row
+
+        # If the loop finishes, the header was not found
+        raise ValueError(f"Crucial '{required_column}' column not found in the first {max_rows_to_scan} rows.")
+    
+    def _values_are_different(self, val1, val2):
+        """
+        Robustly compares two values, handling None, pandas NaT/NaN, and numeric types.
+        """
+        # If both are considered null, they are not different
+        if (pd.isna(val1) or val1 is None) and (pd.isna(val2) or val2 is None):
+            return False
+        # If one is null and the other is not, they are different
+        if (pd.isna(val1) or val1 is None) or (pd.isna(val2) or val2 is None):
+            return True
+        
+        # Try a numeric comparison for floats/ints
+        try:
+            # Compare with a small tolerance for floating point issues
+            if abs(float(val1) - float(val2)) < 0.00001:
+                return False
+        except (ValueError, TypeError):
+            # If they can't be converted to float, proceed to string comparison
+            pass
+
+        # Fallback to string comparison for all other types (dates, text, etc.)
+        return str(val1) != str(val2)
 
     def _write_guids_to_excel(self, updates: dict, excel_file: str, header_row_index: int):
         """
@@ -731,10 +788,8 @@ class DataLoggerGUI:
         Returns:
             str: A status indicating the action taken ('INSERT', 'REPLACE', or 'SKIP').
         """
-        guid_val = record_to_process.get("GUID") 
         time_fix_val = record_to_process.get('time_fix')
         
-        # --- FIX ---
         # 1. Look up the Excel column name for the "Event" field from the config.
         excel_event_col = self.txt_field_columns.get("Event")
         # 2. Get the event value from the incoming record using that Excel column name.
@@ -789,13 +844,6 @@ class DataLoggerGUI:
             # No unique orphan found, proceed with a normal insert.
             cursor.execute(sql_insert, vals_to_use)
             return "INSERT"
-        
-
-    # Function for always on top
-    def toggle_always_on_top(self):
-        """Toggles the 'always on top' state of the main window based on the checkbox."""
-        is_on_top = self.always_on_top_var.get()
-        self.master.wm_attributes("-topmost", is_on_top)
 
     def sync_excel_to_sqlite_triggered(self):
         '''
@@ -840,7 +888,7 @@ class DataLoggerGUI:
             df_excel['original_excel_row'] = df_excel.index + header_row + 2 # Get physical row number
             df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(object).where(pd.notnull(df_excel[guid_column_excel]), None)
 
-            # --- 3. NEW: DUPLICATE GUID REPAIR LOGIC ---
+            # --- 3. DUPLICATE GUID REPAIR LOGIC ---
             # Standardize GUIDs for accurate detection
             if guid_column_excel in df_excel.columns:
                 df_excel[guid_column_excel] = df_excel[guid_column_excel].astype(str).str.upper().str.strip().replace('NONE', None)
@@ -939,66 +987,6 @@ class DataLoggerGUI:
 
         threading.Thread(target=_sync_worker, daemon=True).start()
 
-      
-    def _values_are_different(self, val1, val2):
-        """
-        Robustly compares two values, handling None, pandas NaT/NaN, and numeric types.
-        """
-        # If both are considered null, they are not different
-        if (pd.isna(val1) or val1 is None) and (pd.isna(val2) or val2 is None):
-            return False
-        # If one is null and the other is not, they are different
-        if (pd.isna(val1) or val1 is None) or (pd.isna(val2) or val2 is None):
-            return True
-        
-        # Try a numeric comparison for floats/ints
-        try:
-            # Compare with a small tolerance for floating point issues
-            if abs(float(val1) - float(val2)) < 0.00001:
-                return False
-        except (ValueError, TypeError):
-            # If they can't be converted to float, proceed to string comparison
-            pass
-
-        # Fallback to string comparison for all other types (dates, text, etc.)
-        return str(val1) != str(val2)
-
-    
-    #Find header for the SQL Update function
-    def _find_header_row(self, excel_file, engine, required_column='GUID', max_rows_to_scan=30):
-        """
-        Scans the top N rows of an Excel sheet to find the row index of the header.
-        The header is identified by the presence of a specific required column (e.g., 'GUID').
-
-        Args:
-            excel_file (str): Path to the Excel file.
-            engine (str): The pandas engine to use ('openpyxl' or 'pyxlsb').
-            required_column (str): A column name that MUST be in the header row.
-            max_rows_to_scan (int): The number of rows to scan from the top.
-
-        Returns:
-            int: The zero-based index of the header row.
-
-        Raises:
-            ValueError: If the required column is not found in the scanned rows.
-        """
-        # Read only the top part of the file without assuming any header
-        df_top = pd.read_excel(
-            excel_file,
-            engine=engine,
-            header=None,
-            nrows=max_rows_to_scan
-        )
-        for idx, row in df_top.iterrows():
-            # Check if the required column name is in the current row's values
-            # Comparing as lowercase strings for robustness
-            row_values = [str(v).lower() for v in row.values]
-            if required_column.lower() in row_values:
-                return idx  # Return the index of the found header row
-
-        # If the loop finishes, the header was not found
-        raise ValueError(f"Crucial '{required_column}' column not found in the first {max_rows_to_scan} rows.")
-
     def perform_excel_to_sqlite_sync(self, static_data=None):
         '''
         This function ensures the SQLite database reflects the latest data from the Excel log.
@@ -1057,8 +1045,10 @@ class DataLoggerGUI:
             db_cols_set = set(pd.read_sql_query(f"PRAGMA table_info('{db_table}')", conn_sqlite)['name'])
             
             excel_to_db_map = {item.get("column_name"): item.get("db_column_name") for item in self.txt_field_columns_config if item.get("column_name") and item.get("db_column_name")}
-            if 'GUID' in db_cols_set: excel_to_db_map[guid_column_excel] = 'GUID'
-            if 'time_fix' in db_cols_set: excel_to_db_map['time_fix'] = 'time_fix'
+            if 'GUID' in db_cols_set: 
+                excel_to_db_map[guid_column_excel] = 'GUID'
+            if 'time_fix' in db_cols_set: 
+                excel_to_db_map['time_fix'] = 'time_fix'
             
             guid_db_col_name = excel_to_db_map.get(guid_column_excel)
             if not guid_db_col_name or guid_db_col_name not in db_cols_set:
@@ -1120,6 +1110,7 @@ class DataLoggerGUI:
 
         # --- 5. Apply Changes to the Database ---
         if not records_with_new_guid and not records_to_update:
+            print("Sync complete. No changes detected.")
             return True, "Sync complete. No changes detected."
 
         conn_sqlite = None
@@ -1154,9 +1145,11 @@ class DataLoggerGUI:
                         db_col_name = excel_to_db_map.get(excel_formula_key)
                         if db_col_name:
                             updates[db_col_name] = value
-                if not updates: continue
-                if 'event' in updates and updates['event'] is None: updates['event'] = ''
-                
+                if not updates: 
+                    continue
+                if 'event' in updates and updates['event'] is None: 
+                    updates['event'] = ''
+                print("UPDATES: ", updates) #DEBUG
                 set_clauses = [f'"{col}" = ?' for col in updates.keys()]
                 values = list(updates.values()) + [guid_val]
                 sql = f"UPDATE \"{db_table}\" SET {', '.join(set_clauses)} WHERE \"{guid_db_col_name}\" = ?"
@@ -1164,6 +1157,7 @@ class DataLoggerGUI:
                 updated_count += 1
 
             conn_sqlite.commit()
+            print(f"Sync successful. Replaced: {replaced_count}. Inserted: {inserted_count}. Updated: {updated_count}.")
             return True, f"Sync successful. Replaced: {replaced_count}. Inserted: {inserted_count}. Updated: {updated_count}."
 
         except Exception as e:
@@ -1173,15 +1167,7 @@ class DataLoggerGUI:
         finally:
             if conn_sqlite: conn_sqlite.close()
 
-    def create_status_bar(self):
-        '''
-        Creates a status bar at the bottom of the main window to display status messages.
-        This method initializes a label that will show the current status of the application, such as monitoring status, database connection status, and other messages.
-        '''
-        self.status_var.set("Status: Ready")
-        status_bar = ttk.Label(self.main_frame, textvariable=self.status_var, style="StatusBar.TLabel", anchor='w')
-        status_bar.grid(row=1, column=0, columnspan=3, sticky="ew")
-
+    # --- Status Bar and Indicators ---
     def update_status(self, message):
         '''
         Updates the status bar with a new message, including a timestamp.
@@ -1206,7 +1192,6 @@ class DataLoggerGUI:
                 self.master.after(0, _update)
             except tk.TclError:
                 pass # Window might be destroyed between check and after call
-
 
     def update_db_indicator(self):
         '''
@@ -1258,8 +1243,7 @@ class DataLoggerGUI:
             pass
 
 
-    # --- Logging Actions (using threading) ---
-
+    # --- Logging Actions ---
     def log_event(self, event_type, button_widget, txt_source_key="Main TXT"):
         '''
         This function is called when a standard event button is pressed (e.g., Log on, Log off, Event).
@@ -1297,26 +1281,16 @@ class DataLoggerGUI:
                                  triggering_button=button_widget,
                                  txt_source_key=txt_source_key) # This is correctly passing it
 
-    # Review this fuction: innecessarily specific for "New Day"
-    def log_new_day(self, button_widget=None, txt_source_key="Main TXT"):
+    def log_svp(self, event_type, button_widget, txt_source_key="Main TXT"):
         '''
-        This function is called when the "New Day" button is pressed.
-        It logs a "New Day" event by calling _perform_log_action with the appropriate parameters.
-        Arguments:
-        * button_widget: The button widget that was pressed, used to temporarily disable it during processing.
-        '''
-        self._perform_log_action(event_type="New Day",
-                                 event_text_for_excel="New Day",
-                                 triggering_button=button_widget,
-                                 txt_source_key=txt_source_key)
-    # Review this fuction: innecessarily specific for SVP
-    def apply_svp(self, button_widget, txt_source_key="Main TXT"):
-        '''
-        This function is called when the "Apply SVP" button is pressed.
+        This function is called when the "SVP" button is pressed.
         It checks if the necessary configurations are set (log file, TXT folder, SVP folder path),
         and if so, it calls _perform_log_action to log the SVP event.
         Arguments:
+        * event_type: necessary code to classify the event.
         * button_widget: The button widget that was pressed, used to temporarily disable it during processing.
+        * txt_source_key: TXT file where metadata is obtained
+
         '''
         if not self.log_file_path or not self.txt_folder_path or "SVP" not in self.folder_paths:
             messagebox.showinfo("Info", "Please select log file, TXT folder, and configure SVP folder path/column in Settings.", parent=self.master)
@@ -1332,11 +1306,11 @@ class DataLoggerGUI:
             return
 
         event_text = self.main_button_configs.get("SVP", {}).get("event_text", "SVP applied")
-        self._perform_log_action(event_type="SVP",
+        self._perform_log_action(event_type=event_type,
                                  event_text_for_excel=event_text,
                                  svp_specific_handling=True,
                                  triggering_button=button_widget,
-                                 txt_source_key=txt_source_key) # Changed to pass txt_source_key
+                                 txt_source_key=txt_source_key) 
 
     def _perform_log_action(self, event_type, event_text_for_excel, skip_latest_files=False, svp_specific_handling=False, triggering_button=None, txt_source_key="Main TXT"):
         '''This is the main entry point for handling an event (e.g., button press).
@@ -1361,8 +1335,7 @@ class DataLoggerGUI:
         * Updates the GUI status with success/failure feedback.
         '''
         self.update_status(f"Processing '{event_type}'...")
-        print(f"\n--- Log Action Initiated for '{event_type}' ---")  # DIAGNOSTIC
-        print(f"txt_source_key received: {txt_source_key}")  # DIAGNOSTIC
+        print(f"\n--- Log Action Initiated for '{event_type}' ---")  #DEBUG
 
         original_text = None
         # Disable the button if it exists and is a ttk.Button
@@ -1405,17 +1378,15 @@ class DataLoggerGUI:
                     if source_folder_path and os.path.isdir(source_folder_path):
                         try:
                             txt_data = self._get_txt_data_from_source(source_folder_path)
-                            print(f"TXT data fetched from {source_folder_path}: {txt_data}")  # DIAGNOSTIC
                             if txt_data:
                                 row_data.update(txt_data) # Update row_data with TXT data
-                                print(f"row_data after TXT update: {row_data}")  # DIAGNOSTIC
                             else:
-                                print(f"No TXT data returned from {source_folder_path}")  # DIAGNOSTIC
+                                print(f"No TXT data returned from {source_folder_path}")  #DEBUG
                         except Exception as e_txt:
-                            print(f"Error getting TXT data from source '{txt_source_key}': {e_txt}")  # DIAGNOSTIC
+                            print(f"Error getting TXT data from source '{txt_source_key}': {e_txt}")  #DEBUG
                             self.master.after(0, lambda e=e_txt: messagebox.showerror("Error", f"Failed to read TXT data from {txt_source_key}:\n{e}", parent=self.master))
                     else:
-                        print(f"Source folder path is invalid or empty for {txt_source_key}: {source_folder_path}")  # DIAGNOSTIC
+                        print(f"Source folder path is invalid or empty for {txt_source_key}: {source_folder_path}")  #DEBUG
                         error_title = "Configuration Error"
                         # Debugging to highlight if a text file has not been assigned to a button
                         error_message = (
@@ -1426,8 +1397,7 @@ class DataLoggerGUI:
                         # Schedule the message box to be shown safely in the main GUI thread.
                         self.master.after(0, lambda: messagebox.showwarning(error_title, error_message, parent=self.master))
                 else:
-                    print(f"txt_source_key is 'None' or empty, skipping TXT data collection.")  # DIAGNOSTIC
-                # --- End TXT Data Collection ---
+                    print(f"txt_source_key is 'None' or empty, skipping TXT data collection.")  #DEBUG
 
                 # --- Collect Static Data from Excel Cells ---
                 try:
@@ -1444,11 +1414,10 @@ class DataLoggerGUI:
                 if not skip_latest_files:
                     try:
                         latest_files_data = self.get_latest_files_data()
-                        print(f"Latest files data (monitored folders): {latest_files_data}")  # DIAGNOSTIC
                         if latest_files_data:
                             row_data.update(latest_files_data)
                     except Exception as e_files:
-                        print(f"Error getting latest file data (monitored folders): {e_files}")  # DIAGNOSTIC
+                        print(f"Error getting latest file data (monitored folders): {e_files}")  #DEBUG
                         self.master.after(0, lambda e=e_files: messagebox.showerror("Error", f"Failed to get latest file data:\n{e}", parent=self.master))
 
                 # Adds SVP file info if applicable
@@ -1458,12 +1427,9 @@ class DataLoggerGUI:
                     if svp_folder_path and svp_col_name:
                         latest_svp_file = folder_cache.get("SVP")
                         row_data[svp_col_name] = latest_svp_file if latest_svp_file else "N/A"
-                        print(f"SVP data added: {svp_col_name}: {row_data[svp_col_name]}")  # DIAGNOSTIC
                     elif svp_col_name:
                         row_data[svp_col_name] = "Config Error"
-                        print(f"SVP column config error: {svp_col_name}")  # DIAGNOSTIC
-
-                print(f"Final row_data before processing event text/code: {row_data}")  # DIAGNOSTIC
+                        print(f"SVP column config error: {svp_col_name}")  #DEBUG
 
                 if self.txt_source_aliases:
                     # If aliases are configured, add them to the row_data.
@@ -1471,7 +1437,6 @@ class DataLoggerGUI:
                     kp_ref_column_name = self.txt_field_columns.get("KP Ref.")
                     if kp_ref and kp_ref_column_name:
                         row_data[kp_ref_column_name] = kp_ref
-                        print(f"KP Ref. added: {kp_ref_column_name}: {kp_ref}") # DIAGNOSTIC
                 else:
                     print("No KP Ref. aliases configured, skipping...")
 
@@ -1497,7 +1462,6 @@ class DataLoggerGUI:
                 code_column_name = self.txt_field_columns.get("Code")
                 if code_column_name and event_code_to_log:
                     row_data[code_column_name] = event_code_to_log
-                    print(f"Event Code '{event_code_to_log}' added to column '{code_column_name}'")  # DIAGNOSTIC
 
                 if row_data:
                     # Get the color for the row based on the event type
@@ -1509,7 +1473,7 @@ class DataLoggerGUI:
 
                     # 1. Save to Excel first
                     try:
-                        print(f"Attempting to save to Excel. Log file: {self.log_file_path}")  # DIAGNOSTIC
+                        print(f"Attempting to save to Excel. Log file: {self.log_file_path}")  #DEBUG
                         if not self.log_file_path:
                             excel_save_exception = ValueError("Excel path missing")
                         elif not os.path.exists(self.log_file_path):
@@ -1517,11 +1481,11 @@ class DataLoggerGUI:
                         else:
                             self.save_to_excel(excel_data, row_color=row_color_for_excel, font_color=font_color_for_excel)
                             excel_success = True
-                            print("Excel save: SUCCESS")  # DIAGNOSTIC
+                            print("Excel save: SUCCESS")  #DEBUG
                     except Exception as e_excel:
                         excel_save_exception = e_excel
                         traceback.print_exc()
-                        print(f"Excel save: FAILED with error: {e_excel}")  # DIAGNOSTIC
+                        print(f"Excel save: FAILED with error: {e_excel}")  #DEBUG
                         self.master.after(0, lambda e=e_excel: messagebox.showerror("Error", f"Failed to save to Excel:\n{e}", parent=self.master))
 
                     # 2. If Excel save was successful AND SQLite is enabled, trigger the sync
@@ -1571,12 +1535,11 @@ class DataLoggerGUI:
                         status_msg = f"'{event_type}' logged. " + ", ".join(status_parts) + "."
                 else:
                     status_msg = f"'{event_type}' pressed, but no data was collected/generated."
-                    print(f"No row_data to save for '{event_type}'.")  # DIAGNOSTIC
 
             except Exception as thread_ex:
                 traceback.print_exc()
                 status_msg = f"'{event_type}' - Unexpected thread error: {thread_ex}"
-                print(f"CRITICAL THREAD ERROR: {thread_ex}")  # DIAGNOSTIC
+                print(f"CRITICAL THREAD ERROR: {thread_ex}")  #DEBUG
                 self.master.after(0, lambda e=thread_ex: messagebox.showerror("Thread Error", f"Critical error during logging action '{event_type}':\n{e}", parent=self.master))
 
             finally:
@@ -1597,7 +1560,7 @@ class DataLoggerGUI:
         log_thread = threading.Thread(target=_log_thread_func, daemon=True)
         log_thread.start()
 
-    # --- Data Fetching Methods (Refactored to support multiple TXT sources) ---
+    # --- TXT Reading and Writting ---
     def _get_txt_data_from_source(self, folder_path):
         """
         Reads and parses data from the latest TXT file in the specified folder.
@@ -1605,17 +1568,14 @@ class DataLoggerGUI:
         """
         row_data = {}
         current_dt = datetime.datetime.now()
-        
-        print(f"Attempting to get TXT data from: {folder_path}") # DIAGNOSTIC
 
         latest_txt_file_path = None
         if folder_path and os.path.exists(folder_path):
             latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".txt")
             if not latest_txt_file_path:
                 latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".csv") # Try CSV as fallback
-            print(f"Latest TXT file found: {latest_txt_file_path}") # DIAGNOSTIC
         else:
-            print(f"TXT folder path is invalid or empty: {folder_path}") # DIAGNOSTIC
+            print(f"TXT folder path is invalid or empty: {folder_path}")
             return row_data # Return empty if path is invalid
 
         temp_txt_data = {}
@@ -1638,31 +1598,28 @@ class DataLoggerGUI:
                                 read_success = True
                                 break
                             except IOError as e_io:
-                                print(f"IOError reading TXT file '{latest_txt_file_path}' on attempt {attempt+1} with encoding {enc}: {e_io}") # DIAGNOSTIC
+                                print(f"IOError reading TXT file '{latest_txt_file_path}' on attempt {attempt+1} with encoding {enc}: {e_io}") #DEBUG
                                 if attempt < 2:
                                     time.sleep(0.1) # Wait a bit longer if file is busy
                                     continue
                                 else:
                                     raise
                         if read_success:
-                            print(f"Successfully read TXT file with encoding: {enc}") # DIAGNOSTIC
                             break
                     except UnicodeDecodeError:
-                        print(f"UnicodeDecodeError with encoding: {enc} for file {latest_txt_file_path}") # DIAGNOSTIC
+                        print(f"UnicodeDecodeError with encoding: {enc} for file {latest_txt_file_path}") #DEBUG
                         continue
                     except Exception as e_read:
-                        print(f"Unexpected error during TXT file read for {latest_txt_file_path}: {e_read}") # DIAGNOSTIC
+                        print(f"Unexpected error during TXT file read for {latest_txt_file_path}: {e_read}") #DEBUG
                         lines = []
                         break
 
                 if not read_success or not lines:
-                    print(f"Failed to read any lines from TXT file: {latest_txt_file_path}") # DIAGNOSTIC
+                    print(f"Failed to read any lines from TXT file: {latest_txt_file_path}")
                     return row_data
 
                 last_line_str = lines[-1].strip() # Get the last line of the file
-                print(f"Last line of TXT file: '{last_line_str}'") # DIAGNOSTIC
                 latest_line_parts = last_line_str.split(",")
-                print(f"Last line parts: {latest_line_parts}") # DIAGNOSTIC
                 
                 # Iterate through the ordered config for TXT fields
                 for i, field_config in enumerate(self.txt_field_columns_config):
@@ -1677,13 +1634,12 @@ class DataLoggerGUI:
                         if i < len(latest_line_parts):
                             value = latest_line_parts[i].strip()
                             temp_txt_data[excel_col] = value
-                            print(f"Parsed TXT data: '{field_key}' -> '{excel_col}': '{value}'") # DIAGNOSTIC
+                            #print(f"Parsed TXT data: '{field_key}' -> '{excel_col}': '{value}'") #DEBUG
                         else:
                             temp_txt_data[excel_col] = None # Field not found at expected index
-                            print(f"TXT field '{field_key}' (index {i}) has no corresponding data in line parts.") # DIAGNOSTIC
+                            #print(f"TXT field '{field_key}' (index {i}) has no corresponding data in line parts.")  #DEBUG
             except Exception as e:
-                print(f"Major error during TXT parsing: {e}") # DIAGNOSTIC
-
+                print(f"Major error during TXT parsing: {e}")
 
         date_col = None
         time_col = None
@@ -1708,11 +1664,10 @@ class DataLoggerGUI:
         for col, val in temp_txt_data.items():
             if col not in row_data: # Don't overwrite PC date/time if already set
                 row_data[col] = val
-        
-        print(f"Final row_data from _get_txt_data_from_source: {row_data}") # DIAGNOSTIC
+
         return row_data
 
-    def get_latest_files_data(self): # This is global for monitored folders
+    def get_latest_files_data(self): 
         '''Collects the latest files from all monitored folders and returns a dictionary of column names to file paths.
         Returns:
         * A dictionary where keys are column names (from folder_columns) and values are the latest file paths.
@@ -1720,10 +1675,14 @@ class DataLoggerGUI:
 
         latest_files = {}
         for folder_name, folder_path in self.folder_paths.items():
-            if not folder_path or self.folder_skips.get(folder_name, False): continue
+            if not folder_path or self.folder_skips.get(folder_name, False): 
+                continue
             latest_file = folder_cache.get(folder_name)
             column_name = self.folder_columns.get(folder_name)
-            if not column_name: continue
+
+            if not column_name: 
+                continue
+
             if latest_file: latest_files[column_name] = latest_file
             else: latest_files[column_name] = "N/A"
         return latest_files
@@ -1742,9 +1701,12 @@ class DataLoggerGUI:
             for f in os.listdir(folder_path):
                 f_path = os.path.join(folder_path, f)
                 try:
-                    if os.path.isfile(f_path) and f.lower().endswith(ext_lower): files.append(f_path)
-                except OSError: continue
+                    if os.path.isfile(f_path) and f.lower().endswith(ext_lower): 
+                        files.append(f_path)
+                except OSError: 
+                    continue
             return max(files, key=os.path.getmtime) if files else None
+        
         except FileNotFoundError: return None
         except Exception: return None
 
@@ -1765,7 +1727,6 @@ class DataLoggerGUI:
 
         app, workbook, opened_new_app = None, None, False
         try:
-            print("Connecting to Excel to read static cell data...")
             # This logic connects to an existing instance or opens a new one
             target_norm_path = os.path.normcase(os.path.abspath(self.log_file_path))
             for running_app in xw.apps:
@@ -1801,7 +1762,7 @@ class DataLoggerGUI:
                     value = sheet.range(cell_ref).value
                     
                     static_data[excel_col_key] = value
-                    print(f"Read '{value}' from {sheet_name}!{cell_ref} for mapping '{excel_col_key}'")
+                    #print(f"Read '{value}' from {sheet_name}!{cell_ref} for mapping '{excel_col_key}'") #DEBUG
 
                 except Exception as e:
                     print(f"Error reading from Excel cell for lookup '{lookup_str}': {e}")
@@ -1816,11 +1777,11 @@ class DataLoggerGUI:
             if app is not None and opened_new_app:
                 try:
                     app.quit()
-                except Exception: pass
+                except Exception: 
+                    pass
 
     def save_to_excel(self, row_data, row_color=None, font_color=None, next_row=None): # Added font_color parameter
         '''Saves the provided row_data to the specified Excel log file.'''
-        print(f"Entering save_to_excel. Data: {row_data}")
         if not self.log_file_path or not os.path.exists(self.log_file_path):
             raise FileNotFoundError("Excel log file path is invalid or file does not exist.")
 
@@ -1923,7 +1884,6 @@ class DataLoggerGUI:
                     app.quit()
                 except Exception as e_quit:
                     print(f"Error quitting Excel app: {e_quit}")
-            print("Exiting save_to_excel.")
 
     def log_to_sqlite(self, row_data):
         '''Logs the provided row_data to the SQLite database using mapping from settings.
@@ -1933,16 +1893,15 @@ class DataLoggerGUI:
             * success: True if logging was successful, False otherwise.
             * error_type: A string indicating the type of error, or None.
         '''
-        print(f"Entering log_to_sqlite. Data: {row_data}") # DIAGNOSTIC
         success = False
         error_type = None
 
         if not self.sqlite_enabled:
-            print("SQLite logging disabled.") # DIAGNOSTIC
+            print("SQLite logging disabled.") #DEBUG
             return False, "Disabled"
 
         if not self.sqlite_db_path or not self.sqlite_table:
-            print("SQLite config missing (path or table).") # DIAGNOSTIC
+            print("SQLite config missing (path or table).") #DEBUG
             return False, "ConfigurationMissing"
 
         conn = None
@@ -1952,7 +1911,6 @@ class DataLoggerGUI:
             cursor = conn.cursor()
 
             # --- START: UI-DRIVEN DYNAMIC MAPPING ---
-            print("Applying UI-driven mapping rules to prepare data...") # DIAGNOSTIC
             data_to_insert = {}
 
             # Iterate through the configuration from the settings
@@ -1986,11 +1944,11 @@ class DataLoggerGUI:
             if date_val and time_val:
                 data_to_insert[time_fix_db_col] = f"{date_val} {time_val}"
 
-            print(f"Data prepared for SQLite insert: {data_to_insert}") # DIAGNOSTIC
+            #print(f"Data prepared for SQLite insert: {data_to_insert}") #DEBUG
             # --- END: DYNAMIC MAPPING ---
 
             if not data_to_insert:
-                print("No data to insert after mapping.") # DIAGNOSTIC
+                print("No data to insert after mapping.")
                 return True, None
 
             # Check for table and column validity before inserting
@@ -2014,27 +1972,27 @@ class DataLoggerGUI:
             sql_insert = f'INSERT INTO "{self.sqlite_table}" ({col_name_string}) VALUES ({placeholders})'
             values = list(final_data_to_insert.values())
             
-            print(f"Executing SQLite insert: SQL='{sql_insert}', Values='{values}'") # DIAGNOSTIC
+            #print(f"Executing SQLite insert: SQL='{sql_insert}', Values='{values}'") #DEBUG
             cursor.execute(sql_insert, values)
             conn.commit()
-            print("SQLite insert committed successfully.") # DIAGNOSTIC
+            print("SQLite insert committed successfully.") #DEBUG
             success = True
 
         except sqlite3.OperationalError as op_err:
             error_message = str(op_err); error_type = "OperationalError"
-            print(f"SQLite OperationalError: {error_message}") # DIAGNOSTIC
+            print(f"SQLite OperationalError: {error_message}") #DEBUG
             if conn: conn.rollback()
             # (Your existing specific error handling for "no such table", etc.)
             success = False
         except Exception as e:
             error_message = str(e); error_type = type(e).__name__
-            print(f"Unexpected SQLite logging error: {e}") # DIAGNOSTIC
+            print(f"Unexpected SQLite logging error: {e}") #DEBUG
             if conn: conn.rollback()
             success = False
         finally:
             if cursor: cursor.close()
             if conn: conn.close()
-            print("Exiting log_to_sqlite.") # DIAGNOSTIC
+            print("Exiting log_to_sqlite.") #DEBUG
         return success, error_type
 
     def show_sqlite_error_message(self, error_message, error_type):
@@ -2060,9 +2018,10 @@ class DataLoggerGUI:
         else:
             messagebox.showerror("SQLite Operational Error", f"Error interacting with database:\n{error_message}", parent=parent_window)
 
+    # --- Settings Saving and Loading ---
     def save_settings(self):
         '''Saves the current settings to the JSON file. Cleans up button colors for custom buttons that no longer exist.'''
-        print("\n--- Saving Settings ---") # DIAGNOSTIC
+        print("\n--- Saving Settings ---") 
         colors_to_save = {}
         for key, (bg_color, font_color) in self.button_colors.items(): # Iterate over (bg_color, font_color) tuples
             # Save the tuple if at least one color is set
@@ -2090,18 +2049,12 @@ class DataLoggerGUI:
         try:
             with open(self.settings_file, 'w') as f: 
                 json.dump(settings, f, indent=4)
-            print(f"Settings successfully saved to {self.settings_file}") # DIAGNOSTIC
-            print(f"Saved log_file_path: {self.log_file_path}") # DIAGNOSTIC
-            print(f"Saved txt_folder_path: {self.txt_folder_path}") # DIAGNOSTIC
-            print(f"Saved txt_folder_path_set2: {self.txt_folder_path_set2}") # DIAGNOSTIC
-            print(f"Saved txt_folder_path_set3: {self.txt_folder_path_set3}") # DIAGNOSTIC
-            print(f"Saved custom_button_configs: {self.custom_button_configs}") # DIAGNOSTIC
+            print(f"Settings successfully saved to {self.settings_file}")
             self.update_status("Settings saved.")
         except Exception as e:
-            print(f"Error saving settings: {e}") # DIAGNOSTIC
+            print(f"Error saving settings: {e}") #DEBUG
             messagebox.showerror("Save Error", f"Could not save settings to {self.settings_file}:\n{e}", parent=self.master)
             self.update_status("Error saving settings.")
-        print("--- End Saving Settings ---") # DIAGNOSTIC
 
     def revert_to_defaults(self):
         """
@@ -2150,7 +2103,6 @@ class DataLoggerGUI:
                 # Load main button configs, merging with defaults to handle new settings
 
                 self.load_event_codes() 
-                print("\n--- Loading Settings ---") # DIAGNOSTIC
 
                 loaded_main_configs = settings.get("main_button_configs", {})
                 for btn_name, default_conf in self.main_button_configs.items():
@@ -2160,14 +2112,8 @@ class DataLoggerGUI:
                 self.txt_folder_path = settings.get("txt_folder_path")
                 self.txt_folder_path_set2 = settings.get("txt_folder_path_set2")
                 self.txt_folder_path_set3 = settings.get("txt_folder_path_set3")
-
-                print(f"Loaded log_file_path: {self.log_file_path}") # DIAGNOSTIC
-                print(f"Loaded txt_folder_path: {self.txt_folder_path}") # DIAGNOSTIC
-                print(f"Loaded txt_folder_path_set2: {self.txt_folder_path_set2}") # DIAGNOSTIC
-                print(f"Loaded txt_folder_path_set3: {self.txt_folder_path_set3}") # DIAGNOSTIC
-
-
                 loaded_txt_config = settings.get("txt_field_columns_config")
+
                 if loaded_txt_config:
                     self.txt_field_columns_config = loaded_txt_config
                 else: # Fallback for old settings structure
@@ -2200,10 +2146,14 @@ class DataLoggerGUI:
                 self.txt_field_skips = {cfg["field"]: cfg["skip"] for cfg in self.txt_field_columns_config}
 
 
-                self.folder_paths.clear(); self.folder_paths.update(settings.get("folder_paths", {}))
-                self.folder_columns.clear(); self.folder_columns.update(settings.get("folder_columns", {}))
-                self.file_extensions.clear(); self.file_extensions.update(settings.get("file_extensions", {}))
-                self.folder_skips.clear(); self.folder_skips.update(settings.get("folder_skips", {}))
+                self.folder_paths.clear()
+                self.folder_paths.update(settings.get("folder_paths", {}))
+                self.folder_columns.clear()
+                self.folder_columns.update(settings.get("folder_columns", {}))
+                self.file_extensions.clear()
+                self.file_extensions.update(settings.get("file_extensions", {}))
+                self.folder_skips.clear()
+                self.folder_skips.update(settings.get("folder_skips", {}))
                 self.num_custom_buttons = settings.get("num_custom_buttons", 3)
                 loaded_configs = settings.get("custom_button_configs", [])
                 
@@ -2222,14 +2172,12 @@ class DataLoggerGUI:
                     updated_custom_configs.append(config)
 
                 self.custom_button_configs = updated_custom_configs
-                print(f"Loaded custom_button_configs: {self.custom_button_configs}") # DIAGNOSTIC
 
                 # Load custom button tab groups
                 # Start with the fixed groups and add any others found in settings
                 self.custom_button_tab_groups = sorted(list(set(["Main"] + settings.get("custom_button_tab_groups", []))))
                 # Filter out empty string, if any might appear
                 self.custom_button_tab_groups = [g for g in self.custom_button_tab_groups if g]
-                print(f"Loaded custom_button_tab_groups: {self.custom_button_tab_groups}") # DIAGNOSTIC
 
 
                 loaded_colors = settings.get("button_colors", {})
@@ -2270,24 +2218,39 @@ class DataLoggerGUI:
                     "TXT Source 2": "TXT Source 2",
                     "TXT Source 3": "TXT Source 3"
                 })
-                                
+                print("Settings loaded succesfully")
                 self.update_status("Settings loaded.")
             else:
                 self.update_status("Settings file not found. Using defaults.")
-                print("Settings file not found, using defaults.") # DIAGNOSTIC
+                print("Settings file not found, using defaults.") #DEBUG
         except json.JSONDecodeError as e:
             messagebox.showerror("Load Error", f"Settings file '{self.settings_file}' has invalid format:\n{e}\n\nUsing default settings.", parent=self.master)
             self.update_status("Error loading settings: Invalid format."); self.init_variables()
-            print(f"JSON Decode Error: {e}") # DIAGNOSTIC
+            print(f"JSON Decode Error: {e}") #DEBUG
         except Exception as e:
             traceback.print_exc()
             messagebox.showerror("Load Error", f"Could not load settings from {self.settings_file}:\n{e}\n\nUsing default settings.", parent=self.master)
             self.update_status("Error loading settings."); self.init_variables()
-            print(f"General Error loading settings: {e}") # DIAGNOSTIC
+            print(f"General Error loading settings: {e}") #DEBUG
         finally:
             if hasattr(self, 'button_frame') and self.button_frame: self.update_custom_buttons()
             if hasattr(self, 'db_status_label') and self.db_status_label: self.update_db_indicator()
-            print("--- End Loading Settings ---") # DIAGNOSTIC
+
+    def load_event_codes(self):
+        """Loads the event codes from its dedicated JSON file."""
+
+        print(f"Loading Event Codes from {self.event_codes_file}...")
+        if os.path.exists(self.event_codes_file):
+            try:
+                with open(self.event_codes_file, 'r') as f:
+                    self.event_codes = json.load(f)
+            except (json.JSONDecodeError, Exception) as e:
+                print(f"Error loading event codes file: {e}")
+                self.event_codes = {} # Reset to empty on error
+                messagebox.showerror("Load Error", f"Could not load or parse the event codes file:\n{self.event_codes_file}\n\nError: {e}", parent=self.master)
+        else:
+            print("Event codes file not found. Using empty set.")
+            self.event_codes = {}
 
     # --- Settings Window Interaction ---
     def open_settings(self):
@@ -2339,10 +2302,15 @@ class DataLoggerGUI:
             self.update_monitor_indicator_text() 
             self.master.update_idletasks()
 
+    def toggle_always_on_top(self):
+        """Toggles the 'always on top' state of the main window based on the checkbox."""
+        is_on_top = self.always_on_top_var.get()
+        self.master.wm_attributes("-topmost", is_on_top)
+
     # --- Monitoring ---
     def start_monitoring(self):
         '''Function to read the last version of a file in several folders'''
-        print("\n--- Starting Monitoring ---") # DIAGNOSTIC
+        print("\n--- Starting Monitoring ---") #DEBUG
         
         active_monitors = list(self.monitors.items()) # Get a copy of the items
 
@@ -2351,7 +2319,6 @@ class DataLoggerGUI:
             try:
                 if monitor_observer.is_alive():
                     monitor_observer.stop()
-                    print(f"Signalled monitor to stop: {name}")
             except Exception as e:
                 print(f"Error signalling monitor {name} to stop: {e}")
 
@@ -2362,11 +2329,10 @@ class DataLoggerGUI:
             # separately with a timeout prevents one stuck thread from
             # hanging the entire application.
                 monitor_observer.join(timeout=1.0) 
-                print(f"Joined monitor thread: {name}")
             except Exception as e:
                 print(f"Error joining monitor {name}: {e}")
             self.monitors.clear(); folder_cache.clear()
-            print("Cleared existing monitors and folder cache.") # DIAGNOSTIC
+            print("Cleared existing monitors and folder cache.") #DEBUG
 
         count = 0; monitoring_active = False
         
@@ -2382,19 +2348,19 @@ class DataLoggerGUI:
                 self.folder_columns[source_name] = self.folder_columns.get(source_name, source_name.replace(" ", "_") + "_File")
                 self.file_extensions[source_name] = self.file_extensions.get(source_name, "txt")
                 self.folder_skips[source_name] = self.folder_skips.get(source_name, False)
-                print(f"Added implicit monitor config for {source_name}: {source_path}") # DIAGNOSTIC
 
         for folder_name, folder_path in self.folder_paths.items():
             if folder_path and os.path.isdir(folder_path) and not self.folder_skips.get(folder_name, False):
                 file_extension = self.file_extensions.get(folder_name, "")
-                print(f"Attempting to start monitor for {folder_name}: {folder_path} (ext: {file_extension})") # DIAGNOSTIC
+                #print(f"Attempting to start monitor for {folder_name}: {folder_path} (ext: {file_extension})") #DEBUG
                 success = self.start_folder_monitoring(folder_name, folder_path, file_extension)
-                if success: count += 1; monitoring_active = True
-                print(f"Monitor for {folder_name} started: {success}") # DIAGNOSTIC
+                if success: 
+                    count += 1 
+            
             elif self.folder_skips.get(folder_name): 
-                print(f"Monitor for {folder_name} skipped by setting.") # DIAGNOSTIC
+                print(f"Monitor for {folder_name} skipped by setting.")
             elif folder_path: 
-                print(f"Monitor for {folder_name} not started: path invalid or not a directory ({folder_path}).") # DIAGNOSTIC
+                print(f"Monitor for {folder_name} not started: path invalid or not a directory ({folder_path}).")
 
         self.update_status(f"Monitoring {count} active folders.")
 
@@ -2402,8 +2368,6 @@ class DataLoggerGUI:
         # Replace the old logic with a call to the new, reusable functions
         self.update_monitor_indicator_text()
         self.update_db_indicator()
-        
-        print("--- End Starting Monitoring ---") # DIAGNOSTIC
 
     def start_folder_monitoring(self, folder_name, folder_path, file_extension):
         '''Start monitoring a specific folder for changes in files with a given extension.
@@ -2417,11 +2381,11 @@ class DataLoggerGUI:
         try: 
             # Check if directory is accessible before starting monitor
             if not os.path.isdir(folder_path):
-                print(f"Error: Path '{folder_path}' is not a valid directory for monitoring '{folder_name}'.") # DIAGNOSTIC
+                print(f"Error: Path '{folder_path}' is not a valid directory for monitoring '{folder_name}'.") #DEBUG
                 return False
             os.listdir(folder_path) # Try listing to check permissions
         except Exception as e: 
-            print(f"Error accessing directory '{folder_path}' for monitoring '{folder_name}': {e}") # DIAGNOSTIC
+            print(f"Error accessing directory '{folder_path}' for monitoring '{folder_name}': {e}") #DEBUG
             return False
         try:
             event_handler = FolderMonitor(folder_path, folder_name, self, file_extension)
@@ -2431,13 +2395,13 @@ class DataLoggerGUI:
             self.monitors[folder_name] = observer
             # Trigger an immediate scan on a separate thread to populate cache right away
             threading.Thread(target=event_handler.update_latest_file, daemon=True).start()
-            print(f"Successfully started monitoring for {folder_name} at {folder_path} (ext: {file_extension}).") # DIAGNOSTIC
+            print(f"Successfully started monitoring for {folder_name} at {folder_path} (ext: {file_extension}).") #DEBUG
             return True
         except Exception as e: 
-            print(f"Failed to start watchdog monitor for {folder_name} at {folder_path}: {e}") # DIAGNOSTIC
+            print(f"Failed to start watchdog monitor for {folder_name} at {folder_path}: {e}") #DEBUG
             return False
 
-    # --- Automatic New Day Scheduling ---
+    # --- Programmed Events Scheduling ---
     def schedule_new_day(self):
         '''Schedule the next "New Day" log to trigger at midnight.'''
 
@@ -2448,16 +2412,19 @@ class DataLoggerGUI:
         trigger_delay_ms = time_until_midnight_ms + 1000
 
         self._new_day_timer_id = self.master.after(trigger_delay_ms, self.trigger_new_day) # Set the timer to trigger at midnight - .after(delay in ms, callback function)
-        print(f"Next 'New Day' event scheduled for {midnight} (in {time_until_midnight_ms/1000:.1f} seconds).") # DIAGNOSTIC
-
+        print(f"Next 'New Day' event scheduled for {midnight} (in {time_until_midnight_ms/1000:.1f} seconds).") #DEBUG
 
     def trigger_new_day(self):
-        '''Trigger the "New Day" log manually. This can be called automatically at midnight.'''
-        print("\n--- 'New Day' event triggered ---") # DIAGNOSTIC
+        """Triggers the Midnight position event and reschedules the next one."""
+
         if self.new_day_event_enabled_var.get():
-            self.log_new_day(button_widget=None, txt_source_key="Main TXT")
+            self._perform_log_action(event_type="New Day",
+                            event_text_for_excel="Midnight Position",
+                            triggering_button=None,
+                            txt_source_key="Main TXT")
         else:
             print("'New Day' event is disabled, skipping log.")
+
         # After logging the new day, reschedule the next trigger
         self.schedule_new_day()
 
@@ -2476,7 +2443,7 @@ class DataLoggerGUI:
 
     def trigger_hourly_log(self):
         """Triggers the hourly log and reschedules the next one."""
-        print("\n--- 'Hourly KP Log' event triggered ---")
+
         if self.hourly_event_enabled_var.get():
             # Get column names from settings
             kp_col_name = self.txt_field_columns.get("KP")
@@ -2508,7 +2475,7 @@ class DataLoggerGUI:
                 df = pd.read_excel(self.log_file_path)
                 # Filter for previous hourly logs, ensuring the KP column is numeric
                 hourly_logs_df = df[df[event_col_name].str.startswith("Current KP:", na=False)].copy()
-                print(f"Found {len(hourly_logs_df)} previous hourly logs in Excel file.") # DIAGNOSTIC
+                print(f"Found {len(hourly_logs_df)} previous hourly logs in Excel file.") #DEBUG
                 hourly_logs_df[kp_col_name] = pd.to_numeric(hourly_logs_df[kp_col_name], errors='coerce')
                 hourly_logs_df.dropna(subset=[kp_col_name], inplace=True)
 
@@ -2525,20 +2492,16 @@ class DataLoggerGUI:
                 event_text = f"Current KP: {current_kp:.3f} | First hourly log"
 
             # 4. Call the logging function with the generated text
-            self.log_hourly_kp_event(event_text)
+            self._perform_log_action(event_type="Hourly KP Log",
+                            event_text_for_excel=event_text,
+                            triggering_button=None,  # No button is associated
+                            txt_source_key="Main TXT") # Use the primary TXT source for KP data
         else:
             print("'Hourly KP Log' event is disabled, skipping log.")
         # Reschedule for the following hour
         self.schedule_hourly_log()
 
-    def log_hourly_kp_event(self, event_text):
-        """Logs an automatic hourly event to record the current KP."""
-        self._perform_log_action(event_type="Hourly KP Log",
-                                 event_text_for_excel=event_text,
-                                 triggering_button=None,  # No button is associated
-                                 txt_source_key="Main TXT") # Use the primary TXT source for KP data
-
-    # --- Inline Custom Button Editor ---
+    # --- Custom Button Management ---
     def _show_custom_button_context_menu(self, event, button_index):
         """Shows a context menu for the clicked custom button."""
         # Check if the right-click was on one of the custom button tab frames
@@ -2755,7 +2718,6 @@ class DataLoggerGUI:
         else:
             messagebox.showinfo("Limit Reached", f"You have reached the maximum number of {self.MAX_CUSTOM_BUTTONS} custom buttons.", parent=self.master)
   
-    # Right Click delete custom button function
     def _delete_custom_button(self, button_index):
         """Deletes a custom button after confirmation."""
         
@@ -2796,8 +2758,6 @@ class DataLoggerGUI:
         else:
             self.update_status("Error: Could not delete button (invalid index).")
     
-
-
     def _show_tab_context_menu(self, event):
         """Shows a context menu for adding, renaming, or deleting notebook tabs."""
         context_menu = tk.Menu(self.master, tearoff=0)
@@ -2837,7 +2797,6 @@ class DataLoggerGUI:
 
     def _rename_tab_dialog(self, old_name):
         """Opens a dialog to get the new name for a tab."""
-        from tkinter import simpledialog
 
         new_name = simpledialog.askstring(
             "Rename Tab",
@@ -2847,13 +2806,13 @@ class DataLoggerGUI:
         )
 
         if new_name and new_name.strip() and new_name != old_name:
-            self.rename_tab_group(old_name, new_name.strip())
+            self._rename_tab_group(old_name, new_name.strip())
         elif new_name and new_name == old_name:
             self.update_status("Tab rename cancelled (name is the same).")
         else:
             self.update_status("Tab rename cancelled.")
 
-    def rename_tab_group(self, old_name, new_name):
+    def _rename_tab_group(self, old_name, new_name):
         """Renames a tab group and updates all related configurations."""
         if new_name in self.custom_button_tab_groups:
             messagebox.showerror("Rename Error", f"The tab name '{new_name}' already exists.", parent=self.master)
@@ -2936,7 +2895,6 @@ class DataLoggerGUI:
         self.save_settings()
         self.update_custom_buttons()           
 
-
     def _edit_custom_button_inline(self, button_index):
         """
         Opens a small Toplevel window to edit settings for a specific custom button.
@@ -3014,7 +2972,7 @@ class DataLoggerGUI:
 
         # 1. Get the aliases and build the lists for the dropdown
         aliases = self.txt_source_aliases
-        internal_keys = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"]
+        internal_keys = TXT_FILES_KEYS
         
         # This list will be shown to the user in the dropdown
         display_names = ["None"] + [aliases.get(key, key) for key in internal_keys[1:]]
@@ -3177,7 +3135,7 @@ class DataLoggerGUI:
         if color_code and color_code[1]:
             self._set_color_on_widget(color_str_var, display_label, color_code[1], parent_toplevel)
 
-# --- Settings Window Class (MODIFIED) ---
+# --- Settings Window Class ---
 class SettingsWindow:
 
     def __init__(self, master, parent_gui):
@@ -3282,7 +3240,7 @@ class SettingsWindow:
         try:
             with open(self.parent_gui.event_codes_file, 'w') as f:
                 json.dump(self.parent_gui.event_codes, f, indent=4)
-            print(f"Event codes saved to {self.parent_gui.event_codes_file}")
+
             self.parent_gui.update_status("Event codes configuration saved.")
             # Also reload them in the parent GUI to ensure consistency
             self.parent_gui.load_event_codes()
@@ -3742,7 +3700,7 @@ class SettingsWindow:
         self.txt_field_row_widgets.clear()
 
         # Define the set of default fields that should not be editable as 'TXT Field' or removable
-        default_fixed_fields = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code"}
+        default_fixed_fields = DEFAULT_DATA_FIELDS #NEEDS TO BE REVIEWED
 
         # Recreate rows based on the current configuration
         for i, config in enumerate(self.parent_gui.txt_field_columns_config):
@@ -3784,15 +3742,12 @@ class SettingsWindow:
             ToolTip(column_entry, "Enter the column header for the Excel Log, OR a static cell reference using the format: ='SheetName'!A1")
             widgets_in_row.append(column_entry)
 
-
-            
             # Target DB Column Name
             db_column_entry = ttk.Entry(parent_frame)
             db_column_entry.insert(0, config.get("db_column_name", ""))
             db_column_entry.grid(row=grid_row_index, column=4, padx=5, pady=2, sticky="ew")
             ToolTip(db_column_entry, "Enter the target column name for the SQLite Database.")
             widgets_in_row.append(db_column_entry)
-
             
             # Skip Checkbox
             skip_var = tk.BooleanVar(value=config.get("skip", False))
@@ -3887,7 +3842,7 @@ class SettingsWindow:
 
         num_buttons = self.parent_gui.num_custom_buttons
         configs = self.parent_gui.custom_button_configs
-        txt_source_options = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"]
+        txt_source_options = TXT_FILES_KEYS
         
                 # Use the parent GUI's master list of tab groups as the single source of truth.
         all_tab_groups = sorted(self.parent_gui.custom_button_tab_groups[:])
@@ -3989,7 +3944,7 @@ class SettingsWindow:
         ttk.Label(header_frame, text="Skip?", width=5, anchor="center", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=(10,5), sticky='w')
 
     def add_initial_folder_rows(self):
-        default_folders = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
+        default_folders = DEFAULT_MONITORED_FOLDERS
         
         ordered_specific_txt_folders = [
             ("Main TXT File", self.parent_gui.txt_folder_path),
@@ -4126,18 +4081,28 @@ class SettingsWindow:
         if hasattr(self, 'test_result_label'): self.test_result_label.config(text="")
 
     def test_sqlite_connection(self):
-        db_path = self.sqlite_db_path_entry.get().strip(); table_name = self.sqlite_table_entry.get().strip() or DEFAULT_TABLE_NAME
-        if not db_path: self.test_result_label.config(text="❌ Error: Database path is empty.", foreground="red"); return
-        conn = None; result_text = ""; result_color = "red"
+        db_path = self.sqlite_db_path_entry.get().strip()
+        table_name = self.sqlite_table_entry.get().strip() or DEFAULT_TABLE_NAME
+        if not db_path: 
+            self.test_result_label.config(text="❌ Error: Database path is empty.", foreground="red")
+            return
+        conn = None
+        result_text = ""
+        result_color = "red"
         try:
-            conn = sqlite3.connect(db_path, timeout=3); cursor = conn.cursor()
+            conn = sqlite3.connect(db_path, timeout=3)
+            cursor = conn.cursor()
             result_text = f"✔️ Connection to '{os.path.basename(db_path)}' successful.\n"
             try:
                 cursor.execute(f"SELECT 1 FROM [{table_name}] LIMIT 1;");
-                result_text += f"✔️ Table '{table_name}' found."; result_color = "green"
+                result_text += f"✔️ Table '{table_name}' found."
+                result_color = "green"
             except sqlite3.OperationalError as e_table:
-                if "no such table" in str(e_table).lower(): result_text += f"⚠️ Warning: Table '{table_name}' not found. It needs to be created."; result_color = "#E67E00"
-                else: raise e_table
+                if "no such table" in str(e_table).lower(): 
+                    result_text += f"⚠️ Warning: Table '{table_name}' not found. It needs to be created."
+                    result_color = "#E67E00"
+                else: 
+                    raise e_table
             except Exception as e: result_text += f"❌ Error checking table: {e}"; result_color = "red"
         except sqlite3.Error as e: result_text = f"❌ Error connecting/checking DB: {e}"; result_color = "red"
         except Exception as e: result_text = f"❌ Unexpected Error: {e}"; result_color = "red"
