@@ -1,0 +1,66 @@
+2025-07-16 13:57:13,982 - INFO - Position Set: 49.45833, -2.53500
+2025-07-16 13:57:17,230 - INFO - Starting AIS stream...
+2025-07-16 13:57:17,563 - INFO - WebSocket connection established.
+2025-07-16 13:57:17,564 - INFO - Subscription message sent.
+2025-07-16 13:57:17,755 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:17,850 - WARNING - No RawMessage found for type AidsToNavigationReport. Cannot forward.
+2025-07-16 13:57:19,493 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:19,593 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:19,919 - WARNING - No RawMessage found for type AidsToNavigationReport. Cannot forward.
+2025-07-16 13:57:19,925 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:19,925 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:20,485 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:20,621 - WARNING - No RawMessage found for type PositionReport. Cannot forward.
+2025-07-16 13:57:22,559 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:22,573 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:22,590 - WARNING - No RawMessage found for type PositionReport. Cannot forward.
+2025-07-16 13:57:22,883 - WARNING - No RawMessage found for type AidsToNavigationReport. Cannot forward.
+2025-07-16 13:57:23,526 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:24,801 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:25,488 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:26,330 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:26,812 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:26,875 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:27,633 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:27,694 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:29,047 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:29,530 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:29,531 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:29,531 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:29,532 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:31,195 - WARNING - No RawMessage found for type PositionReport. Cannot forward.
+2025-07-16 13:57:31,946 - WARNING - No RawMessage found for type PositionReport. Cannot forward.
+2025-07-16 13:57:31,947 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:32,680 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:33,369 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:33,723 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:33,750 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:34,776 - WARNING - No RawMessage found for type BaseStationReport. Cannot forward.
+2025-07-16 13:57:35,111 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:36,000 - WARNING - No RawMessage found for type AidsToNavigationReport. Cannot forward.
+2025-07-16 13:57:36,125 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:36,831 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:39,614 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:40,261 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:40,909 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:41,160 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:41,160 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:41,181 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:42,098 - WARNING - No RawMessage found for type BaseStationReport. Cannot forward.
+2025-07-16 13:57:42,869 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:44,380 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:44,441 - WARNING - No RawMessage found for type BinaryAcknowledge. Cannot forward.
+2025-07-16 13:57:45,052 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:48,945 - WARNING - No RawMessage found for type PositionReport. Cannot forward.
+2025-07-16 13:57:49,449 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:50,407 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:50,407 - WARNING - No RawMessage found for type DataLinkManagementMessage. Cannot forward.
+2025-07-16 13:57:50,436 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:52,057 - WARNING - No RawMessage found for type AidsToNavigationReport. Cannot forward.
+2025-07-16 13:57:52,438 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:54,140 - WARNING - No RawMessage found for type StandardClassBPositionReport. Cannot forward.
+2025-07-16 13:57:55,799 - WARNING - No RawMessage found for type StaticDataReport. Cannot forward.
+2025-07-16 13:57:56,151 - WARNING - No RawMessage found for type PositionReport. Cannot forward.
+2025-07-16 13:57:56,726 - INFO - Closing application...
+2025-07-16 13:57:56,727 - INFO - AIS stream stopped by user.
+2025-07-16 13:57:56,728 - INFO - Asyncio event loop has stopped.

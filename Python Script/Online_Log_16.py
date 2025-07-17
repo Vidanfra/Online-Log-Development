@@ -3751,6 +3751,10 @@ class SettingsWindow:
         
         config_frame = ttk.LabelFrame(tab, text="SQLite Configuration", padding=15)
         config_frame.pack(fill='x'); config_frame.columnconfigure(1, weight=1)
+
+        # Frame for action buttons
+        action_button_frame = ttk.Frame(config_frame)
+        action_button_frame.grid(row=3, column=1, columnspan=2, sticky="w", pady=15)
         
         ttk.Label(config_frame, text="Database File (.db):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.sqlite_db_path_entry = ttk.Entry(config_frame, width=70)
@@ -3764,9 +3768,139 @@ class SettingsWindow:
         
         test_button = ttk.Button(config_frame, text="Test Connection & Table", command=self.test_sqlite_connection)
         test_button.grid(row=2, column=1, padx=5, pady=15, sticky="w"); ToolTip(test_button, "Verify connection to the database file and check if the specified table exists.")
+
+        generate_sql_button = ttk.Button(action_button_frame, text="Generate Table SQL", command=self.generate_create_table_sql)
+        generate_sql_button.pack(side=tk.LEFT, padx=5)
+        ToolTip(generate_sql_button, "Beta for testing")
         
         self.test_result_label = ttk.Label(config_frame, text="", font=("Arial", 9), wraplength=500)
         self.test_result_label.grid(row=3, column=0, columnspan=3, padx=5, pady=2, sticky="w")
+
+    def save_settings_to_parent_vars(self):
+        """
+        A lightweight helper that only updates the parent GUI's in-memory
+        column configurations from the current state of the settings UI. 
+        This ensures the SQL generation uses the most up-to-date names.
+        """
+        new_txt_field_configs = []
+        for i, row_info in enumerate(self.txt_field_row_widgets):
+            field_name = ""
+            # For non-fixed fields, read from the entry widget
+            if row_info["field_entry_widget"]:
+                field_name = row_info["field_entry_widget"].get().strip()
+            # For fixed fields, get the name from the original config
+            else:
+                if i < len(self.parent_gui.txt_field_columns_config):
+                    field_name = self.parent_gui.txt_field_columns_config[i]["field"]
+            
+            column_name = row_info["column_entry"].get().strip()
+            db_column_name = row_info["db_column_entry"].get().strip()
+            skip_value = row_info["skip_var"].get()
+
+            if not field_name and not (field_name in DEFAULT_DATA_FIELDS):
+                field_name = f"Custom_Field_{i+1}"
+
+            new_txt_field_configs.append({
+                "field": field_name,
+                "column_name": column_name if column_name else field_name,
+                "db_column_name": db_column_name,
+                "skip": skip_value
+            })
+        self.parent_gui.txt_field_columns_config = new_txt_field_configs
+
+    def _sanitize_for_sql(self, name):
+        """Removes symbols and converts spaces to underscores for a valid SQL column name."""
+        if not name:
+            return ""
+        # Remove any character that is not a letter, number, or space
+        s = re.sub(r'[^\w\s]', '', name)
+        # Replace one or more spaces with a single underscore
+        s = re.sub(r'\s+', '_', s.strip())
+        return s    
+
+    def generate_create_table_sql(self):
+        """
+        Generates a CREATE TABLE SQL statement based on the "TXT Column" field
+        and displays it in a new window for the user to copy.
+        """
+        # Ensure we have the latest column names from the UI before proceeding
+        self.save_settings_to_parent_vars()
+
+        table_name = self.sqlite_table_entry.get().strip()
+        if not table_name:
+            messagebox.showerror("Missing Table Name", "Please enter a table name before generating SQL.", parent=self.master)
+            return
+
+        column_defs = []
+        processed_cols = set()
+
+        # 1. Add the primary key column
+        pk_col = "original_excel_row"
+        column_defs.append(f"    [{pk_col}] INTEGER PRIMARY KEY")
+        processed_cols.add(pk_col.lower())
+
+        # 2. Iterate through the configured columns from the "Data Columns" tab
+        for config_item in self.parent_gui.txt_field_columns_config:
+            # CHANGE: Use the 'field' value (from the "TXT Column") as the source
+            source_col_name = config_item.get("field", "").strip()
+            
+            if source_col_name:
+                # CHANGE: Sanitize the name for use in SQL
+                db_col = self._sanitize_for_sql(source_col_name)
+                
+                # Add the column if it has a valid sanitized name and we haven't already added it
+                if db_col and db_col.lower() not in processed_cols:
+                    column_defs.append(f"    [{db_col}] TEXT")
+                    processed_cols.add(db_col.lower())
+        
+        # 3. Add any other special columns that are handled programmatically
+        special_cols = ["time_fix"]
+        for col in special_cols:
+             if col.lower() not in processed_cols:
+                # Sanitize these as well for consistency
+                sanitized_col = self._sanitize_for_sql(col)
+                if sanitized_col:
+                    column_defs.append(f"    [{sanitized_col}] TEXT")
+                    processed_cols.add(sanitized_col.lower())
+
+        # 4. Construct the final SQL statement
+        column_sql = ",\n".join(column_defs)
+        full_sql = f"CREATE TABLE IF NOT EXISTS [{table_name}] (\n{column_sql}\n);"
+
+        # 5. Display the SQL in a new pop-up window
+        sql_window = Toplevel(self.master)
+        sql_window.title("Generated SQL for Table Creation")
+        sql_window.transient(self.master)
+        sql_window.grab_set()
+        sql_window.geometry("600x400")
+
+        main_frame = ttk.Frame(sql_window, padding=10)
+        main_frame.pack(fill="both", expand=True)
+        main_frame.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(0, weight=1)
+
+        sql_text = tk.Text(main_frame, wrap="word", font=("Courier New", 10), height=10, width=70)
+        sql_text.insert("1.0", full_sql)
+        sql_text.config(state="disabled") # Make it read-only
+        sql_text.grid(row=0, column=0, columnspan=2, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=sql_text.yview)
+        scrollbar.grid(row=0, column=2, sticky="ns")
+        sql_text['yscrollcommand'] = scrollbar.set
+
+        def copy_to_clipboard():
+            self.master.clipboard_clear()
+            self.master.clipboard_append(full_sql)
+            self.parent_gui.update_status("SQL copied to clipboard.")
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=1, column=0, columnspan=3, pady=(10, 0), sticky="e")
+
+        copy_btn = ttk.Button(button_frame, text="Copy to Clipboard", command=copy_to_clipboard)
+        copy_btn.pack(side="left", padx=5)
+
+        close_btn = ttk.Button(button_frame, text="Close", command=sql_window.destroy)
+        close_btn.pack(side="left")
 
     def select_sqlite_file(self):
         filetypes = [("SQLite Database", "*.db"), ("SQLite Database", "*.sqlite"), ("SQLite3 Database", "*.sqlite3"), ("All Files", "*.*")]

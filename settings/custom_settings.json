@@ -165,12 +165,6 @@
             "column_name": "='Resources'!B17",
             "db_column_name": "isurvey_project_manager",
             "skip": false
-        },
-        {
-            "field": "Local Time",
-            "column_name": "Local Time",
-            "db_column_name": "",
-            "skip": false
         }
     ],
     "folder_paths": {
@@ -201,7 +195,7 @@
         "SSS": false,
         "SVP": false
     },
-    "num_custom_buttons": 19,
+    "num_custom_buttons": 22,
     "custom_button_configs": [
         {
             "text": "ROV off Deck",
@@ -335,9 +329,31 @@
             "event_code": "",
             "txt_source_key": "None",
             "tab_group": "ROV"
+        },
+        {
+            "text": "Custom 20",
+            "event_text": "Custom 20 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 21",
+            "event_text": "Custom 21 Event",
+            "event_code": "",
+            "txt_source_key": "None",
+            "tab_group": "Main"
+        },
+        {
+            "text": "Custom 22",
+            "event_text": "Custom 22 Event",
+            "event_code": "AF-E",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Crane"
         }
     ],
     "custom_button_tab_groups": [
+        "Crane",
         "Main",
         "ROV"
     ],
