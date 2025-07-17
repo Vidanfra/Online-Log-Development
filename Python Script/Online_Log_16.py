@@ -3271,7 +3271,7 @@ class SettingsWindow:
         ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w')
         ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=8, sticky='w')
         ttk.Label(header_frame, text="Excel Column / Cell", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
-        ttk.Label(header_frame, text="DB Column", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
+        ttk.Label(header_frame, text="SQLITE DB Column", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
         ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
         ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=6, padx=6, sticky='w')
 
