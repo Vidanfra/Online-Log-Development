@@ -331,6 +331,12 @@ class DataLoggerGUI:
                         )
         self.style.map("TLabel", background=[('selected', '#ADD8E6')]) # Ensure labels in selected row change color
 
+        selection_color = "#cce5ff" # A light blue for highlighting
+        self.style.configure("Selected.TLabel", background=selection_color)
+        self.style.configure("Selected.TEntry", fieldbackground=selection_color)
+        self.style.configure("Selected.TButton", background=selection_color)
+        self.style.configure("Selected.TCheckbutton", background=selection_color)
+
     def init_variables(self):
         '''
         Initializes all key configuration variables, paths, button presets, and GUI state defaults used throughout the application. 
@@ -1851,6 +1857,13 @@ class DataLoggerGUI:
                 self.folder_skips.update(settings.get("folder_skips", {}))
                 self.num_custom_buttons = settings.get("num_custom_buttons", 3)
                 loaded_configs = settings.get("custom_button_configs", [])
+                loaded_folders = settings.get("folder_paths", {})
+                # If the loaded dictionary is empty, populate it with the defaults
+                if not loaded_folders:
+                    for folder in DEFAULT_MONITORED_FOLDERS:
+                        loaded_folders[folder] = "" # Path will be empty by default
+                self.folder_paths.update(loaded_folders)
+                
                 
                 updated_custom_configs = []
                 for i in range(self.num_custom_buttons):
@@ -3595,6 +3608,17 @@ class SettingsWindow:
         
         ttk.Label(tab, text="Configure additional folders to monitor for their latest file names. The latest file name will be logged in the specified Excel/DB column.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
 
+        controls_frame = ttk.Frame(tab)
+        controls_frame.pack(fill='x', pady=(0, 10), padx=10)
+
+        add_btn = ttk.Button(controls_frame, text="Add New Folder", command=self.add_new_folder_row)
+        add_btn.pack(side=tk.LEFT, padx=(0, 5))
+        ToolTip(add_btn, "Add a new custom folder to monitor.")
+
+        self.remove_folder_btn = ttk.Button(controls_frame, text="Remove Selected Folder", command=self.remove_selected_folder_row, state=tk.DISABLED)
+        self.remove_folder_btn.pack(side=tk.LEFT, padx=5)
+        ToolTip(self.remove_folder_btn, "Removes the currently selected folder row from the list.")
+
         self.folder_canvas = tk.Canvas(tab, borderwidth=0, background="#ffffff")
         scrollbar = ttk.Scrollbar(tab, orient="vertical", command=self.folder_canvas.yview)
         self.scrollable_frame = ttk.Frame(self.folder_canvas, style="Row0.TFrame")
@@ -3614,29 +3638,22 @@ class SettingsWindow:
         self.add_folder_header(self.scrollable_frame)
 
     def add_folder_header(self, parent):
-        header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
-        header_frame.grid(row=0, column=0, sticky="w", pady=(0, 5))
-        
-        # Define column weights and sticky for the header to match row layout
-        # Col 0: Folder Type - fixed width
-        header_frame.grid_columnconfigure(0, weight=0)
-        # Col 1: Monitor Path - should expand
-        header_frame.grid_columnconfigure(1, weight=1)
-        # Col 2: "..." button - fixed width
-        header_frame.grid_columnconfigure(2, weight=0)
-        # Col 3: Target Column - fixed width
-        header_frame.grid_columnconfigure(3, weight=0)
-        # Col 4: File Ext. - fixed width
-        header_frame.grid_columnconfigure(4, weight=0)
-        # Col 5: Skip? - fixed width
-        header_frame.grid_columnconfigure(5, weight=0)
+        # Configure the grid columns directly on the main scrollable frame
+        parent.columnconfigure(0, weight=2, minsize=140)  # Folder Type
+        parent.columnconfigure(1, weight=4, minsize=300)  # Monitor Path
+        parent.columnconfigure(2, weight=0)               # ... button
+        parent.columnconfigure(3, weight=2, minsize=150)  # Target Column
+        parent.columnconfigure(4, weight=1, minsize=80)   # File Ext.
+        parent.columnconfigure(5, weight=0, minsize=50)   # Skip?
 
-        ttk.Label(header_frame, text="Folder Type", width=15, anchor="w", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=(5,0), sticky='w')
-        ttk.Label(header_frame, text="Monitor Path", anchor="w", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=5, sticky='ew') # Changed to 'ew'
-        ttk.Label(header_frame, text="...", width=4, anchor="center", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=1, sticky='w') 
-        ttk.Label(header_frame, text="Target Column", width=20, anchor="w", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=5, sticky='w')
-        ttk.Label(header_frame, text="File Ext.", width=10, anchor="w", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=5, sticky='w')
-        ttk.Label(header_frame, text="Skip?", width=5, anchor="center", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=(10,5), sticky='w')
+        # Header labels placed directly into the parent grid for perfect alignment
+        ttk.Label(parent, text="Folder Type", style="Header.TLabel", padding=5).grid(row=0, column=0, sticky='w')
+        ttk.Label(parent, text="Monitor Path", style="Header.TLabel", padding=5).grid(row=0, column=1, sticky='w')
+        # Empty label for browse button column to maintain spacing
+        ttk.Label(parent, text="", style="Header.TLabel").grid(row=0, column=2)
+        ttk.Label(parent, text="Target Column", style="Header.TLabel", padding=5).grid(row=0, column=3, sticky='w')
+        ttk.Label(parent, text="File Ext.", style="Header.TLabel", padding=5).grid(row=0, column=4, sticky='w')
+        ttk.Label(parent, text="Skip?", style="Header.TLabel", padding=5).grid(row=0, column=5, sticky='w')
 
     def add_initial_folder_rows(self):
         default_folders = DEFAULT_MONITORED_FOLDERS
@@ -3697,41 +3714,129 @@ class SettingsWindow:
                                  skip=self.parent_gui.folder_skips.get(folder_name, False))
         self.master.after_idle(self.update_scroll_region)
 
-    def add_folder_row(self, folder_name="", folder_path="", column_name="", extension="", skip=False):
-        row_index = len(self.folder_row_widgets) + 1; style_name = f"Row{row_index % 2}.TFrame"
-        try: self.style.configure(style_name)
-        except tk.TclError: bg = "#ffffff" if row_index % 2 == 0 else "#f5f5f5"; self.style.configure(style_name, background=bg)
-        row_frame = ttk.Frame(self.scrollable_frame, style=style_name, padding=(0, 2))
-        row_frame.grid(row=row_index, column=0, sticky="w", pady=0); 
+    def _select_folder_row(self, folder_name):
+        """Highlights all widgets in a selected folder row."""
+        # Deselect the previously selected row by resetting widget styles
+        if hasattr(self, 'selected_folder_name') and self.selected_folder_name:
+            prev_widgets = self.folder_row_widgets.get(self.selected_folder_name)
+            if prev_widgets:
+                for widget in prev_widgets:
+                    try:
+                        # Resets to the default style for each widget type
+                        widget.configure(style=f"T{type(widget).__name__}")
+                    except tk.TclError:
+                        pass # Widget may have been destroyed
+
+        # Select the new row by applying the "Selected" style
+        self.selected_folder_name = folder_name
+        current_widgets = self.folder_row_widgets.get(folder_name)
+        if current_widgets:
+            for widget in current_widgets:
+                try:
+                    # Applies the 'Selected' style variant, e.g., "Selected.TEntry"
+                    widget.configure(style=f"Selected.T{type(widget).__name__}")
+                except tk.TclError:
+                    pass
+
+        self.remove_folder_btn.config(state=tk.NORMAL)
+
+    def add_new_folder_row(self):
+        """Asks for a new folder type name and adds a new row to the UI."""
+        new_name = simpledialog.askstring("New Folder Type", "Enter a unique name for the new folder type (e.g., 'WROV Data'):", parent=self.master)
+
+        if not new_name or not new_name.strip():
+            return # User cancelled
+
+        new_name = new_name.strip()
+        if new_name in self.folder_entries:
+            messagebox.showerror("Duplicate Name", f"A folder type named '{new_name}' already exists.", parent=self.master)
+            return
         
-        # Add columnconfigure to each row frame to match the header
-        row_frame.grid_columnconfigure(0, weight=0) # Folder Type (fixed width)
-        row_frame.grid_columnconfigure(1, weight=1) # Monitor Path (expands)
-        row_frame.grid_columnconfigure(2, weight=0) # "..." button (fixed width)
-        row_frame.grid_columnconfigure(3, weight=0) # Target Column (fixed width)
-        row_frame.grid_columnconfigure(4, weight=0) # File Ext. (fixed width)
-        row_frame.grid_columnconfigure(5, weight=0) # Skip? (fixed width)
+        # Add a new, empty row for the user to configure
+        self.add_folder_row(folder_name=new_name)
+        self.master.after_idle(self.update_scroll_region)
 
+    def remove_selected_folder_row(self):
+        """Removes the currently selected folder row and its associated data."""
+        if not hasattr(self, 'selected_folder_name') or not self.selected_folder_name:
+            messagebox.showinfo("No Selection", "Please select a folder row to remove.", parent=self.master)
+            return
 
-        label_style = style_name.replace("Frame","Label")
-        try: self.style.configure(label_style, background=self.style.lookup(style_name, 'background'))
-        except Exception: pass
-        label = ttk.Label(row_frame, text=f"{folder_name}:", width=15, anchor='w', style=label_style); label.grid(row=0, column=0, padx=(5,0), pady=1, sticky="w")
-        entry = ttk.Entry(row_frame, width=50); entry.insert(0, folder_path); entry.grid(row=0, column=1, padx=5, pady=1, sticky="ew"); ToolTip(entry, f"Enter the full path to the '{folder_name}' data folder.")
+        folder_to_remove = self.selected_folder_name
+        
+        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove the '{folder_to_remove}' folder configuration?", parent=self.master):
+            # Pop the list of widgets from the dictionary
+            widgets_to_destroy = self.folder_row_widgets.pop(folder_to_remove, None)
+            
+            # **FIX:** If the list exists, iterate through it and destroy each widget
+            if widgets_to_destroy:
+                for widget in widgets_to_destroy:
+                    if widget and widget.winfo_exists():
+                        widget.destroy()
+
+            # Remove the data entries from the other dictionaries
+            self.folder_entries.pop(folder_to_remove, None)
+            self.folder_column_entries.pop(folder_to_remove, None)
+            self.file_extension_entries.pop(folder_to_remove, None)
+            self.folder_skip_vars.pop(folder_to_remove, None)
+
+            # Reset the selection state
+            self.selected_folder_name = None
+            self.remove_folder_btn.config(state=tk.DISABLED)
+            self.parent_gui.update_status(f"Removed '{folder_to_remove}' configuration.")
+
+    def add_folder_row(self, folder_name="", folder_path="", column_name="", extension="", skip=False):
+        row_index = len(self.folder_row_widgets) + 1
+        parent = self.scrollable_frame # The single grid container
+
+        # --- Create Widgets ---
+        label = ttk.Label(parent, text=f"{folder_name}:", anchor='w')
+        entry = ttk.Entry(parent)
+        entry.insert(0, folder_path)
+        
         def select_folder(e=entry, name=folder_name):
-            current_path = e.get(); initial = current_path if os.path.isdir(current_path) else (os.path.dirname(current_path) if current_path else os.getcwd())
+            current_path = e.get()
+            initial = current_path if os.path.isdir(current_path) else os.getcwd()
             folder = filedialog.askdirectory(parent=self.master, initialdir=initial, title=f"Select Folder for {name}")
             if folder:
-                e.delete(0, tk.END); e.insert(0, folder)
-                if name == "Main TXT File": self.parent_gui.txt_folder_path = folder
-                elif name == "TXT Source 2": self.parent_gui.txt_folder_path_set2 = folder
-                elif name == "TXT Source 3": self.parent_gui.txt_folder_path_set3 = folder
+                e.delete(0, tk.END)
+                e.insert(0, folder)
 
-        button = ttk.Button(row_frame, text="...", width=3, command=select_folder); button.grid(row=0, column=2, padx=(0,5), pady=1, sticky='w'); ToolTip(button, "Browse for the folder.") 
-        column_entry = ttk.Entry(row_frame, width=20); column_entry.insert(0, column_name if column_name else folder_name); column_entry.grid(row=0, column=3, padx=5, pady=1, sticky="w"); ToolTip(column_entry, f"Enter the Excel/DB column name for the latest '{folder_name}' filename.")
-        extension_entry = ttk.Entry(row_frame, width=10); extension_entry.insert(0, extension); extension_entry.grid(row=0, column=4, padx=5, pady=1, sticky="w"); ToolTip(extension_entry, f"Optional: Monitor only files ending with this extension (e.g., 'svp', 'log'). Leave blank for any file.")
-        skip_var = tk.BooleanVar(value=skip); skip_checkbox = ttk.Checkbutton(row_frame, variable=skip_var); skip_checkbox.grid(row=0, column=5, padx=(15,5), pady=1, sticky="w"); ToolTip(skip_checkbox, f"Check to disable monitoring for the '{folder_name}' folder.")
-        self.folder_entries[folder_name] = entry; self.folder_column_entries[folder_name] = column_entry; self.file_extension_entries[folder_name] = extension_entry; self.folder_skip_vars[folder_name] = skip_var; self.folder_row_widgets[folder_name] = row_frame
+        button = ttk.Button(parent, text="...", width=3, command=select_folder)
+        column_entry = ttk.Entry(parent)
+        column_entry.insert(0, column_name if column_name else folder_name)
+        extension_entry = ttk.Entry(parent, width=10)
+        extension_entry.insert(0, extension)
+        skip_var = tk.BooleanVar(value=skip)
+        skip_checkbox = ttk.Checkbutton(parent, variable=skip_var)
+
+        # --- Place Widgets on the Shared Grid ---
+        label.grid(row=row_index, column=0, padx=5, pady=2, sticky="ew")
+        entry.grid(row=row_index, column=1, padx=5, pady=2, sticky="ew")
+        button.grid(row=row_index, column=2, padx=(0,5), pady=2, sticky='w')
+        column_entry.grid(row=row_index, column=3, padx=5, pady=2, sticky="ew")
+        extension_entry.grid(row=row_index, column=4, padx=5, pady=2, sticky="ew")
+        skip_checkbox.grid(row=row_index, column=5, padx=(15,5), pady=2, sticky='w')
+
+        # --- Selection and Tooltip Logic ---
+        widgets_in_row = [label, entry, button, column_entry, extension_entry, skip_checkbox]
+        click_handler = lambda e, name=folder_name: self._select_folder_row(name)
+        for widget in widgets_in_row:
+            widget.bind("<Button-1>", click_handler)
+        ToolTip(entry, f"Enter the full path to the '{folder_name}' data folder.")
+        ToolTip(button, "Browse for the folder.")
+        ToolTip(column_entry, f"Enter the Excel/DB column name for the latest '{folder_name}' filename.")
+        ToolTip(extension_entry, "Optional: Monitor only files with this extension (e.g., 'svp').")
+        ToolTip(skip_checkbox, f"Check to disable monitoring for the '{folder_name}' folder.")
+
+        # Store references for selection, saving, and removal
+        self.folder_entries[folder_name] = entry
+        self.folder_column_entries[folder_name] = column_entry
+        self.file_extension_entries[folder_name] = extension_entry
+        self.folder_skip_vars[folder_name] = skip_var
+        # Store all widgets in the row for highlighting
+        self.folder_row_widgets[folder_name] = widgets_in_row
+
 
     def update_scroll_region(self):
         self.scrollable_frame.update_idletasks()
@@ -4048,86 +4153,71 @@ class SettingsWindow:
 
     # --- Settings Save/Load Logic ---
     def save_settings(self):
+        # --- File Paths Tab ---
         self.parent_gui.log_file_path = self.log_file_entry.get().strip()
         self.parent_gui.txt_source_aliases["Main TXT"] = self.txt_name_main_var.get().strip()
         self.parent_gui.txt_folder_path = self.txt_path_main_var.get().strip()
-
         self.parent_gui.txt_source_aliases["TXT Source 2"] = self.txt_name_set2_var.get().strip()
         self.parent_gui.txt_folder_path_set2 = self.txt_path_set2_var.get().strip()
-
         self.parent_gui.txt_source_aliases["TXT Source 3"] = self.txt_name_set3_var.get().strip()
         self.parent_gui.txt_folder_path_set3 = self.txt_path_set3_var.get().strip()
 
-        # Save TXT field columns from the UI
+        # --- Data Columns Tab ---
         new_txt_field_configs = []
         for i, row_info in enumerate(self.txt_field_row_widgets):
             field_name = ""
-            # For non-fixed fields, read from the entry widget
             if row_info["field_entry_widget"]:
                 field_name = row_info["field_entry_widget"].get().strip()
-            else: # For fixed fields, get the name from the original config based on its index
+            else: # For fixed fields, get the name from the original config
                 if i < len(self.parent_gui.txt_field_columns_config):
                     field_name = self.parent_gui.txt_field_columns_config[i]["field"]
-                else:
-                    # Fallback, though this case should ideally not be reached if recreation is consistent
-                    field_name = f"Unknown_Field_{i}" 
-
-            column_name = row_info["column_entry"].get().strip()
-            db_column_name = row_info["db_column_entry"].get().strip() # Get DB column name
-            skip_value = row_info["skip_var"].get()
             
-            # Ensure field_name is not empty for custom fields, assign a default if it is
-            # This is important for saving valid data.
-            if not field_name and not (field_name in {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event"}):
+            column_name = row_info["column_entry"].get().strip()
+            db_column_name = row_info["db_column_entry"].get().strip()
+            skip_value = row_info["skip_var"].get()
+
+            if not field_name and not (field_name in DEFAULT_DATA_FIELDS):
                 field_name = f"Custom_Field_{i+1}"
 
             new_txt_field_configs.append({
                 "field": field_name,
-                "column_name": column_name if column_name else field_name, # Default to field name if column is empty
+                "column_name": column_name if column_name else field_name,
                 "db_column_name": db_column_name,
                 "skip": skip_value
             })
         self.parent_gui.txt_field_columns_config = new_txt_field_configs
-        # Also update the derived dicts for runtime use
         self.parent_gui.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.parent_gui.txt_field_columns_config}
         self.parent_gui.txt_field_skips = {cfg["field"]: cfg["skip"] for cfg in self.parent_gui.txt_field_columns_config}
 
+        # --- Monitored Folders Tab ---
+        parent_folder_paths = {}
+        parent_folder_cols = {}
+        parent_folder_exts = {}
+        parent_folder_skips = {}
+        for folder_name in self.folder_entries.keys():
+            entry_widget = self.folder_entries[folder_name]
+            col_entry = self.folder_column_entries[folder_name]
+            ext_entry = self.file_extension_entries[folder_name]
+            skip_var = self.folder_skip_vars[folder_name]
 
-        parent_folder_paths = {}; parent_folder_cols = {}; parent_folder_exts = {}; parent_folder_skips = {}
-        for folder_name, entry_widget in self.folder_entries.items():
             folder_path = entry_widget.get().strip()
-            if folder_path and folder_name not in ["Main TXT File", "TXT Source 2", "TXT Source 3"]:
-                parent_folder_paths[folder_name] = folder_path; col_entry = self.folder_column_entries.get(folder_name); ext_entry = self.file_extension_entries.get(folder_name); skip_var = self.folder_skip_vars.get(folder_name)
-                parent_folder_cols[folder_name] = col_entry.get().strip() if col_entry and col_entry.get().strip() else folder_name
-                parent_folder_exts[folder_name] = ext_entry.get().strip().lstrip('.') if ext_entry else ""
-                parent_folder_skips[folder_name] = skip_var.get() if skip_var else False
-            elif folder_name in ["Main TXT File", "TXT Source 2", "TXT Source 3"]:
-                current_txt_path = ""
-                if folder_name == "Main TXT File": current_txt_path = self.parent_gui.txt_folder_path
-                elif folder_name == "TXT Source 2": current_txt_path = self.parent_gui.txt_folder_path_set2
-                elif folder_name == "TXT Source 3": current_txt_path = self.parent_gui.txt_folder_path_set3
+            parent_folder_paths[folder_name] = folder_path
+            parent_folder_cols[folder_name] = col_entry.get().strip() if col_entry.get().strip() else folder_name
+            parent_folder_exts[folder_name] = ext_entry.get().strip().lstrip('.')
+            parent_folder_skips[folder_name] = skip_var.get()
+        
+        self.parent_gui.folder_paths = parent_folder_paths
+        self.parent_gui.folder_columns = parent_folder_cols
+        self.parent_gui.file_extensions = parent_folder_exts
+        self.parent_gui.folder_skips = parent_folder_skips
 
-                if current_txt_path:
-                    parent_folder_paths[folder_name] = current_txt_path
-                    col_entry = self.folder_column_entries.get(folder_name)
-                    ext_entry = self.file_extension_entries.get(folder_name)
-                    skip_var = self.folder_skip_vars.get(folder_name)
-                    
-                    parent_folder_cols[folder_name] = col_entry.get().strip() if col_entry and col_entry.get().strip() else folder_name.replace(" ", "_")
-                    parent_folder_exts[folder_name] = ext_entry.get().strip().lstrip('.') if ext_entry else "txt"
-                    parent_folder_skips[folder_name] = skip_var.get() if skip_var else False
-                else:
-                    for d in [self.parent_gui.folder_paths, self.parent_gui.folder_columns, self.parent_gui.file_extensions, self.parent_gui.folder_skips]:
-                        d.pop(folder_name, None)
-
-        self.parent_gui.folder_paths = parent_folder_paths; self.parent_gui.folder_columns = parent_folder_cols; self.parent_gui.file_extensions = parent_folder_exts; self.parent_gui.folder_skips = parent_folder_skips
-
+        # --- Button Configuration Tab ---
         parent_custom_configs = []
-        all_new_tab_groups = set() # Collect all tab groups
-        for i, (text_widget, event_widget, event_code_var, txt_source_var, tab_group_var) in enumerate(self.custom_button_widgets): # Unpack new var
+        all_new_tab_groups = set()
+        for i, (text_widget, event_widget, event_code_var, txt_source_var, tab_group_var) in enumerate(self.custom_button_widgets):
             text = text_widget.get().strip()
             event_text = event_widget.get().strip()
-            event_code = event_code_var.get() # Get event code
+            event_code = event_code_var.get()
             txt_source_key = txt_source_var.get()
             tab_group = tab_group_var.get().strip() or "Main"
 
@@ -4136,40 +4226,41 @@ class SettingsWindow:
             final_event_text = event_text if event_text else f"{final_text} Triggered"
 
             parent_custom_configs.append({
-                "text": final_text, 
-                "event_text": final_event_text, 
-                "event_code": event_code, # Add event_code to saved config
-                "txt_source_key": txt_source_key, 
+                "text": final_text,
+                "event_text": final_event_text,
+                "event_code": event_code,
+                "txt_source_key": txt_source_key,
                 "tab_group": tab_group
             })
-            all_new_tab_groups.add(tab_group) # Add to set of new tab groups
+            all_new_tab_groups.add(tab_group)
 
         self.parent_gui.num_custom_buttons = len(parent_custom_configs)
         self.parent_gui.custom_button_configs = parent_custom_configs
-        # Get the set of all existing tab groups
         final_tab_groups = set(self.parent_gui.custom_button_tab_groups)
-        # Add any new groups defined in the UI to the set
         final_tab_groups.update(all_new_tab_groups)
-        # Save the updated, sorted list
         self.parent_gui.custom_button_tab_groups = sorted(list(final_tab_groups))
-
-        # Save colors for the automatic events
+        
+        # --- Programmed Events / Timezone Tab ---
+        # Save colors
         new_day_bg_color_hex = self.new_day_bg_color_var.get()
         new_day_font_color_hex = self.new_day_font_color_var.get()
-        self.parent_gui.button_colors["New Day"] = (new_day_bg_color_hex if new_day_bg_color_hex else None, 
-                                                    new_day_font_color_hex if new_day_font_color_hex else None)
+        self.parent_gui.button_colors["New Day"] = (new_day_bg_color_hex if new_day_bg_color_hex else None, new_day_font_color_hex if new_day_font_color_hex else None)
 
         hourly_bg_color_hex = self.hourly_bg_color_var.get()
         hourly_font_color_hex = self.hourly_font_color_var.get()
-        self.parent_gui.button_colors["Hourly KP Log"] = (hourly_bg_color_hex if hourly_bg_color_hex else None,
-                                                          hourly_font_color_hex if hourly_font_color_hex else None)
-        
+        self.parent_gui.button_colors["Hourly KP Log"] = (hourly_bg_color_hex if hourly_bg_color_hex else None, hourly_font_color_hex if hourly_font_color_hex else None)
 
+      
+        
+        # --- SQLite Log Tab ---
         self.parent_gui.sqlite_enabled = self.sqlite_enabled_var.get()
         self.parent_gui.sqlite_db_path = self.sqlite_db_path_entry.get().strip()
         self.parent_gui.sqlite_table = self.sqlite_table_entry.get().strip() or DEFAULT_TABLE_NAME
 
+        # --- Final Actions ---
+        # Trigger the master save function in the main GUI
         self.parent_gui.save_settings()
+        # Refresh the main GUI and services with the new settings
         self.parent_gui.update_custom_buttons()
         self.parent_gui.start_monitoring()
         self.parent_gui.update_db_indicator()
