@@ -1,7 +1,7 @@
 {
-    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/Excel TEmplate/DailyLog-Horizon_v8.xlsb",
-    "txt_folder_path": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing",
-    "txt_folder_path_set2": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing",
+    "log_file_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Excel Template/DailyLog-Horizon_v8.xlsb",
+    "txt_folder_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Vessel Navigation",
+    "txt_folder_path_set2": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Vessel Navigation",
     "txt_folder_path_set3": "",
     "txt_field_columns_config": [
         {
@@ -168,17 +168,17 @@
         }
     ],
     "folder_paths": {
-        "Main TXT File": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing",
-        "TXT Source 2": "S:/QPS PROJECTS/600053_RHM_UXO_IDC/LogFiles/Online Log testing",
+        "Main TXT File": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Vessel Navigation",
+        "TXT Source 2": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Vessel Navigation",
         "TXT Source 3": "",
         "Qinsy DB": "",
-        "Naviscan": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "Naviscan": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Vessel Navigation/Subfolder",
         "SIS": "",
-        "SSS": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "SSS": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Vessel Navigation/Subfolder",
         "SBP": "",
         "Mag": "",
         "Grad": "",
-        "SVP": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/SQL Database",
+        "SVP": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Vessel Navigation",
         "SpintINS": "",
         "Video": "",
         "Cathx": "",
@@ -204,6 +204,25 @@
         "Hypack RAW": "Hypack RAW",
         "Eiva NaviPac": "Eiva NaviPac",
         "test": "test"
+    },
+    "folder_db_columns": {
+        "Main TXT File": "",
+        "TXT Source 2": "",
+        "TXT Source 3": "",
+        "Qinsy DB": "",
+        "Naviscan": "",
+        "SIS": "",
+        "SSS": "",
+        "SBP": "",
+        "Mag": "",
+        "Grad": "",
+        "SVP": "",
+        "SpintINS": "",
+        "Video": "",
+        "Cathx": "",
+        "Hypack RAW": "",
+        "Eiva NaviPac": "",
+        "test": ""
     },
     "file_extensions": {
         "Main TXT File": "txt",
@@ -512,7 +531,7 @@
         ]
     },
     "sqlite_enabled": true,
-    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL Database/RHM_600053_UXO_IDC.sqlite",
+    "sqlite_db_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/SQL Database/RHM_600053_UXO_IDC.sqlite",
     "sqlite_table": "fieldlog",
     "always_on_top": true,
     "new_day_event_enabled": true,

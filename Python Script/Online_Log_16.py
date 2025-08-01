@@ -14,6 +14,7 @@ import uuid
 import pandas as pd
 import openpyxl
 import re
+from pathlib import Path
 
 # --- DEFINED CONSTANTS ---
 # PATHS
@@ -162,7 +163,7 @@ class FolderMonitor(FileSystemEventHandler):
                 self.update_latest_file()
 
     def on_created(self, event):
-        if not event.is_directory and event.src_path.lower().endswith(self.extension):
+        if not event.is_directory and (not self.extension or event.src_path.lower().endswith(self.extension)):
             self._update_if_newer(event.src_path)
 
     def _update_if_newer(self, file_path):
@@ -180,7 +181,8 @@ class FolderMonitor(FileSystemEventHandler):
         try:
             for f_name in os.listdir(self.path):
                 f_path = os.path.join(self.path, f_name)
-                if os.path.isfile(f_path) and f_name.lower().endswith(self.extension):
+                # Handles empty extension to match any file
+                if os.path.isfile(f_path) and (not self.extension or f_name.lower().endswith(self.extension)):
                     mtime = os.path.getmtime(f_path)
                     if mtime > latest_mtime:
                         latest_mtime = mtime
@@ -376,7 +378,7 @@ class DataLoggerGUI:
             "Main TXT": "#BAE1FF",    # Light Blue
             "TXT Source 2": "#BAFFC9",    # Light Green
             "TXT Source 3": "#FFFFBA",    # Light Yellow
-            "None": None          # No color for buttons with no source
+            "None": None         # No color for buttons with no source
         }
 
         self.txt_file_path = None # This will now be dynamic based on source
@@ -403,6 +405,7 @@ class DataLoggerGUI:
 
         self.folder_paths = {}
         self.folder_columns = {}
+        self.folder_db_columns = {}
         self.file_extensions = {}
         self.folder_skips = {}
         self.monitors = {}
@@ -851,7 +854,21 @@ class DataLoggerGUI:
         try:
             conn_sqlite = sqlite3.connect(db_file, timeout=10)
             db_cols_set = set(pd.read_sql_query(f"PRAGMA table_info('{db_table}')", conn_sqlite)['name'])
-            excel_to_db_map = {item.get("column_name"): item.get("db_column_name") for item in self.txt_field_columns_config if item.get("column_name") and item.get("db_column_name")}
+            
+            # Start with the map from TXT/Data Columns config
+            excel_to_db_map = {
+                item.get("column_name"): item.get("db_column_name")
+                for item in self.txt_field_columns_config
+                if item.get("column_name") and item.get("db_column_name")
+            }
+
+            # --- Add mappings from Monitored Folders ---
+            for folder_name, excel_col in self.folder_columns.items():
+                db_col = self.folder_db_columns.get(folder_name)
+                # Only add if both Excel and DB columns are defined
+                if excel_col and db_col:
+                    excel_to_db_map[excel_col] = db_col
+            
             excel_to_db_map[row_num_col_excel] = 'original_excel_row'
             if 'time_fix' in db_cols_set:
                 excel_to_db_map['time_fix'] = 'time_fix'
@@ -1160,11 +1177,14 @@ class DataLoggerGUI:
                     svp_folder_path = self.folder_paths.get("SVP")
                     svp_col_name = self.folder_columns.get("SVP", "SVP")
                     if svp_folder_path and svp_col_name:
-                      latest_svp_file = folder_cache.get("SVP")
-                      if latest_svp_file:
-                          row_data[svp_col_name] = os.path.basename(latest_svp_file)
-                      else:
-                          row_data[svp_col_name] = "N/A"
+                        latest_svp_file = folder_cache.get("SVP")
+                        if latest_svp_file:
+                            # Split the SVP filename and extension
+                            filename_with_ext = os.path.basename(latest_svp_file)
+                            filename_without_ext, _ = os.path.splitext(filename_with_ext)
+                            row_data[svp_col_name] = filename_without_ext
+                        else:
+                            row_data[svp_col_name] = "N/A"
                     elif svp_col_name:
                         row_data[svp_col_name] = "Config Error"
                         print(f"SVP column config error: {svp_col_name}")
@@ -1383,48 +1403,67 @@ class DataLoggerGUI:
 
         return row_data
 
-    def get_latest_files_data(self): 
+    def get_latest_files_data(self):
         '''Collects the latest files from all monitored folders and returns a dictionary of column names to file paths.
         Returns:
         * A dictionary where keys are column names (from folder_columns) and values are the latest file paths.
         '''
-
         latest_files = {}
         for folder_name, folder_path in self.folder_paths.items():
-            if not folder_path or self.folder_skips.get(folder_name, False): 
+            if not folder_path or self.folder_skips.get(folder_name, False):
                 continue
-            latest_file = folder_cache.get(folder_name)
+
+            extension = self.file_extensions.get(folder_name, "")
+            latest_file = self.find_latest_file_in_folder(folder_path, extension)
+            
             column_name = self.folder_columns.get(folder_name)
-
-            if not column_name: 
+            if not column_name:
                 continue
 
-            if latest_file: latest_files[column_name] = os.path.basename(latest_file)
-            else: latest_files[column_name] = "N/A"
+            if latest_file:
+                # Split the filename and extension ---
+                filename_with_ext = os.path.basename(latest_file)
+                filename_without_ext, _ = os.path.splitext(filename_with_ext)
+                latest_files[column_name] = filename_without_ext
+            else:
+                latest_files[column_name] = "N/A"
         return latest_files
 
-    def find_latest_file_in_folder(self, folder_path, extension=".txt"):
-        '''Finds the most recent file with the specified extension in the given folder.
+    def find_latest_file_in_folder(self, folder_path, extension=""):
+        '''Finds the most recent file with the specified extension in the given folder AND ALL SUBFOLDERS.
             Arguments:
-            * folder_path: The path to the folder where files are searched.
-            * extension: The file extension to look for (default is ".txt").
+            * folder_path: The path to the top-level folder to search.
+            * extension: The file extension to look for. If empty, finds the latest of any file.
             Returns:
-            * The path to the most recent file with the specified extension, or None if no such file exists.
+            * The path (as a string) to the most recent file, or None if no such file exists.
         '''
         try:
-            files = []
-            ext_lower = extension.lower()
-            for f in os.listdir(folder_path):
-                f_path = os.path.join(folder_path, f)
-                try:
-                    if os.path.isfile(f_path) and f.lower().endswith(ext_lower): 
-                        files.append(f_path)
-                except OSError: 
-                    continue
-            return max(files, key=os.path.getmtime) if files else None
+            p = Path(folder_path)
+            
+            # Handles empty extension and formats the glob pattern
+            if extension:
+                # Ensure the extension starts with a dot for the glob pattern
+                glob_pattern = f'*.{extension.lstrip(".")}'
+            else:
+                # If no extension is specified, search for any file
+                glob_pattern = '*'
+            
+            # Use rglob to find all matching files recursively, then filter for actual files
+            files = [f for f in p.rglob(glob_pattern) if f.is_file()]
+            
+            if not files:
+                return None
+
+            # Find the file with the latest modification time
+            latest_file = max(files, key=lambda f: f.stat().st_mtime)
+            
+            # Return the path as a string to maintain consistency with os.path functions
+            return str(latest_file)
         
-        except FileNotFoundError: return None
-        except Exception: return None
+        except FileNotFoundError:
+            return None # Folder doesn't exist
+        except Exception:
+            return None # Other potential errors
 
     def _get_static_excel_data(self):
         """
@@ -1734,13 +1773,18 @@ class DataLoggerGUI:
             "txt_folder_path_set2": self.txt_folder_path_set2,
             "txt_folder_path_set3": self.txt_folder_path_set3,
             "txt_field_columns_config": self.txt_field_columns_config,
-            "folder_paths": self.folder_paths, "folder_columns": self.folder_columns,
-            "file_extensions": self.file_extensions, "folder_skips": self.folder_skips,
+            "folder_paths": self.folder_paths,
+            "folder_columns": self.folder_columns,
+            "folder_db_columns": self.folder_db_columns,
+            "file_extensions": self.file_extensions, 
+            "folder_skips": self.folder_skips,
             "num_custom_buttons": self.num_custom_buttons,
             "custom_button_configs": self.custom_button_configs,
-            "custom_button_tab_groups": self.custom_button_tab_groups, # NEW: Save tab groups
-            "button_colors": colors_to_save, "sqlite_enabled": self.sqlite_enabled,
-            "sqlite_db_path": self.sqlite_db_path, "sqlite_table": self.sqlite_table,
+            "custom_button_tab_groups": self.custom_button_tab_groups,
+            "button_colors": colors_to_save, 
+            "sqlite_enabled": self.sqlite_enabled,
+            "sqlite_db_path": self.sqlite_db_path, 
+            "sqlite_table": self.sqlite_table,
             "always_on_top": self.always_on_top_var.get(),
             "new_day_event_enabled": self.new_day_event_enabled_var.get(),
             "hourly_event_enabled": self.hourly_event_enabled_var.get(),
@@ -1851,6 +1895,8 @@ class DataLoggerGUI:
                 self.folder_paths.update(settings.get("folder_paths", {}))
                 self.folder_columns.clear()
                 self.folder_columns.update(settings.get("folder_columns", {}))
+                self.folder_db_columns.clear()
+                self.folder_db_columns.update(settings.get("folder_db_columns", {}))
                 self.file_extensions.clear()
                 self.file_extensions.update(settings.get("file_extensions", {}))
                 self.folder_skips.clear()
@@ -2846,12 +2892,13 @@ class DataLoggerGUI:
 # --- Settings Window Class ---
 class SettingsWindow:
 
+    # In class SettingsWindow...
     def __init__(self, master, parent_gui):
         self.master = master
         self.parent_gui = parent_gui
         self.master.title("Settings")
-        self.master.geometry("1000x850")
-        self.master.minsize(700, 500)
+        self.master.geometry("1150x850")
+        self.master.minsize(800, 500)
         self.style = parent_gui.style
 
         self.main_frame = ttk.Frame(self.master)
@@ -3603,8 +3650,9 @@ class SettingsWindow:
 
             self.custom_button_widgets.append( (text_entry, event_entry, event_code_var, txt_source_var, tab_group_var) )
 
-    def create_monitored_folders_tab(self): # Renamed
-        tab = ttk.Frame(self.notebook); self.notebook.add(tab, text="Monitored Folders")
+    def create_monitored_folders_tab(self):
+        tab = ttk.Frame(self.notebook)
+        self.notebook.add(tab, text="Monitored Folders")
         
         ttk.Label(tab, text="Configure additional folders to monitor for their latest file names. The latest file name will be logged in the specified Excel/DB column.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
 
@@ -3633,27 +3681,37 @@ class SettingsWindow:
             elif hasattr(event, 'delta'): delta = -int(event.delta / 120)
             else: delta = 0
             self.folder_canvas.yview_scroll(delta, "units")
-        self.folder_canvas.bind_all("<MouseWheel>", _on_mousewheel); self.folder_canvas.bind_all("<Button-4>", _on_mousewheel); self.folder_canvas.bind_all("<Button-5>", _on_mousewheel)
-        self.folder_entries = {}; self.folder_column_entries = {}; self.file_extension_entries = {}; self.folder_skip_vars = {}; self.folder_row_widgets = {}
+        self.folder_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        self.folder_canvas.bind_all("<Button-4>", _on_mousewheel)
+        self.folder_canvas.bind_all("<Button-5>", _on_mousewheel)
+        
+        self.folder_entries = {}
+        self.folder_column_entries = {}
+        self.folder_db_column_entries = {}
+        self.file_extension_entries = {}
+        self.folder_skip_vars = {}
+        self.folder_row_widgets = {}
         self.add_folder_header(self.scrollable_frame)
 
     def add_folder_header(self, parent):
         # Configure the grid columns directly on the main scrollable frame
         parent.columnconfigure(0, weight=2, minsize=140)  # Folder Type
-        parent.columnconfigure(1, weight=4, minsize=300)  # Monitor Path
+        parent.columnconfigure(1, weight=4, minsize=250)  # Monitor Path
         parent.columnconfigure(2, weight=0)               # ... button
-        parent.columnconfigure(3, weight=2, minsize=150)  # Target Column
-        parent.columnconfigure(4, weight=1, minsize=80)   # File Ext.
-        parent.columnconfigure(5, weight=0, minsize=50)   # Skip?
+        parent.columnconfigure(3, weight=2, minsize=150)  # Excel Column
+        parent.columnconfigure(4, weight=2, minsize=150)  # SQLite DB Column
+        parent.columnconfigure(5, weight=1, minsize=80)   # File Ext.
+        parent.columnconfigure(6, weight=0, minsize=50)   # Skip?
 
         # Header labels placed directly into the parent grid for perfect alignment
         ttk.Label(parent, text="Folder Type", style="Header.TLabel", padding=5).grid(row=0, column=0, sticky='w')
         ttk.Label(parent, text="Monitor Path", style="Header.TLabel", padding=5).grid(row=0, column=1, sticky='w')
         # Empty label for browse button column to maintain spacing
         ttk.Label(parent, text="", style="Header.TLabel").grid(row=0, column=2)
-        ttk.Label(parent, text="Target Column", style="Header.TLabel", padding=5).grid(row=0, column=3, sticky='w')
-        ttk.Label(parent, text="File Ext.", style="Header.TLabel", padding=5).grid(row=0, column=4, sticky='w')
-        ttk.Label(parent, text="Skip?", style="Header.TLabel", padding=5).grid(row=0, column=5, sticky='w')
+        ttk.Label(parent, text="Excel Column", style="Header.TLabel", padding=5).grid(row=0, column=3, sticky='w')
+        ttk.Label(parent, text="SQLite DB Column", style="Header.TLabel", padding=5).grid(row=0, column=4, sticky='w')
+        ttk.Label(parent, text="File Ext.", style="Header.TLabel", padding=5).grid(row=0, column=5, sticky='w')
+        ttk.Label(parent, text="Skip?", style="Header.TLabel", padding=5).grid(row=0, column=6, sticky='w')
 
     def add_initial_folder_rows(self):
         default_folders = DEFAULT_MONITORED_FOLDERS
@@ -3700,6 +3758,7 @@ class SettingsWindow:
             elif folder_name == "TXT Source 3": folder_path_to_use = self.parent_gui.txt_folder_path_set3 or ""
 
             column_name_to_use = self.parent_gui.folder_columns.get(folder_name, folder_name)
+            db_column_name_to_use = self.parent_gui.folder_db_columns.get(folder_name, "")
             extension_to_use = self.parent_gui.file_extensions.get(folder_name, "")
 
             if folder_name in ["Main TXT File", "TXT Source 2", "TXT Source 3"]:
@@ -3710,6 +3769,7 @@ class SettingsWindow:
 
             self.add_folder_row(folder_name=folder_name, folder_path=folder_path_to_use,
                                  column_name=column_name_to_use,
+                                 db_column_name=db_column_name_to_use,
                                  extension=extension_to_use,
                                  skip=self.parent_gui.folder_skips.get(folder_name, False))
         self.master.after_idle(self.update_scroll_region)
@@ -3777,6 +3837,7 @@ class SettingsWindow:
             # Remove the data entries from the other dictionaries
             self.folder_entries.pop(folder_to_remove, None)
             self.folder_column_entries.pop(folder_to_remove, None)
+            self.folder_db_column_entries.pop(folder_to_remove, None)
             self.file_extension_entries.pop(folder_to_remove, None)
             self.folder_skip_vars.pop(folder_to_remove, None)
 
@@ -3785,7 +3846,7 @@ class SettingsWindow:
             self.remove_folder_btn.config(state=tk.DISABLED)
             self.parent_gui.update_status(f"Removed '{folder_to_remove}' configuration.")
 
-    def add_folder_row(self, folder_name="", folder_path="", column_name="", extension="", skip=False):
+    def add_folder_row(self, folder_name="", folder_path="", column_name="", db_column_name="", extension="", skip=False):
         row_index = len(self.folder_row_widgets) + 1
         parent = self.scrollable_frame # The single grid container
 
@@ -3805,6 +3866,8 @@ class SettingsWindow:
         button = ttk.Button(parent, text="...", width=3, command=select_folder)
         column_entry = ttk.Entry(parent)
         column_entry.insert(0, column_name if column_name else folder_name)
+        db_column_entry = ttk.Entry(parent)
+        db_column_entry.insert(0, db_column_name) 
         extension_entry = ttk.Entry(parent, width=10)
         extension_entry.insert(0, extension)
         skip_var = tk.BooleanVar(value=skip)
@@ -3815,11 +3878,12 @@ class SettingsWindow:
         entry.grid(row=row_index, column=1, padx=5, pady=2, sticky="ew")
         button.grid(row=row_index, column=2, padx=(0,5), pady=2, sticky='w')
         column_entry.grid(row=row_index, column=3, padx=5, pady=2, sticky="ew")
-        extension_entry.grid(row=row_index, column=4, padx=5, pady=2, sticky="ew")
-        skip_checkbox.grid(row=row_index, column=5, padx=(15,5), pady=2, sticky='w')
+        db_column_entry.grid(row=row_index, column=4, padx=5, pady=2, sticky="ew")
+        extension_entry.grid(row=row_index, column=5, padx=5, pady=2, sticky="ew")
+        skip_checkbox.grid(row=row_index, column=6, padx=(15, 5), pady=2, sticky='w')
 
         # --- Selection and Tooltip Logic ---
-        widgets_in_row = [label, entry, button, column_entry, extension_entry, skip_checkbox]
+        widgets_in_row = [label, entry, button, column_entry, db_column_entry, extension_entry, skip_checkbox]
         click_handler = lambda e, name=folder_name: self._select_folder_row(name)
         for widget in widgets_in_row:
             widget.bind("<Button-1>", click_handler)
@@ -3828,10 +3892,12 @@ class SettingsWindow:
         ToolTip(column_entry, f"Enter the Excel/DB column name for the latest '{folder_name}' filename.")
         ToolTip(extension_entry, "Optional: Monitor only files with this extension (e.g., 'svp').")
         ToolTip(skip_checkbox, f"Check to disable monitoring for the '{folder_name}' folder.")
+        ToolTip(db_column_entry, f"Enter the SQLite DB column name for the latest '{folder_name}' filename.")
 
         # Store references for selection, saving, and removal
         self.folder_entries[folder_name] = entry
         self.folder_column_entries[folder_name] = column_entry
+        self.folder_db_column_entries[folder_name] = db_column_entry
         self.file_extension_entries[folder_name] = extension_entry
         self.folder_skip_vars[folder_name] = skip_var
         # Store all widgets in the row for highlighting
@@ -4192,22 +4258,26 @@ class SettingsWindow:
         # --- Monitored Folders Tab ---
         parent_folder_paths = {}
         parent_folder_cols = {}
+        parent_folder_db_cols = {}
         parent_folder_exts = {}
         parent_folder_skips = {}
         for folder_name in self.folder_entries.keys():
             entry_widget = self.folder_entries[folder_name]
             col_entry = self.folder_column_entries[folder_name]
+            db_col_entry = self.folder_db_column_entries[folder_name]
             ext_entry = self.file_extension_entries[folder_name]
             skip_var = self.folder_skip_vars[folder_name]
 
             folder_path = entry_widget.get().strip()
             parent_folder_paths[folder_name] = folder_path
             parent_folder_cols[folder_name] = col_entry.get().strip() if col_entry.get().strip() else folder_name
+            parent_folder_db_cols[folder_name] = db_col_entry.get().strip()
             parent_folder_exts[folder_name] = ext_entry.get().strip().lstrip('.')
             parent_folder_skips[folder_name] = skip_var.get()
         
         self.parent_gui.folder_paths = parent_folder_paths
         self.parent_gui.folder_columns = parent_folder_cols
+        self.parent_gui.folder_db_columns = parent_folder_db_cols
         self.parent_gui.file_extensions = parent_folder_exts
         self.parent_gui.folder_skips = parent_folder_skips
 
@@ -4250,7 +4320,7 @@ class SettingsWindow:
         hourly_font_color_hex = self.hourly_font_color_var.get()
         self.parent_gui.button_colors["Hourly KP Log"] = (hourly_bg_color_hex if hourly_bg_color_hex else None, hourly_font_color_hex if hourly_font_color_hex else None)
 
-      
+        
         
         # --- SQLite Log Tab ---
         self.parent_gui.sqlite_enabled = self.sqlite_enabled_var.get()
