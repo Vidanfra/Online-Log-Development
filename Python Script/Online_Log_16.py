@@ -16,6 +16,10 @@ import openpyxl
 import re
 from pathlib import Path
 
+#DEBUG
+timings = {}
+start_time = time.perf_counter()
+
 # --- DEFINED CONSTANTS ---
 # PATHS
 DEFAULT_SETTINGS_FILE = "settings/default_settings.json"
@@ -815,6 +819,7 @@ class DataLoggerGUI:
         threading.Thread(target=_sync_worker, daemon=True).start()
 
     def perform_excel_to_sqlite_sync(self, static_data=None):
+        timings['start'] = time.perf_counter() #DEBUG
         print("\n--- Starting Excel to SQLite Sync ---")
         excel_file = self.log_file_path
         db_file = self.sqlite_db_path
@@ -849,6 +854,8 @@ class DataLoggerGUI:
         except Exception as e:
             traceback.print_exc()
             return False, f"Sync Error: Failed during Excel read/prep stage. ({e})"
+        
+        timings['after_read_excel'] = time.perf_counter() #DEBUG
 
         conn_sqlite = None
         try:
@@ -883,6 +890,8 @@ class DataLoggerGUI:
         finally:
             if conn_sqlite: conn_sqlite.close()
 
+        timings['after_load_sqlite'] = time.perf_counter() #DEBUG
+
         df_excel.set_index(row_num_col_excel, inplace=True, drop=False)
         if not df_sqlite.empty:
             df_sqlite.set_index(row_num_db_col_name, inplace=True, drop=False)
@@ -910,6 +919,7 @@ class DataLoggerGUI:
             print("Sync complete. No changes detected.")
             return True, "Sync complete. No changes detected."
 
+        timings['after_compare'] = time.perf_counter() #DEBUG
         conn_sqlite = None
         try:
             conn_sqlite = sqlite3.connect(db_file, timeout=10)
@@ -953,6 +963,19 @@ class DataLoggerGUI:
             return False, f"Sync Error: Failed to write to SQLite. ({e})"
         finally:
             if conn_sqlite: conn_sqlite.close()
+            timings['after_update_sqlite'] = time.perf_counter() #DEBUG
+
+            print("\n--- Timing Summary (seconds) ---")
+            phases = [
+                ('Read Excel', 'start', 'after_read_excel'),
+                ('Load SQLite', 'after_read_excel', 'after_load_sqlite'),
+                ('Compare Rows', 'after_load_sqlite', 'after_compare'),
+                ('Insert Rows', 'after_compare', 'after_update_sqlite'),
+                ('Total Time', 'start', 'after_update_sqlite'),
+            ]
+            for label, t1, t2 in phases:
+                if t1 in timings and t2 in timings:
+                    print(f"{label:20}: {timings[t2] - timings[t1]:.4f} s")
 
     # --- Status Bar and Indicators ---
     def update_status(self, message):

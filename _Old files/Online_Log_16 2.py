@@ -358,7 +358,7 @@ class DataLoggerGUI:
 
         # Settings File Configuration
         self.default_settings_file = DEFAULT_SETTINGS_FILE
-        self.settings_file = CUSTOM_SETTINGS_FILE       
+        self.settings_file = CUSTOM_SETTINGS_FILE           
 
        # Event Code Configuration
         self.event_codes_file = EVENT_CODES_FILE
@@ -415,7 +415,7 @@ class DataLoggerGUI:
 
         self.folder_paths = {}
         self.folder_columns = {}
-        self.folder_db_columns = {} # --- NEW ---
+        self.folder_db_columns = {}
         self.file_extensions = {}
         self.folder_skips = {}
         self.monitors = {}
@@ -715,6 +715,7 @@ class DataLoggerGUI:
         
         # Try a numeric comparison with a small tolerance for floating point issues
         try:
+            # Compare with a small tolerance for floating point issues
             if abs(float(val1) - float(val2)) < 0.00001:
                 return False
         except (ValueError, TypeError):
@@ -1368,7 +1369,7 @@ class DataLoggerGUI:
         try:
             p = Path(folder_path)
             
-            # --- MODIFIED: Handles empty extension and formats the glob pattern ---
+            # Handles empty extension and formats the glob pattern
             if extension:
                 # Ensure the extension starts with a dot for the glob pattern
                 glob_pattern = f'*.{extension.lstrip(".")}'
@@ -1621,12 +1622,12 @@ class DataLoggerGUI:
             "txt_field_columns_config": self.txt_field_columns_config,
             "folder_paths": self.folder_paths,
             "folder_columns": self.folder_columns,
-            "folder_db_columns": self.folder_db_columns, # --- NEW ---
+            "folder_db_columns": self.folder_db_columns,
             "file_extensions": self.file_extensions, 
             "folder_skips": self.folder_skips,
             "num_custom_buttons": self.num_custom_buttons,
             "custom_button_configs": self.custom_button_configs,
-            "custom_button_tab_groups": self.custom_button_tab_groups, # NEW: Save tab groups
+            "custom_button_tab_groups": self.custom_button_tab_groups,
             "button_colors": colors_to_save, 
             "sqlite_enabled": self.sqlite_enabled,
             "sqlite_db_path": self.sqlite_db_path, 
@@ -1741,8 +1742,8 @@ class DataLoggerGUI:
                 self.folder_paths.update(settings.get("folder_paths", {}))
                 self.folder_columns.clear()
                 self.folder_columns.update(settings.get("folder_columns", {}))
-                self.folder_db_columns.clear() # --- NEW ---
-                self.folder_db_columns.update(settings.get("folder_db_columns", {})) # --- NEW ---
+                self.folder_db_columns.clear()
+                self.folder_db_columns.update(settings.get("folder_db_columns", {}))
                 self.file_extensions.clear()
                 self.file_extensions.update(settings.get("file_extensions", {}))
                 self.folder_skips.clear()
@@ -1971,7 +1972,6 @@ class DataLoggerGUI:
 
     def start_folder_monitoring(self, folder_name, folder_path, file_extension):
         '''Start monitoring a specific folder for changes in files with a given extension.
-            
             Arguments:
             * folder_name: Name of the folder to monitor.
             * folder_path: Full path to the folder to monitor.
@@ -2745,8 +2745,8 @@ class SettingsWindow:
         self.master = master
         self.parent_gui = parent_gui
         self.master.title("Settings")
-        self.master.geometry("1150x850") # --- MODIFIED: Wider for new column ---
-        self.master.minsize(800, 500) # --- MODIFIED: Wider for new column ---
+        self.master.geometry("1150x850")
+        self.master.minsize(800, 500)
         self.style = parent_gui.style
 
         self.main_frame = ttk.Frame(self.master)
@@ -3535,7 +3535,7 @@ class SettingsWindow:
         
         self.folder_entries = {}
         self.folder_column_entries = {}
-        self.folder_db_column_entries = {} # --- NEW ---
+        self.folder_db_column_entries = {}
         self.file_extension_entries = {}
         self.folder_skip_vars = {}
         self.folder_row_widgets = {}
@@ -4106,26 +4106,26 @@ class SettingsWindow:
         # --- Monitored Folders Tab ---
         parent_folder_paths = {}
         parent_folder_cols = {}
-        parent_folder_db_cols = {} # --- NEW ---
+        parent_folder_db_cols = {}
         parent_folder_exts = {}
         parent_folder_skips = {}
         for folder_name in self.folder_entries.keys():
             entry_widget = self.folder_entries[folder_name]
             col_entry = self.folder_column_entries[folder_name]
-            db_col_entry = self.folder_db_column_entries[folder_name] # --- NEW ---
+            db_col_entry = self.folder_db_column_entries[folder_name]
             ext_entry = self.file_extension_entries[folder_name]
             skip_var = self.folder_skip_vars[folder_name]
 
             folder_path = entry_widget.get().strip()
             parent_folder_paths[folder_name] = folder_path
             parent_folder_cols[folder_name] = col_entry.get().strip() if col_entry.get().strip() else folder_name
-            parent_folder_db_cols[folder_name] = db_col_entry.get().strip() # --- NEW ---
+            parent_folder_db_cols[folder_name] = db_col_entry.get().strip()
             parent_folder_exts[folder_name] = ext_entry.get().strip().lstrip('.')
             parent_folder_skips[folder_name] = skip_var.get()
         
         self.parent_gui.folder_paths = parent_folder_paths
         self.parent_gui.folder_columns = parent_folder_cols
-        self.parent_gui.folder_db_columns = parent_folder_db_cols # --- NEW ---
+        self.parent_gui.folder_db_columns = parent_folder_db_cols
         self.parent_gui.file_extensions = parent_folder_exts
         self.parent_gui.folder_skips = parent_folder_skips
 
