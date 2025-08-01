@@ -179,27 +179,37 @@ class FolderMonitor(FileSystemEventHandler):
             # self.gui_instance.update_status(f"Newer file found in {self.folder_name}: {os.path.basename(file_path)}")
 
     def update_latest_file(self):
-        '''Scans the folder to find the truly latest file and updates the cache.'''
+        '''Scans the folder AND ALL SUBFOLDERS to find the truly latest file and updates the cache.'''
         latest = None
         latest_mtime = -1
         try:
-            for f_name in os.listdir(self.path):
-                f_path = os.path.join(self.path, f_name)
-                # Handles empty extension to match any file
-                if os.path.isfile(f_path) and (not self.extension or f_name.lower().endswith(self.extension)):
-                    mtime = os.path.getmtime(f_path)
-                    if mtime > latest_mtime:
-                        latest_mtime = mtime
-                        latest = f_path
+            # Use os.walk for a recursive search through all directories and subdirectories
+            for root, _, files in os.walk(self.path):
+                for f_name in files:
+                    # Check if the file matches the extension (if one is specified)
+                    if not self.extension or f_name.lower().endswith(self.extension):
+                        f_path = os.path.join(root, f_name)
+                        try:
+                            mtime = os.path.getmtime(f_path)
+                            if mtime > latest_mtime:
+                                latest_mtime = mtime
+                                latest = f_path
+                        except FileNotFoundError:
+                            continue # File might have been deleted during the scan
+                            
         except FileNotFoundError:
             self.gui_instance.update_status(f"Monitoring error: Folder '{self.path}' not found for '{self.folder_name}'.")
         except Exception as e:
             self.gui_instance.update_status(f"Monitoring error in '{self.folder_name}': {e}")
 
         if latest:
-            folder_cache[self.folder_name] = latest
+            # If a new latest file is found, update the cache
+            if folder_cache.get(self.folder_name) != latest:
+                print(f"Cache update for '{self.folder_name}': {os.path.basename(latest)}")
+                folder_cache[self.folder_name] = latest
         elif self.folder_name in folder_cache:
-            del folder_cache[self.folder_name] # Remove if no valid latest file is found
+            # If no files are found, clear the cache entry
+            del folder_cache[self.folder_name]
 
 # --- Main Application GUI Class ---
 class DataLoggerGUI:
@@ -976,6 +986,8 @@ class DataLoggerGUI:
             for label, t1, t2 in phases:
                 if t1 in timings and t2 in timings:
                     print(f"{label:20}: {timings[t2] - timings[t1]:.4f} s")
+    
+
 
     # --- Status Bar and Indicators ---
     def update_status(self, message):
@@ -1136,17 +1148,12 @@ class DataLoggerGUI:
                 triggering_button = None
 
         def _log_thread_func():
-            nonlocal original_text
-            row_data = {}
-            excel_success = False
-            sqlite_logged = False
-            excel_save_exception = None
-            sqlite_save_exception_type = None
-            status_msg = f"'{event_type}' processed with errors."
-
+            status_msg = f"'{event_type}' failed."
             try:
+                # --- This part of the logic for gathering data remains the same ---
                 row_data = {}
 
+                # 1. Get data from the selected TXT source
                 if txt_source_key and txt_source_key != "None":
                     source_folder_path = None
                     if txt_source_key == "Main TXT":
@@ -1166,6 +1173,8 @@ class DataLoggerGUI:
                         except Exception as e_txt:
                             print(f"Error getting TXT data from source '{txt_source_key}': {e_txt}")
                             self.master.after(0, lambda e=e_txt: messagebox.showerror("Error", f"Failed to read TXT data from {txt_source_key}:\n{e}", parent=self.master))
+
+                # 2. Get static data from Excel cells (this correctly uses xlwings)
                     else:
                         print(f"Source folder path is invalid or empty for {txt_source_key}: {source_folder_path}")
                         error_title = "Configuration Error"
@@ -1179,23 +1188,24 @@ class DataLoggerGUI:
                     print(f"txt_source_key is 'None' or empty, skipping TXT data collection.")
 
                 try:
-                    print("Attempting to get static data from Excel cells...")
+                    print("Reading data from Excel cells...")
                     static_data_from_cells = self._get_static_excel_data()
                     if static_data_from_cells:
                         row_data.update(static_data_from_cells)
-                        print(f"Successfully merged static data: {static_data_from_cells}")
                 except Exception as e_static:
                     print(f"Error getting static data from Excel cells: {e_static}")
-
+                
+                # 3. Get latest files from monitored folders (using the OPTIMIZED function)
                 if not skip_latest_files:
                     try:
-                        latest_files_data = self.get_latest_files_data()
+                        latest_files_data = self.get_latest_files_data_fast() # Use the new fast function
                         if latest_files_data:
                             row_data.update(latest_files_data)
                     except Exception as e_files:
                         print(f"Error getting latest file data (monitored folders): {e_files}")
                         self.master.after(0, lambda e=e_files: messagebox.showerror("Error", f"Failed to get latest file data:\n{e}", parent=self.master))
 
+                # Handle SVP specific logic
                 if svp_specific_handling:
                     svp_folder_path = self.folder_paths.get("SVP")
                     svp_col_name = self.folder_columns.get("SVP", "SVP")
@@ -1211,7 +1221,7 @@ class DataLoggerGUI:
                     elif svp_col_name:
                         row_data[svp_col_name] = "Config Error"
                         print(f"SVP column config error: {svp_col_name}")
-
+                # Handle KP Ref. specific logic
                 if self.txt_source_aliases:
                     kp_ref = self.txt_source_aliases.get(txt_source_key)
                     kp_ref_column_name = self.txt_field_columns.get("KP Ref.")
@@ -1220,6 +1230,7 @@ class DataLoggerGUI:
                 else:
                     print("No KP Ref. aliases configured, skipping...")
 
+                # Handle Event specific logic
                 event_column_name = self.txt_field_columns.get("Event")
                 if event_column_name and event_text_for_excel is not None:
                     row_data[event_column_name] = event_text_for_excel
@@ -1237,67 +1248,36 @@ class DataLoggerGUI:
                 if code_column_name and event_code_to_log:
                     row_data[code_column_name] = event_code_to_log
 
+                # SAVING LOGIC
                 if row_data:
                     color_tuple = self.button_colors.get(event_type, (None, None))
-                    row_color_for_excel = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
-                    font_color_for_excel = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
-                    excel_data = {k: v for k, v in row_data.items() if k != 'EventType'}
+                    row_color = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
+                    font_color = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
 
+                    # Call the new, combined save function
                     try:
-                        print(f"Attempting to save to Excel. Log file: {self.log_file_path}")
-                        if not self.log_file_path:
-                            excel_save_exception = ValueError("Excel path missing")
-                        elif not os.path.exists(self.log_file_path):
-                            excel_save_exception = FileNotFoundError("Excel file missing")
+                        print(f"Saving data in Excel and SQLite for '{event_type}' with row data: {row_data}") #DEBUG
+                        success_excel, success_sqlite, message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
+                        if success_excel:
+                            print(f"Excel save: SUCCESS - {message}")
+                            status_msg = f"'{event_type}' logged. {message}"
                         else:
-                            self.save_to_excel(excel_data, row_color=row_color_for_excel, font_color=font_color_for_excel)
-                            excel_success = True
-                            print("Excel save: SUCCESS")
-                    except Exception as e_excel:
-                        excel_save_exception = e_excel
+                            status_msg = f"'{event_type}' failed. {message}"
+                            self.master.after(0, lambda e=status_msg: messagebox.showerror("Error", f"Failed to save to Excel:\n{status_msg}", parent=self.master))
+
+                        if success_sqlite:
+                            print(f"SQLite save: SUCCESS - {message}")
+                            status_msg = f"'{event_type}' logged. {message}"
+                        else:
+                            status_msg = f"'{event_type}' failed. {message}"
+                            self.master.after(0, lambda e=status_msg: messagebox.showerror("Error", f"Failed to save to SQL:\n{status_msg}", parent=self.master))
+
+                    except Exception as e:
                         traceback.print_exc()
-                        print(f"Excel save: FAILED with error: {e_excel}")
-                        self.master.after(0, lambda e=e_excel: messagebox.showerror("Error", f"Failed to save to Excel:\n{e}", parent=self.master))
-
-                    if excel_success and self.sqlite_enabled:
-                        print("Excel write successful, now syncing to SQLite...")
-                        static_data_to_pass = {
-                            key: val for key, val in row_data.items() if str(key).startswith('=')
-                        }
-                        sqlite_success, sync_message = self.perform_excel_to_sqlite_sync(static_data=static_data_to_pass)
-
-                        if sqlite_success:
-                            sqlite_logged = True
-                            print(f"SQLite sync result: {sync_message}")
-                        else:
-                            sqlite_logged = False
-                            sqlite_save_exception_type = "SyncFailed"
-                            print(f"SQLite sync FAILED: {sync_message}")
-                            self.master.after(0, lambda msg=sync_message: messagebox.showwarning("Sync Warning", f"Could not sync to SQLite:\n{msg}", parent=self.master))
-
-                    status_parts = []
-                    if excel_success:
-                        status_parts.append("Excel: OK")
-                    elif excel_save_exception:
-                        status_parts.append(f"Excel: Fail ({type(excel_save_exception).__name__})")
-                    else:
-                        status_parts.append("Excel: Fail (Check Path)")
-
-                    if self.sqlite_enabled:
-                        if sqlite_logged:
-                            status_parts.append("SQLite: OK")
-                        else:
-                            err_detail = f" ({sqlite_save_exception_type})" if sqlite_save_exception_type else ""
-                            status_parts.append(f"SQLite: Fail{err_detail}")
-
-                    if not excel_success and not (self.sqlite_enabled and sqlite_logged):
-                        status_msg = f"'{event_type}' log FAILED. " + ", ".join(status_parts)
-                    elif not status_parts:
-                        status_msg = f"Error logging '{event_type}' - No status."
-                    else:
-                        status_msg = f"'{event_type}' logged. " + ", ".join(status_parts) + "."
+                        print(f"Saving exception: FAILED with error: {e}")
                 else:
-                    status_msg = f"'{event_type}' pressed, but no data was collected/generated."
+                    status_msg = f"'{event_type}' - No data collected."
+
             except Exception as thread_ex:
                 traceback.print_exc()
                 status_msg = f"'{event_type}' - Unexpected thread error: {thread_ex}"
@@ -1426,31 +1406,24 @@ class DataLoggerGUI:
 
         return row_data
 
-    def get_latest_files_data(self):
-        '''Collects the latest files from all monitored folders and returns a dictionary of column names to file paths.
-        Returns:
-        * A dictionary where keys are column names (from folder_columns) and values are the latest file paths.
-        '''
-        latest_files = {}
-        for folder_name, folder_path in self.folder_paths.items():
-            if not folder_path or self.folder_skips.get(folder_name, False):
-                continue
-
-            extension = self.file_extensions.get(folder_name, "")
-            latest_file = self.find_latest_file_in_folder(folder_path, extension)
-            
-            column_name = self.folder_columns.get(folder_name)
-            if not column_name:
-                continue
-
-            if latest_file:
-                # Split the filename and extension ---
-                filename_with_ext = os.path.basename(latest_file)
-                filename_without_ext, _ = os.path.splitext(filename_with_ext)
-                latest_files[column_name] = filename_without_ext
-            else:
-                latest_files[column_name] = "N/A"
-        return latest_files
+    def get_latest_files_data_fast(self):
+        """
+        FAST version that collects latest file data by reading directly from the
+        watchdog's global cache, avoiding slow disk scans.
+        """
+        data = {}
+        for folder_name, column_name in self.folder_columns.items():
+            if not self.folder_skips.get(folder_name, False) and column_name:
+                # Read directly from the cache
+                latest_file_path = folder_cache.get(folder_name)
+                
+                if latest_file_path and os.path.exists(latest_file_path):
+                    # Store the filename without the extension
+                    filename_without_ext, _ = os.path.splitext(os.path.basename(latest_file_path))
+                    data[column_name] = filename_without_ext
+                else:
+                    data[column_name] = "N/A" # No file found/cached yet
+        return data
 
     def find_latest_file_in_folder(self, folder_path, extension=""):
         '''Finds the most recent file with the specified extension in the given folder AND ALL SUBFOLDERS.
@@ -1558,205 +1531,125 @@ class DataLoggerGUI:
                 except Exception: 
                     pass
 
-    def save_to_excel(self, row_data, row_color=None, font_color=None, next_row=None):
+    def save_to_excel_and_sqlite(self, row_data, row_color=None, font_color=None):
+        """
+        Efficiently saves a single row of data to the open Excel file via xlwings
+        and directly inserts the corresponding record into the SQLite database.
+        This avoids slow, full-file reads.
+        """
         if not self.log_file_path or not os.path.exists(self.log_file_path):
-            raise FileNotFoundError("Excel log file path is invalid or file does not exist.")
+            return False, False, "Excel: Path Invalid."
 
-        app, workbook, opened_new_app = None, None, False
+        excel_message = "Excel: Fail."
+        sqlite_message = "SQLite: Skipped."
+        next_row = -1
+
+        # --- 1. Write to Excel using xlwings ---
         try:
-            target_norm_path = os.path.normcase(os.path.abspath(self.log_file_path))
+            wb = xw.Book(self.log_file_path)
+            sheet = wb.sheets[0]
 
-            for running_app in xw.apps:
-                for wb in running_app.books:
-                    try:
-                        if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
-                            workbook = wb
-                            app = running_app
-                            break
-                    except Exception:
-                        continue
-                if workbook:
-                    break
-
-            if workbook is None:
-                app = xw.App(visible=False)
-                opened_new_app = True
-                workbook = app.books.open(self.log_file_path, read_only=False)
-
-            sheet = workbook.sheets[0]
             header_row_index = -1
             header_values = []
-            required_columns = EXCEL_LOG_REQUIRED_COLS
-
             for i in range(1, MAX_HEADER_SEARCH_ROW + 1):
                 row_values_list = sheet.range(f'A{i}').expand('right').value
-                if row_values_list is None:
-                    continue
+                if not row_values_list: continue
                 current_row_headers = {str(h).lower().strip() for h in row_values_list if h is not None}
-                if required_columns.issubset(current_row_headers):
+                if EXCEL_LOG_REQUIRED_COLS.issubset(current_row_headers):
                     header_row_index = i
                     header_values = row_values_list
-                    print(f"Header found in row: {header_row_index}")
                     break
-
+            
             if header_row_index == -1:
-                raise ValueError("Could not find the header row with required columns in the Excel file.")
+                raise ValueError("Could not find header row in Excel.")
 
-            header_map_lower = {str(h).lower(): i + 1 for i, h in enumerate(header_values) if h is not None}
-            last_header_col_index = max(header_map_lower.values()) if header_map_lower else 1
+            header_map = {str(h).lower(): i for i, h in enumerate(header_values) if h}
+            
+            last_row = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
+            next_row = max(last_row, header_row_index) + 1
 
-            if next_row is None:
-                last_row_with_data = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
-                next_row = max(last_row_with_data, header_row_index) + 1
-                print(f"Next available row in Excel: {next_row}")
-
-            written_cols = []
+            output_data = [None] * len(header_map)
             for col_name, value in row_data.items():
                 col_name_lower = str(col_name).lower()
-                if col_name_lower in header_map_lower:
-                    col_index = header_map_lower[col_name_lower]
-                    try:
-                        target_cell = sheet.range(next_row, col_index)
-                        target_cell.value = value
-                        written_cols.append(col_index)
-                    except Exception as e_write:
-                        print(f"Warning: Could not write to column '{col_name}'. Error: {e_write}")
+                if col_name_lower in header_map:
+                    col_idx = header_map[col_name_lower]
+                    output_data[col_idx] = value
+            
+            target_range = sheet.range(f"A{next_row}").resize(1, len(output_data))
+            target_range.value = output_data
 
-            if written_cols:
-                target_range = sheet.range((next_row, 1), (next_row, last_header_col_index))
+            if row_color or font_color:
+                format_range = sheet.range((next_row, 1), (next_row, len(header_map)))
                 if row_color:
-                    try:
-                        target_range.color = row_color
-                    except Exception as e_color:
-                        print(f"Warning: Could not apply background color. Error: {e_color}")
+                    format_range.color = row_color
                 if font_color:
-                    try:
-                        target_range.font.color = font_color
-                    except Exception as e_font_color:
-                        print(f"Warning: Could not apply font color. Error: {e_font_color}")
-
-            workbook.save()
-            print("Workbook saved successfully.")
+                    format_range.font.color = font_color
+            
+            excel_message = "Excel: OK."
+            success_excel = True
+            
         except Exception as e:
             traceback.print_exc()
-            print(f"Unhandled error in save_to_excel: {e}")
-            raise e
-        finally:
-            if app is not None and opened_new_app:
-                try:
-                    app.quit()
-                except Exception as e_quit:
-                    print(f"Error quitting Excel app: {e_quit}")
+            excel_message = f"Excel: Fail ({type(e).__name__})."
+            return False, False, f"{excel_message} {sqlite_message}"
 
-    def log_to_sqlite(self, row_data):
-        '''Logs the provided row_data to the SQLite database using mapping from settings.
-            Arguments:
-            * row_data: A dictionary containing the data to log, where keys are Excel column names.
-            Returns:
-            * success: True if logging was successful, False otherwise.
-            * error_type: A string indicating the type of error, or None.
-        '''
-        success = False
-        error_type = None
-
-        if not self.sqlite_enabled:
-            print("SQLite logging disabled.") #DEBUG
-            return False, "Disabled"
-
-        if not self.sqlite_db_path or not self.sqlite_table:
-            print("SQLite config missing (path or table).") #DEBUG
-            return False, "ConfigurationMissing"
-
-        conn = None
-        cursor = None
-        try:
-            conn = sqlite3.connect(self.sqlite_db_path, timeout=10)
-            cursor = conn.cursor()
-
-            # --- START: UI-DRIVEN DYNAMIC MAPPING ---
-            data_to_insert = {}
-
-            # Iterate through the configuration from the settings
-            for config_item in self.txt_field_columns_config:
-                excel_col = config_item.get("column_name")
-                db_col = config_item.get("db_column_name")
-                
-                # Check if the Excel column name exists in the incoming data AND a DB column is specified
-                if excel_col and db_col and excel_col in row_data:
-                    data_to_insert[db_col] = row_data[excel_col]
-
-            # --- SPECIAL HANDLING FOR FIELDS NOT IN THE UI ---
-            # GUID is critical and always mapped directly
-            if 'GUID' in row_data:
-                # Find the DB column mapped from the 'GUID' field, if any.
-                guid_db_col = "guid" # Default
+        # --- 2. Write to SQLite ---
+        if self.sqlite_enabled and next_row != -1:
+            sqlite_message = "SQLite: Fail."
+            conn = None
+            try:
+                db_data = {}
                 for item in self.txt_field_columns_config:
-                    if item.get("field") == "GUID" and item.get("db_column_name"):
-                        guid_db_col = item.get("db_column_name")
-                        break
-                data_to_insert[guid_db_col] = row_data['GUID']
+                    excel_col = item.get("column_name")
+                    db_col = item.get("db_column_name")
+                    if excel_col and db_col and excel_col in row_data:
+                        db_data[db_col] = row_data[excel_col]
+                
+                for folder, excel_col in self.folder_columns.items():
+                    db_col = self.folder_db_columns.get(folder)
+                    if excel_col and db_col and excel_col in row_data:
+                        db_data[db_col] = row_data[excel_col]
 
+                db_data['original_excel_row'] = next_row
 
-            # Handle combined 'time_fix' field
-            date_excel_col = self.txt_field_columns.get("Date")
-            time_excel_col = self.txt_field_columns.get("Time")
-            time_fix_db_col = "time_fix" # You could make this configurable too in the future
+                # Manually construct the 'time_fix' field required by the database.
+                date_excel_col = self.txt_field_columns.get("Date")
+                time_excel_col = self.txt_field_columns.get("Time")
+                if date_excel_col in row_data and time_excel_col in row_data:
+                    date_val = row_data.get(date_excel_col)
+                    time_val = row_data.get(time_excel_col)
+                    if date_val and time_val:
+                        db_data['time_fix'] = f"{date_val} {time_val}"
 
-            date_val = row_data.get(date_excel_col)
-            time_val = row_data.get(time_excel_col)
-            if date_val and time_val:
-                data_to_insert[time_fix_db_col] = f"{date_val} {time_val}"
+                if db_data:
+                    # Ensure the mandatory time_fix column exists before trying to insert
+                    if 'time_fix' not in db_data or not db_data['time_fix']:
+                        raise sqlite3.IntegrityError("NOT NULL constraint failed: fieldlog.time_fix (generated value was empty)")
 
-            #print(f"Data prepared for SQLite insert: {data_to_insert}") #DEBUG
-            # --- END: DYNAMIC MAPPING ---
-
-            if not data_to_insert:
-                print("No data to insert after mapping.")
-                return True, None
-
-            # Check for table and column validity before inserting
-            cursor.execute(f"PRAGMA table_info([{self.sqlite_table}]);")
-            db_columns = {row[1].lower() for row in cursor.fetchall()}
-            
-            final_data_to_insert = {}
-            for key, value in data_to_insert.items():
-                if key.lower() in db_columns:
-                    final_data_to_insert[key] = value
+                    conn = sqlite3.connect(self.sqlite_db_path, timeout=10)
+                    cursor = conn.cursor()
+                    
+                    cols = ', '.join([f'"{c}"' for c in db_data.keys()])
+                    placeholders = ', '.join(['?'] * len(db_data))
+                    sql = f'INSERT INTO "{self.sqlite_table}" ({cols}) VALUES ({placeholders})'
+                    
+                    cursor.execute(sql, list(db_data.values()))
+                    conn.commit()
+                    sqlite_message = "SQLite: OK."
+                    success_sqlite = True
                 else:
-                    print(f"Warning: Mapped DB column '{key}' not found in table '{self.sqlite_table}' and will be skipped.")
-            
-            if not final_data_to_insert:
-                 print("No data left to insert after validating against table columns.")
-                 return True, None
+                    sqlite_message = "SQLite: No data mapped."
+                    success_sqlite = False
 
-            cols = list(final_data_to_insert.keys())
-            placeholders = ", ".join(["?"] * len(cols))
-            col_name_string = ", ".join([f'"{c}"' for c in cols])
-            sql_insert = f'INSERT INTO "{self.sqlite_table}" ({col_name_string}) VALUES ({placeholders})'
-            values = list(final_data_to_insert.values())
-            
-            #print(f"Executing SQLite insert: SQL='{sql_insert}', Values='{values}'") #DEBUG
-            cursor.execute(sql_insert, values)
-            conn.commit()
-            print("SQLite insert committed successfully.") #DEBUG
-            success = True
+            except Exception as e:
+                if conn: conn.rollback()
+                traceback.print_exc()
+                sqlite_message = f"SQLite: Fail ({type(e).__name__})."
+                success_sqlite = False
+            finally:
+                if conn: conn.close()
 
-        except sqlite3.OperationalError as op_err:
-            error_message = str(op_err); error_type = "OperationalError"
-            print(f"SQLite OperationalError: {error_message}") #DEBUG
-            if conn: conn.rollback()
-            # (Your existing specific error handling for "no such table", etc.)
-            success = False
-        except Exception as e:
-            error_message = str(e); error_type = type(e).__name__
-            print(f"Unexpected SQLite logging error: {e}") #DEBUG
-            if conn: conn.rollback()
-            success = False
-        finally:
-            if cursor: cursor.close()
-            if conn: conn.close()
-            print("Exiting log_to_sqlite.") #DEBUG
-        return success, error_type
+        return success_excel, success_sqlite, f"{excel_message} {sqlite_message}"
 
     def show_sqlite_error_message(self, error_message, error_type):
         ''' Displays an error message box for SQLite errors with specific handling based on the error type.
@@ -2156,26 +2049,27 @@ class DataLoggerGUI:
             Returns True if monitoring started successfully, False otherwise.
         '''
         try: 
-            # Check if directory is accessible before starting monitor
             if not os.path.isdir(folder_path):
-                print(f"Error: Path '{folder_path}' is not a valid directory for monitoring '{folder_name}'.") #DEBUG
+                print(f"Error: Path '{folder_path}' is not a valid directory for monitoring '{folder_name}'.")
                 return False
-            os.listdir(folder_path) # Try listing to check permissions
+            os.listdir(folder_path) # Check permissions
         except Exception as e: 
-            print(f"Error accessing directory '{folder_path}' for monitoring '{folder_name}': {e}") #DEBUG
+            print(f"Error accessing directory '{folder_path}' for monitoring '{folder_name}': {e}")
             return False
+        
         try:
             event_handler = FolderMonitor(folder_path, folder_name, self, file_extension)
             observer = PollingObserver(timeout=1)
-            observer.schedule(event_handler, folder_path, recursive=False)
+            # --- THE FIX IS HERE: Set recursive=True ---
+            observer.schedule(event_handler, folder_path, recursive=True)
             observer.start()
             self.monitors[folder_name] = observer
             # Trigger an immediate scan on a separate thread to populate cache right away
             threading.Thread(target=event_handler.update_latest_file, daemon=True).start()
-            print(f"Successfully started monitoring for {folder_name} at {folder_path} (ext: {file_extension}).") #DEBUG
+            print(f"Successfully started recursive monitoring for {folder_name} at {folder_path} (ext: {file_extension}).")
             return True
         except Exception as e: 
-            print(f"Failed to start watchdog monitor for {folder_name} at {folder_path}: {e}") #DEBUG
+            print(f"Failed to start watchdog monitor for {folder_name} at {folder_path}: {e}")
             return False
 
     # --- Programmed Events Scheduling ---
