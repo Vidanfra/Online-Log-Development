@@ -1,0 +1,7 @@
+customtkinter
+Pillow
+requests
+xlwings
+watchdog
+pandas
+openpyxl
