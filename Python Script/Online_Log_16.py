@@ -3357,7 +3357,9 @@ class SettingsWindow:
             elif hasattr(event, 'delta'): delta = -int(event.delta / 120)
             else: delta = 0
             self.txt_fields_canvas.yview_scroll(delta, "units")
-        self.txt_fields_canvas.bind_all("<MouseWheel>", _on_mousewheel_txt); self.txt_fields_canvas.bind_all("<Button-4>", _on_mousewheel_txt); self.txt_fields_canvas.bind_all("<Button-5>", _on_mousewheel_txt)
+        self.txt_fields_canvas.bind("<MouseWheel>", _on_mousewheel_txt) 
+        self.txt_fields_canvas.bind("<Button-4>", _on_mousewheel_txt)   
+        self.txt_fields_canvas.bind("<Button-5>", _on_mousewheel_txt)   
         
         # Store widgets for each row dynamically
         self.txt_field_row_widgets = [] # List of dictionaries, each holding refs for a row
@@ -3833,9 +3835,9 @@ class SettingsWindow:
             elif hasattr(event, 'delta'): delta = -int(event.delta / 120)
             else: delta = 0
             self.folder_canvas.yview_scroll(delta, "units")
-        self.folder_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        self.folder_canvas.bind_all("<Button-4>", _on_mousewheel)
-        self.folder_canvas.bind_all("<Button-5>", _on_mousewheel)
+        self.folder_canvas.bind("<MouseWheel>", _on_mousewheel) 
+        self.folder_canvas.bind("<Button-4>", _on_mousewheel)   
+        self.folder_canvas.bind("<Button-5>", _on_mousewheel)  
         
         self.folder_entries = {}
         self.folder_column_entries = {}
