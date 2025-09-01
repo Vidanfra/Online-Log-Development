@@ -1,0 +1,8 @@
+CREATE TABLE database_log (
+                id INTEGER NOT NULL,
+                changes TEXT NOT NULL,
+                table_name TEXT NOT NULL,
+                updated_by TEXT,
+                timestamp_utc TEXT DEFAULT (CURRENT_TIMESTAMP),
+                PRIMARY KEY (id)
+            )

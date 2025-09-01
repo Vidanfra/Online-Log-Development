@@ -60,6 +60,8 @@ class ToolTip:
         self.tooltip_window = None
         self.show_id = None # ID for the scheduled 'after' call to show
         self.hide_id = None # ID for the scheduled 'after' call to hide
+        self.last_log_on_kp = None 
+        self.log_on_time = None
 
         # Bind events to intermediate handlers
         self.widget.bind("<Enter>", self.on_enter, add='+') # Use add='+ to coexist with button bindings
@@ -72,15 +74,11 @@ class ToolTip:
         self.schedule_show()
 
     def on_leave(self, event=None):
-        # When mouse leaves, cancel any scheduled show and schedule a hide
         self.cancel_scheduled_show()
-        self.cancel_scheduled_show() # Ensure no show is pending
         self.schedule_hide()
 
     def schedule_show(self):
-        # Cancel previous show timer if any
         self.cancel_scheduled_show()
-        # Schedule the tooltip to appear after delay
         self.show_id = self.widget.after(self.show_delay, self.show_tooltip)
 
     def schedule_hide(self):
@@ -141,15 +139,14 @@ class ToolTip:
             self.tooltip_window = None
 
     def hide_tooltip(self):
-        # Cancel any scheduled hide first (prevents duplicate calls)
         self.cancel_scheduled_hide()
         tw = self.tooltip_window
-        self.tooltip_window = None # Set to None first
+        self.tooltip_window = None
         if tw:
             try:
                 tw.destroy()
             except tk.TclError:
-                pass # Ignore if already destroyed
+                pass
 
 # --- FolderMonitor Class ---
 class FolderMonitor(FileSystemEventHandler):
@@ -263,6 +260,9 @@ class DataLoggerGUI:
         Arguments:
         * master: The root Tkinter window or parent widget.
         '''
+        self.calculate_logoff_values = tk.BooleanVar(value=True) # Defaults to enabled
+        self.last_log_on_kp = None
+        self.log_on_time = None
 
         print("\n--- Starting Online Logger ---\n")
 
@@ -326,6 +326,7 @@ class DataLoggerGUI:
         # Open the settings window by default when the app starts
         self.startup_settings()
 
+        
     def init_styles(self):
         ''' 
         Initializes the styles for the application using ttk.Style.
@@ -1270,7 +1271,54 @@ class DataLoggerGUI:
                 if source_folder_path and os.path.isdir(source_folder_path):
                     txt_data = self._get_txt_data_from_source(source_folder_path)
                     if txt_data: row_data.update(txt_data)
+
+                # --- START CORRECTED LOGIC for Log On/Off Calculation ---
+                # Set the initial event text to the default from button config
+                event_text_to_log = event_text_for_excel
+
+                if event_type == "Log on":
+                    kp_col_name = self.txt_field_columns.get("KP")
+                    if kp_col_name and kp_col_name in row_data:
+                        try:
+                            self.last_log_on_kp = float(row_data[kp_col_name])
+                            self.log_on_time = datetime.datetime.now()
+                            self.update_status(f"KP for Log on event stored: {self.last_log_on_kp}")
+                        except (ValueError, TypeError):
+                            self.last_log_on_kp = None
+                            self.log_on_time = None
+                            self.update_status("Could not parse KP for Log on. Calculations disabled.")
+
+                elif event_type == "Log off" and self.calculate_logoff_values.get():
+                    kp_col_name = self.txt_field_columns.get("KP")
+                    if self.last_log_on_kp is not None and self.log_on_time is not None and kp_col_name in row_data:
+                        try:
+                            current_kp = float(row_data[kp_col_name])
+                            current_time = datetime.datetime.now()
+                            time_diff_seconds = (current_time - self.log_on_time).total_seconds()
+                            
+                            distance_km = abs(current_kp - self.last_log_on_kp)
+                            
+                            speed_knots = 0
+                            if time_diff_seconds > 0:
+                                # Corrected and simplified calculation
+                                distance_nm = distance_km / 1.852
+                                time_hours = time_diff_seconds / 3600
+                                speed_knots = distance_nm / time_hours
+
+                                # Add a check for a tiny, negligible speed
+                                if abs(speed_knots) < 0.01:
+                                    speed_knots = 0.0 # To avoid logging tiny floating point values
+                                    
+                            event_text_to_log = f"Log off - Distance travelled: {distance_km:.2f}km - Speed: {speed_knots:.2f} Knots"
+                            
+                            self.last_log_on_kp = None
+                            self.log_on_time = None
+                            self.update_status("Log off complete. KP and time reset.")
+                        except (ValueError, TypeError) as e:
+                            event_text_to_log = f"Log off - Error in calculations: {e}"
+                            self.update_status("Error calculating distance/speed.")
                 
+
                 # 2. Get static data from Excel cells
                 static_data_from_cells = self._get_static_excel_data()
                 if static_data_from_cells: row_data.update(static_data_from_cells)
@@ -1280,11 +1328,11 @@ class DataLoggerGUI:
                     latest_files_data = self.get_latest_files_data_fast()
                     if latest_files_data: row_data.update(latest_files_data)
                 
-                # Update Event and Code columns
+                # Update the Event column with the FINAL, determined string
                 event_column_name = self.txt_field_columns.get("Event")
-                if event_column_name and event_text_for_excel is not None:
-                    row_data[event_column_name] = event_text_for_excel
-
+                if event_column_name and event_text_to_log is not None:
+                    row_data[event_column_name] = event_text_to_log # <-- Corrected line
+                
                 event_code_to_log = ""
                 # Find event code in main or custom configs
                 if event_type in self.main_button_configs:
@@ -1314,7 +1362,7 @@ class DataLoggerGUI:
                     ))
                 else:
                     self.master.after(0, self.update_status, message)
-            
+                
             except Exception as thread_ex:
                 # Log the full traceback for debugging
                 traceback.print_exc()
@@ -1331,7 +1379,7 @@ class DataLoggerGUI:
                     ))
                 else:
                     self.master.after(0, self.update_status, status_msg)
-
+        
         # Start the background thread
         log_thread = threading.Thread(target=_log_worker, daemon=True)
         log_thread.start()
@@ -1758,7 +1806,8 @@ class DataLoggerGUI:
             "new_day_event_enabled": self.new_day_event_enabled_var.get(),
             "hourly_event_enabled": self.hourly_event_enabled_var.get(),
             "main_button_configs": self.main_button_configs, # This is the crucial line to save the new setting
-            "txt_source_aliases": self.txt_source_aliases
+            "txt_source_aliases": self.txt_source_aliases,
+            "calculate_logoff_values": self.calculate_logoff_values.get()
         }
         try:
             with open(self.settings_file, 'w') as f: 
@@ -1949,6 +1998,7 @@ class DataLoggerGUI:
                  # Set the new threshold setting, defaulting to 15 if not found
                 self.active_logging_threshold_seconds.set(settings.get("active_logging_threshold_seconds", 15)) # <-- ADD THIS
                 self.sqlite_table = settings.get("sqlite_table", "fieldlog")
+                self.calculate_logoff_values.set(settings.get("calculate_logoff_values", True)) # Defaults to True if not found
                 self.always_on_top_var.set(settings.get("always_on_top", True))
                 self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
                 self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
@@ -2983,12 +3033,18 @@ class SettingsWindow:
         self.selected_txt_row_index = -1  # -1 means no row is selected
         self.txt_move_up_btn = None
         self.txt_move_down_btn = None
+        
+        # Initialize color picker variables here for the new layout
+        self.new_day_bg_color_var = tk.StringVar()
+        self.new_day_font_color_var = tk.StringVar()
+        self.hourly_bg_color_var = tk.StringVar()
+        self.hourly_font_color_var = tk.StringVar()
 
         # --- Create tabs (ensure each is called only ONCE) ---
         self.create_file_paths_tab()
         self.create_txt_column_mapping_tab()
         self.create_button_configuration_tab()
-        self.create_event_codes_tab()  # For the feature added previously
+        self.create_event_codes_tab()
         self.create_monitored_folders_tab()
         self.create_sqlite_tab()
         self.create_auto_events_tab()
@@ -3778,6 +3834,12 @@ class SettingsWindow:
     def create_monitored_folders_tab(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="Monitored Folders")
+
+        #Tip for Monitored folders
+        warning_frame = ttk.Frame(tab, padding=5)
+        warning_frame.pack(fill='x', pady=(0, 10))
+        ttk.Label(warning_frame, text="⚠ When changing directories, stop folder monitoring before making the change or the program will not start monitoring for any changes you make.",
+                  wraplength=900, justify=tk.LEFT, foreground='red').pack(fill='x')
         
         ttk.Label(tab, text="Configure additional folders to monitor for their latest file names. The latest file name will be logged in the specified Excel/DB column.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
 
@@ -4266,106 +4328,102 @@ class SettingsWindow:
             self.master.after(15000, lambda: self.test_result_label.config(text=""))
 
     def create_auto_events_tab(self):
-            """Creates the tab for configuring automatic timed events."""
-            tab = ttk.Frame(self.notebook, padding=20)
-            self.notebook.add(tab, text="Programmed Events")
+        """
+        Creates the tab for configuring automatic timed events with an improved layout.
+        """
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="Programmed Events")
 
-            # --- "New Day" Event Configuration ---
-            new_day_frame = ttk.LabelFrame(tab, text="Midnight 'New Day' Event", padding=15)
-            new_day_frame.pack(fill='x', pady=(0, 15))
-            new_day_frame.columnconfigure(1, weight=1)
+        # Use a main grid to structure the tab content
+        tab.columnconfigure(0, weight=1)
+        
+        # 1. Midnight 'New Day' Event Configuration
+        new_day_frame = ttk.LabelFrame(tab, text="Midnight 'New Day' Event", padding=15)
+        new_day_frame.grid(row=0, column=0, sticky='ew', pady=(0, 15))
+        new_day_frame.columnconfigure(1, weight=1) # Allow second column to expand
 
-            new_day_check = ttk.Checkbutton(
-                new_day_frame,
-                text="Enable this automatic event",
-                variable=self.parent_gui.new_day_event_enabled_var,
-                style="Large.TCheckbutton"
-            )
-            new_day_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
-            ToolTip(new_day_check, "If checked, an event will be logged automatically at midnight.")
+        # Row 0: Enable Checkbox
+        new_day_check = ttk.Checkbutton(new_day_frame, text="Enable this automatic event", 
+                                        variable=self.parent_gui.new_day_event_enabled_var,
+                                        style="Large.TCheckbutton")
+        new_day_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        ToolTip(new_day_check, "If checked, an event will be logged automatically at midnight.")
 
-            # Color picker for New Day event
-            self.new_day_bg_color_var, self.new_day_bg_color_label, \
-            self.new_day_font_color_var, self.new_day_font_color_label = self._create_color_picker_row(
-                new_day_frame, 1, "Excel Row Colors:", "New Day" # Changed label text
-        )
+        # Rows 1-2: Color Pickers
+        ttk.Label(new_day_frame, text="Excel Row Colors:").grid(row=1, column=0, sticky='w', padx=5, pady=(2, 0))
+        self._create_color_picker_widgets(new_day_frame, 1, "New Day")
 
-            # --- "Hourly KP Log" Event Configuration ---
-            hourly_frame = ttk.LabelFrame(tab, text="Hourly KP Log Event", padding=15)
-            hourly_frame.pack(fill='x', pady=5)
-            hourly_frame.columnconfigure(1, weight=1)
 
-            hourly_check = ttk.Checkbutton(
-                hourly_frame,
-                text="Enable this automatic event",
-                variable=self.parent_gui.hourly_event_enabled_var,
-                style="Large.TCheckbutton"
-            )
-            hourly_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
-            ToolTip(hourly_check, "If checked, the current KP will be logged automatically every hour.")
+        # 2. Hourly KP Log Event Configuration
+        hourly_frame = ttk.LabelFrame(tab, text="Hourly KP Log Event", padding=15)
+        hourly_frame.grid(row=1, column=0, sticky='ew', pady=5)
+        hourly_frame.columnconfigure(1, weight=1)
 
-            # Color picker for Hourly event
-            self.hourly_bg_color_var, self.hourly_bg_color_label, \
-            self.hourly_font_color_var, self.hourly_font_color_label = self._create_color_picker_row(
-                hourly_frame, 1, "Excel Row Colors:", "Hourly KP Log" # Changed label text
-        )
+        # Row 0: Enable Checkbox
+        hourly_check = ttk.Checkbutton(hourly_frame, text="Enable this automatic event",
+                                    variable=self.parent_gui.hourly_event_enabled_var,
+                                    style="Large.TCheckbutton")
+        hourly_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        ToolTip(hourly_check, "If checked, the current KP will be logged automatically every hour.")
+        
+        # Rows 1-2: Color Pickers
+        ttk.Label(hourly_frame, text="Excel Row Colors:").grid(row=1, column=0, sticky='w', padx=5, pady=(2, 0))
+        self._create_color_picker_widgets(hourly_frame, 1, "Hourly KP Log")
 
-    def _create_color_picker_row(self, parent_frame, row, label_text, event_name):
-        """Helper to create color picker widgets for both background and font colors for the Auto Events tab."""
-        ttk.Label(parent_frame, text=label_text).grid(row=row, column=0, sticky='w', padx=5)
 
-        # Frame for Background Color picker
-        bg_color_frame = ttk.Frame(parent_frame)
-        bg_color_frame.grid(row=row, column=1, sticky='w', padx=5, pady=(2,0)) # Add some top padding
+        # 3. Log off Distance/Speed Calculation
+        logoff_frame = ttk.LabelFrame(tab, text="Log off Distance/Speed Calculation", padding=15)
+        logoff_frame.grid(row=2, column=0, sticky='ew', pady=5)
+        logoff_frame.columnconfigure(1, weight=1)
+        
+        # Row 0: Enable Checkbox
+        logoff_check = ttk.Checkbutton(logoff_frame, text="Calculate distance & speed on Log off",
+                                    variable=self.parent_gui.calculate_logoff_values,
+                                    style="Large.TCheckbutton")
+        logoff_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        ToolTip(logoff_check, "If checked, the Log off button will calculate and display distance and speed based on the last Log on event's KP.")
 
-        # Get initial colors from the master button_colors dictionary
+    def _create_color_picker_widgets(self, parent_frame, grid_row, event_name):
+        """
+        Helper to create and place the color picker widgets for both background and font colors.
+        """
         initial_bg_color, initial_font_color = self.parent_gui.button_colors.get(event_name, (None, None))
         
         bg_color_var = tk.StringVar(value=initial_bg_color if initial_bg_color else "")
+        font_color_var = tk.StringVar(value=initial_font_color if initial_font_color else "")
+        
+        # Frame for Background Color picker
+        bg_color_frame = ttk.Frame(parent_frame)
+        bg_color_frame.grid(row=grid_row, column=1, sticky='w', padx=5, pady=(2, 0))
+
         bg_display_label = tk.Label(bg_color_frame, width=4, relief="solid", borderwidth=1,
                                     background=bg_color_var.get() if bg_color_var.get() else 'SystemButtonFace')
         bg_display_label.pack(side="left", padx=(0, 5))
 
-        # Background Clear button
         clear_bg_btn = ttk.Button(bg_color_frame, text="X", width=2, style="Toolbutton",
-                                 command=lambda: self.parent_gui._set_color_on_widget(bg_color_var, bg_display_label, None, self.master))
+                                command=lambda: self.parent_gui._set_color_on_widget(bg_color_var, bg_display_label, None, self.master))
         clear_bg_btn.pack(side="left", padx=1)
-        ToolTip(clear_bg_btn, f"Clear background color for {event_name}.")
-
-        # Background Choose button
+        
         choose_bg_btn = ttk.Button(bg_color_frame, text="...", width=3, style="Toolbutton",
-                                  command=lambda: self.parent_gui._choose_color_dialog(bg_color_var, bg_display_label, self.master, f"{event_name} Background"))
+                                command=lambda: self.parent_gui._choose_color_dialog(bg_color_var, bg_display_label, self.master, f"{event_name} Background"))
         choose_bg_btn.pack(side="left", padx=1)
-        ToolTip(choose_bg_btn, f"Choose a custom background color for {event_name}.")
-
 
         # Frame for Font Color picker
         font_color_frame = ttk.Frame(parent_frame)
-        font_color_frame.grid(row=row + 1, column=1, sticky='w', padx=5, pady=(0,2)) # Place below background, with some bottom padding
+        font_color_frame.grid(row=grid_row + 1, column=1, sticky='w', padx=5, pady=(0, 2))
 
-        font_color_var = tk.StringVar(value=initial_font_color if initial_font_color else "")
         font_display_label = tk.Label(font_color_frame, width=4, relief="solid", borderwidth=1,
-                                      background=font_color_var.get() if font_color_var.get() else 'SystemButtonFace')
+                                    background=font_color_var.get() if font_color_var.get() else 'SystemButtonFace')
         font_display_label.pack(side="left", padx=(0, 5))
 
-        # Font Clear button
         clear_font_btn = ttk.Button(font_color_frame, text="X", width=2, style="Toolbutton",
-                                   command=lambda: self.parent_gui._set_color_on_widget(font_color_var, font_display_label, None, self.master))
+                                    command=lambda: self.parent_gui._set_color_on_widget(font_color_var, font_display_label, None, self.master))
         clear_font_btn.pack(side="left", padx=1)
-        ToolTip(clear_font_btn, f"Clear font color for {event_name}.")
-
-        # Font Choose button
+        
         choose_font_btn = ttk.Button(font_color_frame, text="...", width=3, style="Toolbutton",
                                     command=lambda: self.parent_gui._choose_color_dialog(font_color_var, font_display_label, self.master, f"{event_name} Font"))
         choose_font_btn.pack(side="left", padx=1)
-        ToolTip(choose_font_btn, f"Choose a custom font color for {event_name}.")
-        
-        # Adjust row span for the main label
-        parent_frame.grid_rowconfigure(row, weight=0) # Make sure the label row doesn't expand
-        parent_frame.grid_rowconfigure(row+1, weight=0) # Make sure the font color row doesn't expand
 
-
-        return bg_color_var, bg_display_label, font_color_var, font_display_label # Return all four  
 
     # --- Settings Save/Load Logic ---
     def save_settings(self):
@@ -4490,57 +4548,70 @@ class SettingsWindow:
         self.parent_gui.update_db_indicator()
 
     def load_settings(self):
+        """Loads settings from the parent DataLoggerGUI instance and populates the UI."""
+        
+        # --- File Paths Tab ---
         self.log_file_entry.delete(0, tk.END)
-        self.populate_event_codes_tree()
         self.log_file_entry.insert(0, self.parent_gui.log_file_path or "")
         
-        # Load the custom names into the new entry fields
         aliases = self.parent_gui.txt_source_aliases
         self.txt_name_main_var.set(aliases.get("Main TXT", "Main TXT"))
         self.txt_name_set2_var.set(aliases.get("TXT Source 2", "TXT Source 2"))
         self.txt_name_set3_var.set(aliases.get("TXT Source 3", "TXT Source 3"))
 
-        # Load the paths into the path entry fields
         self.txt_path_main_var.set(self.parent_gui.txt_folder_path or "")
         self.txt_path_set2_var.set(self.parent_gui.txt_folder_path_set2 or "")
         self.txt_path_set3_var.set(self.parent_gui.txt_folder_path_set3 or "")
 
-        # Reload TXT field rows based on the (potentially newly loaded) config
+        # --- Data Columns Tab ---
         self.recreate_txt_field_rows()
         self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
 
-
-        for name, frame in list(self.folder_row_widgets.items()):
-            if frame and frame.winfo_exists(): frame.destroy()
-        self.folder_row_widgets.clear()
+        # --- Monitored Folders Tab ---
+        for name in list(self.folder_row_widgets.keys()):
+            if name not in self.parent_gui.folder_paths:
+                widgets_to_destroy = self.folder_row_widgets.pop(name, [])
+                for widget in widgets_to_destroy:
+                    if widget and widget.winfo_exists():
+                        widget.destroy()
         self.folder_entries.clear()
         self.folder_column_entries.clear()
+        self.folder_db_column_entries.clear()
         self.file_extension_entries.clear()
         self.folder_skip_vars.clear()
-
+        self.folder_log_x_vars.clear()
         self.add_initial_folder_rows()
         self.master.after_idle(self.update_scroll_region)
 
+        # --- Button Configuration Tab ---
         self.num_buttons_entry.delete(0, tk.END)
         self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
         self.recreate_custom_button_settings()
         
-        # Load colors for the automatic events tab
-        new_day_bg_color, new_day_font_color = self.parent_gui.button_colors.get("New Day", (None, None))
-        self.parent_gui._set_color_on_widget(self.new_day_bg_color_var, self.new_day_bg_color_label, new_day_bg_color, self.master)
-        self.parent_gui._set_color_on_widget(self.new_day_font_color_var, self.new_day_font_color_label, new_day_font_color, self.master)
-
-        hourly_bg_color, hourly_font_color = self.parent_gui.button_colors.get("Hourly KP Log", (None, None))
-        self.parent_gui._set_color_on_widget(self.hourly_bg_color_var, self.hourly_bg_color_label, hourly_bg_color, self.master)
-        self.parent_gui._set_color_on_widget(self.hourly_font_color_var, self.hourly_font_color_label, hourly_font_color, self.master)
+        # --- Programmed Events Tab ---
+        self.parent_gui.new_day_event_enabled_var.set(self.parent_gui.new_day_event_enabled_var.get())
+        self.parent_gui.hourly_event_enabled_var.set(self.parent_gui.hourly_event_enabled_var.get())
+        self.parent_gui.calculate_logoff_values.set(self.parent_gui.calculate_logoff_values.get())
         
+        # Load the color values into the UI variables
+        new_day_bg_color, new_day_font_color = self.parent_gui.button_colors.get("New Day", (None, None))
+        self.new_day_bg_color_var.set(new_day_bg_color or "")
+        self.new_day_font_color_var.set(new_day_font_color or "")
+        
+        hourly_bg_color, hourly_font_color = self.parent_gui.button_colors.get("Hourly KP Log", (None, None))
+        self.hourly_bg_color_var.set(hourly_bg_color or "")
+        self.hourly_font_color_var.set(hourly_font_color or "")
 
+        # --- SQLite Log Tab ---
         self.sqlite_enabled_var.set(self.parent_gui.sqlite_enabled)
         self.sqlite_db_path_entry.delete(0, tk.END)
         self.sqlite_db_path_entry.insert(0, self.parent_gui.sqlite_db_path or "")
         self.sqlite_table_entry.delete(0, tk.END)
         self.sqlite_table_entry.insert(0, self.parent_gui.sqlite_table or DEFAULT_TABLE_NAME)
         if hasattr(self, 'test_result_label'): self.test_result_label.config(text="")
+        
+        # --- Timezone Tab ---
+        self.parent_gui.time_offset_hours.set(self.parent_gui.time_offset_hours.get())
     
 # --- Main Execution ---
 if __name__ == "__main__":
