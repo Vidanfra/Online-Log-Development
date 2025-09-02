@@ -9,14 +9,13 @@ from watchdog.events import FileSystemEventHandler
 import datetime
 import json
 import traceback
-import sqlite3 # Use Python's built-in SQLite module
-import uuid
 import pandas as pd
 import openpyxl
 import re
 import asyncio
 import sys
 from pathlib import Path
+
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -37,8 +36,6 @@ DEFAULT_DATA_FIELDS = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Lo
 TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"] 
 DEFAULT_MONITORED_FOLDERS = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
 
-# DB SETTINGS
-DEFAULT_TABLE_NAME = "fieldlog" #NEEDS TO BE REVIEWED
 
 # NUMERICAL CONSTANTS
 MAX_HEADER_SEARCH_ROW = 30
@@ -60,6 +57,8 @@ class ToolTip:
         self.tooltip_window = None
         self.show_id = None # ID for the scheduled 'after' call to show
         self.hide_id = None # ID for the scheduled 'after' call to hide
+        self.last_log_on_kp = None 
+        self.log_on_time = None
 
         # Bind events to intermediate handlers
         self.widget.bind("<Enter>", self.on_enter, add='+') # Use add='+ to coexist with button bindings
@@ -72,15 +71,11 @@ class ToolTip:
         self.schedule_show()
 
     def on_leave(self, event=None):
-        # When mouse leaves, cancel any scheduled show and schedule a hide
         self.cancel_scheduled_show()
-        self.cancel_scheduled_show() # Ensure no show is pending
         self.schedule_hide()
 
     def schedule_show(self):
-        # Cancel previous show timer if any
         self.cancel_scheduled_show()
-        # Schedule the tooltip to appear after delay
         self.show_id = self.widget.after(self.show_delay, self.show_tooltip)
 
     def schedule_hide(self):
@@ -141,15 +136,14 @@ class ToolTip:
             self.tooltip_window = None
 
     def hide_tooltip(self):
-        # Cancel any scheduled hide first (prevents duplicate calls)
         self.cancel_scheduled_hide()
         tw = self.tooltip_window
-        self.tooltip_window = None # Set to None first
+        self.tooltip_window = None
         if tw:
             try:
                 tw.destroy()
             except tk.TclError:
-                pass # Ignore if already destroyed
+                pass
 
 # --- FolderMonitor Class ---
 class FolderMonitor(FileSystemEventHandler):
@@ -228,7 +222,6 @@ class DataLoggerGUI:
         * style: The ttk.Style object for styling widgets.
         * status_var: StringVar for status messages.
         * monitor_status_label: Label to display monitoring status.
-        * db_status_label: Label to display SQLite database status.
         * settings_window_instance: Instance of the settings window to avoid multiple instances.
         * log_file_path: Path to the Excel log file.
         * txt_folder_path: Folder path for TXT files.
@@ -249,9 +242,6 @@ class DataLoggerGUI:
         * folder_skips: Skip flags for folders.
         * monitors: Holds the actual folder watchers.
         * button_colors: Dictionary mapping button text to their colors.
-        * sqlite_enabled: Whether SQLite logging is enabled.
-        * sqlite_db_path: Path to the SQLite database file.
-        * sqlite_table: Default table name for SQLite logging.
         * main_frame: The main frame containing all widgets.
         '''
 
@@ -263,6 +253,9 @@ class DataLoggerGUI:
         Arguments:
         * master: The root Tkinter window or parent widget.
         '''
+        self.calculate_logoff_values = tk.BooleanVar(value=True) # Defaults to enabled
+        self.last_log_on_kp = None
+        self.log_on_time = None
 
         print("\n--- Starting Online Logger ---\n")
 
@@ -323,9 +316,13 @@ class DataLoggerGUI:
         # self.start_monitoring() 
         self.update_monitor_indicator_text()  # Initial monitor start & status update
 
+        #schedule sutomatic sync routing
+        
+
         # Open the settings window by default when the app starts
         self.startup_settings()
 
+        
     def init_styles(self):
         ''' 
         Initializes the styles for the application using ttk.Style.
@@ -411,7 +408,7 @@ class DataLoggerGUI:
         self.txt_field_columns_config = [
             {"field": "Date", "column_name": "Date", "skip": False},
             {"field": "Time", "column_name": "Time", "skip": False},
-            {"field": "Local Time", "column_name": "Local Time", "skip": False, "db_column_name": "local_time"},
+            {"field": "Local Time", "column_name": "Local Time", "skip": False}, # Corrected line
             {"field": "KP", "column_name": "KP", "skip": False},
             {"field": "DCC", "column_name": "DCC", "skip": False},
             {"field": "Line name", "column_name": "Line name", "skip": False},
@@ -419,9 +416,8 @@ class DataLoggerGUI:
             {"field": "Longitude", "column_name": "Longitude", "skip": False},
             {"field": "Easting", "column_name": "Easting", "skip": False},
             {"field": "Northing", "column_name": "Northing", "skip": False},
-            {"field": "Event", "column_name": "Event", "skip": False}, # Default "Event" field is still here
+            {"field": "Event", "column_name": "Event", "skip": False},
             {"field": "Code", "column_name": "Code", "skip": False}
-
         ]
         # These two will be derived from txt_field_columns_config for backwards compatibility/easier lookup
         self.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.txt_field_columns_config}
@@ -430,7 +426,6 @@ class DataLoggerGUI:
 
         self.folder_paths = {}
         self.folder_columns = {}
-        self.folder_db_columns = {}
         self.file_extensions = {}
         self.folder_skips = {}
         self.folder_log_x_instead = {}
@@ -467,9 +462,6 @@ class DataLoggerGUI:
         self.custom_button_tab_frames = {}
 
 
-        self.sqlite_enabled = False
-        self.sqlite_db_path = None
-        self.sqlite_table = DEFAULT_TABLE_NAME
         self.time_offset_hours = tk.DoubleVar(value=0.0)
         self.active_logging_threshold_seconds = tk.IntVar(value=15)
 
@@ -485,9 +477,9 @@ class DataLoggerGUI:
 
         self.status_var = tk.StringVar()
         self.monitor_status_label = None
-        self.db_status_label = None
         self.settings_window_instance = None # Track settings window
         self.custom_inline_editor_window = None # To track the open inline editor
+
 
     def init_settings(self):
         ''' Check if the custom settings file exists and loads it. If not, it load the default settings file.'''
@@ -651,13 +643,9 @@ class DataLoggerGUI:
 
         btn_settings = ttk.Button(config_lf, text="Settings", style="Small.TButton", command=self.open_settings)
         # CHANGE 3: Place the settings button on the bottom row, first column.
-        btn_settings.grid(row=1, column=0, sticky="nsew", padx=(4, 2), pady=(2, 4))
+        btn_settings.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=4, pady=(2, 4))
         ToolTip(btn_settings, "Open the configuration window.")
 
-        btn_sync = ttk.Button(config_lf, text="Sync DB", style="Small.TButton", command=self.sync_excel_to_sqlite_triggered)
-        # CHANGE 4: Place the sync button on the bottom row, second column.
-        btn_sync.grid(row=1, column=1, sticky="nsew", padx=(2, 4), pady=(2, 4))
-        ToolTip(btn_sync, "Update SQLite DB from the Excel log.")
 
     def create_status_indicators(self):
         '''
@@ -674,11 +662,6 @@ class DataLoggerGUI:
         self.monitor_status_label = ttk.Label(indicator_lf, text="...", foreground="orange", font=("Arial", 8))
         self.monitor_status_label.grid(row=0, column=1, sticky="w", padx=4, pady=2)
 
-        # SQLite Status
-        ttk.Label(indicator_lf, text="SQLite:", font=("Arial", 8, "bold")).grid(row=1, column=0, sticky="w", padx=4, pady=2)
-        self.db_status_label = ttk.Label(indicator_lf, text="...", foreground="orange", font=("Arial", 8))
-        self.db_status_label.grid(row=1, column=1, sticky="w", padx=4, pady=2)
-        
         # Always on Top Checkbox
         always_on_top_check = ttk.Checkbutton(
             indicator_lf,
@@ -688,8 +671,7 @@ class DataLoggerGUI:
         )
         always_on_top_check.grid(row=2, column=0, columnspan=2, sticky='w', padx=4, pady=(5, 2))
         ToolTip(always_on_top_check, "If checked, this window will always stay on top.")
-
-        self.update_db_indicator()
+      
 
     def create_status_bar(self):
         '''
@@ -767,322 +749,7 @@ class DataLoggerGUI:
         # If the loop finishes, the header was not found
         raise ValueError(f"Crucial '{required_column}' column not found in the first {max_rows_to_scan} rows.")
     
-    def _values_are_different(self, val1, val2):
-        """
-        Robustly compares two values, handling None, pandas NaT/NaN, and numeric types.
-        """
-        # If both are considered null, they are not different
-        if (pd.isna(val1) or val1 is None) and (pd.isna(val2) or val2 is None):
-            return False
-        # If one is null and the other is not, they are different
-        if (pd.isna(val1) or val1 is None) or (pd.isna(val2) or val2 is None):
-            return True
-        
-        # Try a numeric comparison for floats/ints
-        try:
-            # Compare with a small tolerance for floating point issues
-            if abs(float(val1) - float(val2)) < 0.00001:
-                return False
-        except (ValueError, TypeError):
-            # If they can't be converted to float, proceed to string comparison
-            pass
-
-        # Fallback to string comparison for all other types (dates, text, etc.)
-        return str(val1) != str(val2)
-
     
-    def update_or_insert_record(self, record_to_process, cursor, db_table, excel_to_db_map, db_cols_set, orphaned_rows_df):
-        """
-        Intelligently updates an existing orphaned record or inserts a new one.
-        """
-        time_fix_val = record_to_process.get('time_fix')
-        excel_event_col = self.txt_field_columns.get("Event")
-        event_val = record_to_process.get(excel_event_col, "") if excel_event_col else ""
-        db_event_col = excel_to_db_map.get(excel_event_col) if excel_event_col else None
-
-        match = None
-        if time_fix_val and not orphaned_rows_df.empty:
-            if db_event_col and db_event_col in orphaned_rows_df.columns:
-                match_mask = (orphaned_rows_df['time_fix'] == time_fix_val) & \
-                            (orphaned_rows_df[db_event_col].fillna('') == (event_val or ''))
-            else:
-                match_mask = (orphaned_rows_df['time_fix'] == time_fix_val)
-
-            potential_matches = orphaned_rows_df[match_mask]
-            if len(potential_matches) == 1:
-                match = potential_matches.iloc[0]
-
-        cols_to_use = [excel_to_db_map[k] for k in record_to_process.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
-        vals_to_use = [record_to_process[k] for k in record_to_process.keys() if k in excel_to_db_map and excel_to_db_map[k] in db_cols_set]
-
-        if db_event_col in cols_to_use:
-            try:
-                event_col_index = cols_to_use.index(db_event_col)
-                if vals_to_use[event_col_index] is None:
-                    vals_to_use[event_col_index] = ''
-            except (ValueError, IndexError):
-                pass
-
-        placeholders = ', '.join(['?'] * len(cols_to_use))
-        sql_insert = f"INSERT INTO \"{db_table}\" ({', '.join(f'\"{c}\"' for c in cols_to_use)}) VALUES ({placeholders})"
-        row_num_db_col_name = excel_to_db_map.get("original_excel_row")
-
-        if match is not None:
-            old_row_to_delete = match[row_num_db_col_name]
-            sql_delete = f"DELETE FROM \"{db_table}\" WHERE \"{row_num_db_col_name}\" = ?"
-            cursor.execute(sql_delete, (old_row_to_delete,))
-            cursor.execute(sql_insert, vals_to_use)
-            return "REPLACE"
-        else:
-            cursor.execute(sql_insert, vals_to_use)
-            return "INSERT"
-
-    def sync_excel_to_sqlite_triggered(self):
-        should_proceed = messagebox.askokcancel(
-            "Save Before Syncing",
-            "Please ensure the Excel log file has been saved before proceeding. You can save it now if you forgot it.\n\n"
-            "Click OK to continue with the sync.\n"
-            "Click Cancel to stop the operation.",
-            icon='warning',
-            parent=self.master
-        )
-
-        if not should_proceed:
-            self.update_status("Sync cancelled by user.")
-            return
-
-        if not self.sqlite_enabled:
-            messagebox.showwarning("Sync Skipped", "SQLite logging is not enabled in Settings.", parent=self.master)
-            return
-        if not self.log_file_path or not os.path.exists(self.log_file_path):
-            messagebox.showerror("Sync Error", "Excel log file path is not set or the file does not exist.", parent=self.master)
-            return
-        if not self.sqlite_db_path:
-            messagebox.showerror("Sync Error", "SQLite database path is not set.", parent=self.master)
-            return
-
-        try:
-            excel_file = self.log_file_path
-            excel_engine = 'pyxlsb' if excel_file.lower().endswith('.xlsb') else 'openpyxl'
-            header_row = self._find_header_row(excel_file, excel_engine)
-            df_excel = pd.read_excel(excel_file, engine=excel_engine, header=header_row)
-            df_excel['original_excel_row'] = df_excel.index + header_row + 2
-        except Exception as e_check:
-            traceback.print_exc()
-            messagebox.showerror("Pre-check Error", f"An unexpected error occurred while checking the file:\n{e_check}", parent=self.master)
-            return
-
-        sync_button = next((btn for lf in self.config_frame.winfo_children() if isinstance(lf, ttk.LabelFrame) for btn in lf.winfo_children() if isinstance(btn, ttk.Button) and btn.cget('text') == "Sync DB"), None)
-
-        if sync_button:
-            original_text = sync_button['text']
-            sync_button.config(state=tk.DISABLED, text="Syncing...")
-
-        self.update_status("Starting sync from Excel to SQLite...")
-
-        def _sync_worker():
-            success, message = self.perform_excel_to_sqlite_sync()
-            self.master.after(0, self.update_status, message)
-            if sync_button:
-                self.master.after(0, lambda: sync_button.config(state=tk.NORMAL, text=original_text))
-
-        threading.Thread(target=_sync_worker, daemon=True).start()
-
-    def perform_excel_to_sqlite_sync(self, static_data=None):
-        timings['start'] = time.perf_counter() #DEBUG
-        print("\n--- Starting Excel to SQLite Sync ---")
-        excel_file = self.log_file_path
-        db_file = self.sqlite_db_path
-        db_table = self.sqlite_table
-        row_num_col_excel = "original_excel_row"
-
-        if not all([excel_file, db_file, db_table]):
-            return False, "Sync Error: Configuration paths or table missing."
-
-        try:
-            if excel_file.lower().endswith('.xlsb'): excel_engine = 'pyxlsb'
-            elif excel_file.lower().endswith('.xlsx'): excel_engine = 'openpyxl'
-            else: return False, "Sync Error: Unsupported file format. Please use .xlsx or .xlsb."
-
-            header_row = self._find_header_row(excel_file, excel_engine)
-            df_excel = pd.read_excel(excel_file, engine=excel_engine, header=header_row)
-            df_excel[row_num_col_excel] = df_excel.index + header_row + 2
-            df_excel = df_excel.astype(object).where(pd.notnull(df_excel), None)
-
-            # Note: An empty Excel file implies all DB records should be deleted.
-            # The logic below handles this case correctly.
-
-            date_col, time_col = self.txt_field_columns.get("Date"), self.txt_field_columns.get("Time")
-            
-            # This check is only relevant if the excel file is NOT empty
-            if not df_excel.empty and (not date_col or not time_col or date_col not in df_excel.columns or time_col not in df_excel.columns):
-                error_msg = (
-                    "Sync Error: Essential 'Date' or 'Time' columns are missing from the Excel file.\n\n"
-                    f"Required Date Column: '{date_col}'\n"
-                    f"Required Time Column: '{time_col}'\n\n"
-                    "Please check your Excel file headers and 'Data Columns' settings."
-                )
-                self.master.after(0, lambda: messagebox.showerror("Sync Error", error_msg, parent=self.master))
-                return False, error_msg
-
-            if not df_excel.empty:
-                try:
-                    date_serial = pd.to_numeric(df_excel[date_col], errors='coerce')
-                    time_serial = pd.to_numeric(df_excel[time_col], errors='coerce')
-                    excel_serial_datetime = date_serial.fillna(0) + time_serial.fillna(0)
-                    df_excel['time_fix'] = pd.to_datetime(excel_serial_datetime, unit='D', origin='1899-12-30').dt.strftime('%Y-%m-%d %H:%M:%S')
-                except Exception as e:
-                    return False, f"Sync Error: Could not process Excel date/time. Error: {e}"
-        except Exception as e:
-            traceback.print_exc()
-            return False, f"Sync Error: Failed during Excel read/prep stage. ({e})"
-        
-        timings['after_read_excel'] = time.perf_counter() #DEBUG
-
-        conn_sqlite = None
-        try:
-            conn_sqlite = sqlite3.connect(db_file, timeout=10)
-            db_cols_set = set(pd.read_sql_query(f"PRAGMA table_info('{db_table}')", conn_sqlite)['name'])
-            
-            excel_to_db_map = {
-                item.get("column_name"): item.get("db_column_name")
-                for item in self.txt_field_columns_config
-                if item.get("column_name") and item.get("db_column_name")
-            }
-
-            for folder_name, excel_col in self.folder_columns.items():
-                db_col = self.folder_db_columns.get(folder_name)
-                if excel_col and db_col:
-                    excel_to_db_map[excel_col] = db_col
-            
-            excel_to_db_map[row_num_col_excel] = 'original_excel_row'
-            if 'time_fix' in db_cols_set:
-                excel_to_db_map['time_fix'] = 'time_fix'
-            row_num_db_col_name = excel_to_db_map.get(row_num_col_excel)
-            if not row_num_db_col_name or row_num_db_col_name not in db_cols_set:
-                return False, f"Sync Error: Row number column '{row_num_db_col_name}' not configured or not in DB."
-            df_sqlite = pd.read_sql_query(f'SELECT * FROM "{db_table}"', conn_sqlite)
-            df_sqlite = df_sqlite.astype(object).where(pd.notnull(df_sqlite), None)
-        except Exception as e:
-            traceback.print_exc()
-            return False, f"Sync Error: Failed during SQLite read stage. ({e})"
-        finally:
-            if conn_sqlite: conn_sqlite.close()
-
-        timings['after_load_sqlite'] = time.perf_counter() #DEBUG
-
-        if not df_excel.empty:
-            df_excel.set_index(row_num_col_excel, inplace=True, drop=False)
-            
-        if not df_sqlite.empty:
-            if df_sqlite[row_num_db_col_name].duplicated().any():
-                print(f"Warning: Duplicate entries found in SQLite column '{row_num_db_col_name}'. Using first occurrence of each.")
-                df_sqlite.drop_duplicates(subset=[row_num_db_col_name], keep='first', inplace=True)
-            df_sqlite.set_index(row_num_db_col_name, inplace=True, drop=False)
-
-        excel_rows = set(df_excel.index) if not df_excel.empty else set()
-        db_rows = set(df_sqlite.index) if not df_sqlite.empty else set()
-        
-        rows_to_update_ids = excel_rows.intersection(db_rows)
-        rows_to_insert_ids = excel_rows - db_rows
-        rows_to_delete_ids = db_rows - excel_rows
-        
-        records_to_update = []
-        for row_num in rows_to_update_ids:
-            excel_row = df_excel.loc[row_num]
-            sqlite_row = df_sqlite.loc[row_num]
-            is_different = False
-            for excel_col, excel_val in excel_row.items():
-                db_col = excel_to_db_map.get(excel_col)
-                if db_col in sqlite_row.index and self._values_are_different(excel_val, sqlite_row[db_col]):
-                    is_different = True
-                    break
-            if is_different:
-                records_to_update.append(excel_row.to_dict())
-
-        records_to_insert = [df_excel.loc[row_num].to_dict() for row_num in rows_to_insert_ids]
-        
-        # --- ## CORRECTED LOGIC ## ---
-        # This condition now correctly checks if there is NOTHING to do before exiting.
-        if not records_to_insert and not records_to_update and not rows_to_delete_ids:
-            print("Sync complete. No changes detected.")
-            return True, "Sync complete. No changes detected."
-
-        timings['after_compare'] = time.perf_counter() #DEBUG
-        conn_sqlite = None
-        try:
-            conn_sqlite = sqlite3.connect(db_file, timeout=10)
-            cursor = conn_sqlite.cursor()
-            inserted_count, replaced_count, updated_count, deleted_count = 0, 0, 0, 0
-
-            if rows_to_delete_ids:
-                ids_to_delete = list(rows_to_delete_ids)
-                placeholders = ', '.join(['?'] * len(ids_to_delete))
-                # Build the DELETE query using the unique row number column
-                sql_delete = f'DELETE FROM "{db_table}" WHERE "{row_num_db_col_name}" IN ({placeholders})'
-                cursor.execute(sql_delete, ids_to_delete)
-                deleted_count = cursor.rowcount
-                print(f"Deleted {deleted_count} orphaned rows from the database.")
-            
-            # We pass an empty dataframe for orphaned_records_df now, as we've already handled deletions
-            orphaned_records_df_for_replace = pd.DataFrame()
-
-            for record in records_to_insert:
-                if static_data:
-                    record.update(static_data)
-                action = self.update_or_insert_record(record, cursor, db_table, excel_to_db_map, db_cols_set, orphaned_records_df_for_replace)
-                if action == "REPLACE":
-                    replaced_count += 1
-                elif action == "INSERT":
-                    inserted_count += 1
-
-            for record in records_to_update:
-                row_val = record[row_num_col_excel]
-                updates = {excel_to_db_map[k]: v for k, v in record.items() if k in excel_to_db_map and k != row_num_col_excel and excel_to_db_map[k] in db_cols_set}
-
-                if static_data:
-                    for excel_formula_key, value in static_data.items():
-                        db_col_name = excel_to_db_map.get(excel_formula_key)
-                        if db_col_name:
-                            updates[db_col_name] = value
-                if not updates:
-                    continue
-                if 'event' in updates and updates['event'] is None:
-                    updates['event'] = ''
-                set_clauses = [f'"{col}" = ?' for col in updates.keys()]
-                values = list(updates.values()) + [row_val]
-                sql = f"UPDATE \"{db_table}\" SET {', '.join(set_clauses)} WHERE \"{row_num_db_col_name}\" = ?"
-                cursor.execute(sql, values)
-                updated_count += 1
-
-            conn_sqlite.commit()
-            
-            status_message = (f"Sync successful. Inserted: {inserted_count}. "
-                              f"Updated: {updated_count}. Deleted: {deleted_count}.")
-            print(status_message)
-            return True, status_message
-        except Exception as e:
-            if conn_sqlite: conn_sqlite.rollback()
-            traceback.print_exc()
-            return False, f"Sync Error: Failed to write to SQLite. ({e})"
-        finally:
-            if conn_sqlite: conn_sqlite.close()
-            timings['after_update_sqlite'] = time.perf_counter() #DEBUG
-
-            print("\n--- Timing Summary (seconds) ---")
-            phases = [
-                ('Read Excel', 'start', 'after_read_excel'),
-                ('Load SQLite', 'after_read_excel', 'after_load_sqlite'),
-                ('Compare Rows', 'after_load_sqlite', 'after_compare'),
-                ('Write to DB', 'after_compare', 'after_update_sqlite'),
-                ('Total Time', 'start', 'after_update_sqlite'),
-            ]
-            for label, t1, t2 in phases:
-                if t1 in timings and t2 in timings:
-                    print(f"{label:20}: {timings[t2] - timings[t1]:.4f} s")
-    
-
-
     # --- Status Bar and Indicators ---
     def update_status(self, message):
         '''
@@ -1109,35 +776,7 @@ class DataLoggerGUI:
             except tk.TclError:
                 pass # Window might be destroyed between check and after call
 
-    def update_db_indicator(self):
-        '''
-        Updates the SQLite database status indicator label based on the current configuration.
-        This method checks if SQLite logging is enabled, verifies the database file path, and updates the label text and color accordingly.
-        It also handles cases where the database file is missing or the path is not set.
-        '''
-        if not hasattr(self, 'db_status_label') or not self.db_status_label:
-            return
-        if not self.master.winfo_exists():
-            return
-
-        # Corrected indentation for the following block
-        status_text = "Disabled"
-        status_color = "gray"
-        if self.sqlite_enabled:
-            if self.sqlite_db_path and os.path.exists(self.sqlite_db_path):
-                status_text = "Enabled"
-                status_color = "green"
-            elif self.sqlite_db_path:
-                status_text = "File Missing"
-                status_color = "#E65C00"
-            else:
-                status_text = "Path Missing"
-                status_color = "#E65C00"
-        try:
-            self.db_status_label.config(text=status_text, foreground=status_color)
-        except tk.TclError:
-            pass # Widget might be destroyed
-
+    
     def update_monitor_indicator_text(self):
         """
         Updates the monitoring status label text and color based on the current
@@ -1270,7 +909,54 @@ class DataLoggerGUI:
                 if source_folder_path and os.path.isdir(source_folder_path):
                     txt_data = self._get_txt_data_from_source(source_folder_path)
                     if txt_data: row_data.update(txt_data)
+
+                # --- START CORRECTED LOGIC for Log On/Off Calculation ---
+                # Set the initial event text to the default from button config
+                event_text_to_log = event_text_for_excel
+
+                if event_type == "Log on":
+                    kp_col_name = self.txt_field_columns.get("KP")
+                    if kp_col_name and kp_col_name in row_data:
+                        try:
+                            self.last_log_on_kp = float(row_data[kp_col_name])
+                            self.log_on_time = datetime.datetime.now()
+                            self.update_status(f"KP for Log on event stored: {self.last_log_on_kp}")
+                        except (ValueError, TypeError):
+                            self.last_log_on_kp = None
+                            self.log_on_time = None
+                            self.update_status("Could not parse KP for Log on. Calculations disabled.")
+
+                elif event_type == "Log off" and self.calculate_logoff_values.get():
+                    kp_col_name = self.txt_field_columns.get("KP")
+                    if self.last_log_on_kp is not None and self.log_on_time is not None and kp_col_name in row_data:
+                        try:
+                            current_kp = float(row_data[kp_col_name])
+                            current_time = datetime.datetime.now()
+                            time_diff_seconds = (current_time - self.log_on_time).total_seconds()
+                            
+                            distance_km = abs(current_kp - self.last_log_on_kp)
+                            
+                            speed_knots = 0
+                            if time_diff_seconds > 0:
+                                # Corrected and simplified calculation
+                                distance_nm = distance_km / 1.852
+                                time_hours = time_diff_seconds / 3600
+                                speed_knots = distance_nm / time_hours
+
+                                # Add a check for a tiny, negligible speed
+                                if abs(speed_knots) < 0.01:
+                                    speed_knots = 0.0 # To avoid logging tiny floating point values
+                                    
+                            event_text_to_log = f"Log off - Distance travelled: {distance_km:.2f}km - Speed: {speed_knots:.2f} Knots"
+                            
+                            self.last_log_on_kp = None
+                            self.log_on_time = None
+                            self.update_status("Log off complete. KP and time reset.")
+                        except (ValueError, TypeError) as e:
+                            event_text_to_log = f"Log off - Error in calculations: {e}"
+                            self.update_status("Error calculating distance/speed.")
                 
+
                 # 2. Get static data from Excel cells
                 static_data_from_cells = self._get_static_excel_data()
                 if static_data_from_cells: row_data.update(static_data_from_cells)
@@ -1280,11 +966,11 @@ class DataLoggerGUI:
                     latest_files_data = self.get_latest_files_data_fast()
                     if latest_files_data: row_data.update(latest_files_data)
                 
-                # Update Event and Code columns
+                # Update the Event column with the FINAL, determined string
                 event_column_name = self.txt_field_columns.get("Event")
-                if event_column_name and event_text_for_excel is not None:
-                    row_data[event_column_name] = event_text_for_excel
-
+                if event_column_name and event_text_to_log is not None:
+                    row_data[event_column_name] = event_text_to_log # <-- Corrected line
+                
                 event_code_to_log = ""
                 # Find event code in main or custom configs
                 if event_type in self.main_button_configs:
@@ -1304,8 +990,14 @@ class DataLoggerGUI:
                 row_color = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
                 font_color = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
 
-                # Perform the blocking save operation
-                success_excel, success_sqlite, message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
+                # Attempt to save to Excel
+                excel_success, success_sqlite, excel_message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
+                
+                # **FIX:** Define the 'message' variable here based on the result
+                if excel_success:
+                    message = f"'{event_type}' logged successfully. {excel_message}"
+                else:
+                    message = f"Error logging '{event_type}'. {excel_message}"
 
                 # Use master.after to schedule the GUI update on the main thread
                 if triggering_button:
@@ -1314,7 +1006,7 @@ class DataLoggerGUI:
                     ))
                 else:
                     self.master.after(0, self.update_status, message)
-            
+                
             except Exception as thread_ex:
                 # Log the full traceback for debugging
                 traceback.print_exc()
@@ -1331,7 +1023,7 @@ class DataLoggerGUI:
                     ))
                 else:
                     self.master.after(0, self.update_status, status_msg)
-
+            
         # Start the background thread
         log_thread = threading.Thread(target=_log_worker, daemon=True)
         log_thread.start()
@@ -1565,20 +1257,14 @@ class DataLoggerGUI:
 
     def save_to_excel_and_sqlite(self, row_data, row_color=None, font_color=None):
         """
-        Efficiently saves a single row of data to the open Excel file via xlwings
-        and directly inserts the corresponding record into the SQLite database.
-        This avoids slow, full-file reads.
+        Saves a single row of data to the open Excel file via xlwings.
         """
         if not self.log_file_path or not os.path.exists(self.log_file_path):
             return False, False, "Excel: Path Invalid."
 
         excel_message = "Excel: Fail."
-        sqlite_message = "SQLite: Skipped."
         success_excel = False
-        success_sqlite = False
-        next_row = -1
 
-        # --- 1. Write to Excel using xlwings ---
         try:
             wb = xw.Book(self.log_file_path)
             sheet = wb.sheets[0]
@@ -1625,104 +1311,10 @@ class DataLoggerGUI:
         except Exception as e:
             traceback.print_exc()
             excel_message = f"Excel: Fail ({type(e).__name__})."
-            return False, False, f"{excel_message} {sqlite_message}"
+            return False, False, f"{excel_message}"
 
-        # --- 2. Write to SQLite ---
-        if self.sqlite_enabled and next_row != -1:
-            sqlite_message = "SQLite: Fail."
-            conn = None
-            try:
-                db_data = {}
-                # First, map the data from the TXT/Data columns config
-                for item in self.txt_field_columns_config:
-                    excel_col = item.get("column_name")
-                    db_col = item.get("db_column_name")
-                    if excel_col and db_col and excel_col in row_data:
-                        db_data[db_col] = row_data[excel_col]
-                
-                # --- START MODIFICATION ---
-                # Next, map data from Monitored Folders, with special handling for 'X'
-                for folder, excel_col in self.folder_columns.items():
-                    db_col = self.folder_db_columns.get(folder)
-                    if excel_col and db_col and excel_col in row_data:
-                        excel_value = row_data[excel_col]
-                        
-                        # If the value for Excel is 'X', get the real filename for the DB.
-                        if excel_value == 'X':
-                            real_filepath = folder_cache.get(folder)
-                            if real_filepath and os.path.exists(real_filepath):
-                                filename_no_ext, _ = os.path.splitext(os.path.basename(real_filepath))
-                                db_data[db_col] = filename_no_ext
-                            else:
-                                # Fallback if cache is empty but we got an 'X'
-                                db_data[db_col] = "X"
-                        else:
-                            # Otherwise, use the value as is (filename, "", or "N/A")
-                            db_data[db_col] = excel_value
-                # --- END MODIFICATION ---
+        return success_excel, True, excel_message # NOTE: returns true for SQL part to avoid errors, but it won't be used
 
-                db_data['original_excel_row'] = next_row
-
-                # Manually construct the 'time_fix' field required by the database.
-                date_excel_col = self.txt_field_columns.get("Date")
-                time_excel_col = self.txt_field_columns.get("Time")
-                if date_excel_col in row_data and time_excel_col in row_data:
-                    date_val = row_data.get(date_excel_col)
-                    time_val = row_data.get(time_excel_col)
-                    if date_val and time_val:
-                        db_data['time_fix'] = f"{date_val} {time_val}"
-
-                if db_data:
-                    if 'time_fix' not in db_data or not db_data['time_fix']:
-                        raise sqlite3.IntegrityError("NOT NULL constraint failed: fieldlog.time_fix (generated value was empty)")
-
-                    conn = sqlite3.connect(self.sqlite_db_path, timeout=10)
-                    cursor = conn.cursor()
-                    
-                    cols = ', '.join([f'"{c}"' for c in db_data.keys()])
-                    placeholders = ', '.join(['?'] * len(db_data))
-                    sql = f'INSERT INTO "{self.sqlite_table}" ({cols}) VALUES ({placeholders})'
-                    
-                    cursor.execute(sql, list(db_data.values()))
-                    conn.commit()
-                    sqlite_message = "SQLite: OK."
-                    success_sqlite = True
-                else:
-                    sqlite_message = "SQLite: No data mapped."
-                    success_sqlite = False
-
-            except Exception as e:
-                if conn: conn.rollback()
-                traceback.print_exc()
-                sqlite_message = f"SQLite: Fail ({type(e).__name__})."
-                success_sqlite = False
-            finally:
-                if conn: conn.close()
-
-        return success_excel, success_sqlite, f"{excel_message} {sqlite_message}"
-
-    def show_sqlite_error_message(self, error_message, error_type):
-        ''' Displays an error message box for SQLite errors with specific handling based on the error type.
-            Arguments:
-            * error_message: The error message string from the SQLite operation.
-            * error_type: A string indicating the type of error (e.g., "NoSuchTable", "NoSuchColumn", "DatabaseLocked", etc.).
-        '''
-
-        parent_window = self.settings_window_instance if (hasattr(self, 'settings_window_instance') and self.settings_window_instance and self.settings_window_instance.winfo_exists()) else self.master
-
-        if error_type == "NoSuchTable":
-            messagebox.showerror("SQLite Error", f"Table '{self.sqlite_table}' not found.\nPlease check table name or create table.\nDB: {self.sqlite_db_path}", parent=parent_window)
-        elif error_type == "NoSuchColumn":
-            try:
-                missing_col = error_message.split("column named")[-1].strip().split(":")[0].strip()
-                missing_col = missing_col.strip("'\"[]")
-            except Exception:
-                missing_col = "[unknown]"
-            messagebox.showerror("SQLite Error", f"Column '{missing_col}' not found in table '{self.sqlite_table}'.\nCheck Settings (TXT Columns / Folder Columns) vs. DB table structure.\n\n(Original error: {error_message})", parent=parent_window)
-        elif error_type == "DatabaseLocked":
-            messagebox.showerror("SQLite Error", f"Database file is locked.\nAnother program might be using it.\nDB: {self.sqlite_db_path}\n\n(Original error: {error_message})", parent=parent_window)
-        else:
-            messagebox.showerror("SQLite Operational Error", f"Error interacting with database:\n{error_message}", parent=parent_window)
 
     # --- Settings Saving and Loading ---
     def save_settings(self):
@@ -1742,7 +1334,6 @@ class DataLoggerGUI:
             "txt_field_columns_config": self.txt_field_columns_config,
             "folder_paths": self.folder_paths,
             "folder_columns": self.folder_columns,
-            "folder_db_columns": self.folder_db_columns,
             "file_extensions": self.file_extensions, 
             "folder_skips": self.folder_skips,
             "folder_log_x_instead": self.folder_log_x_instead,
@@ -1750,15 +1341,13 @@ class DataLoggerGUI:
             "custom_button_configs": self.custom_button_configs,
             "custom_button_tab_groups": self.custom_button_tab_groups,
             "button_colors": colors_to_save, 
-            "sqlite_enabled": self.sqlite_enabled,
-            "sqlite_db_path": self.sqlite_db_path, 
-            "sqlite_table": self.sqlite_table,
             "always_on_top": self.always_on_top_var.get(),
             "active_logging_threshold_seconds": self.active_logging_threshold_seconds.get(),
             "new_day_event_enabled": self.new_day_event_enabled_var.get(),
             "hourly_event_enabled": self.hourly_event_enabled_var.get(),
             "main_button_configs": self.main_button_configs, # This is the crucial line to save the new setting
-            "txt_source_aliases": self.txt_source_aliases
+            "txt_source_aliases": self.txt_source_aliases,
+            "calculate_logoff_values": self.calculate_logoff_values.get()
         }
         try:
             with open(self.settings_file, 'w') as f: 
@@ -1878,8 +1467,6 @@ class DataLoggerGUI:
                 self.folder_paths.update(settings.get("folder_paths", {}))
                 self.folder_columns.clear()
                 self.folder_columns.update(settings.get("folder_columns", {}))
-                self.folder_db_columns.clear()
-                self.folder_db_columns.update(settings.get("folder_db_columns", {}))
                 self.file_extensions.clear()
                 self.file_extensions.update(settings.get("file_extensions", {}))
                 self.folder_skips.clear()
@@ -1941,14 +1528,12 @@ class DataLoggerGUI:
                         self.button_colors[key] = (color_value, None) # Assume it's a background color, no font color
                     else:
                         self.button_colors[key] = (None, None) # Fallback for unknown formats
-                self.sqlite_enabled = settings.get("sqlite_enabled", False)
-                self.sqlite_db_path = settings.get("sqlite_db_path")
                 always_on_top_setting = settings.get("always_on_top", False)
                 self.always_on_top_var.set(always_on_top_setting)
                 self.master.wm_attributes("-topmost", always_on_top_setting)
                  # Set the new threshold setting, defaulting to 15 if not found
                 self.active_logging_threshold_seconds.set(settings.get("active_logging_threshold_seconds", 15)) # <-- ADD THIS
-                self.sqlite_table = settings.get("sqlite_table", "fieldlog")
+                self.calculate_logoff_values.set(settings.get("calculate_logoff_values", True)) # Defaults to True if not found
                 self.always_on_top_var.set(settings.get("always_on_top", True))
                 self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
                 self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
@@ -1974,7 +1559,7 @@ class DataLoggerGUI:
             print(f"General Error loading settings: {e}") #DEBUG
         finally:
             if hasattr(self, 'button_frame') and self.button_frame: self.update_custom_buttons()
-            if hasattr(self, 'db_status_label') and self.db_status_label: self.update_db_indicator()
+            
 
     def load_event_codes(self):
         """Loads the event codes from its dedicated JSON file."""
@@ -2195,7 +1780,7 @@ class DataLoggerGUI:
             self.update_status("Monitoring not started. Check folder paths are valid.")
             
         self.update_monitor_indicator_text()
-        self.update_db_indicator()
+        
 
     # --- Programmed Events Scheduling ---
     def schedule_new_day(self):
@@ -2296,6 +1881,7 @@ class DataLoggerGUI:
             print("'Hourly KP Log' event is disabled, skipping log.")
         # Reschedule for the following hour
         self.schedule_hourly_log()
+
 
     # --- Custom Button Management ---
     def _show_custom_button_context_menu(self, event, button_index):
@@ -2983,16 +2569,22 @@ class SettingsWindow:
         self.selected_txt_row_index = -1  # -1 means no row is selected
         self.txt_move_up_btn = None
         self.txt_move_down_btn = None
+        
+        # Initialize color picker variables here for the new layout
+        self.new_day_bg_color_var = tk.StringVar()
+        self.new_day_font_color_var = tk.StringVar()
+        self.hourly_bg_color_var = tk.StringVar()
+        self.hourly_font_color_var = tk.StringVar()
 
         # --- Create tabs (ensure each is called only ONCE) ---
         self.create_file_paths_tab()
         self.create_txt_column_mapping_tab()
         self.create_button_configuration_tab()
-        self.create_event_codes_tab()  # For the feature added previously
+        self.create_event_codes_tab()
         self.create_monitored_folders_tab()
-        self.create_sqlite_tab()
         self.create_auto_events_tab()
         self.create_timezone_tab()
+        
 
         # Bottom Buttons
         button_frame = ttk.Frame(self.main_frame)
@@ -3431,7 +3023,6 @@ class SettingsWindow:
         ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w')
         ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=8, sticky='w')
         ttk.Label(header_frame, text="Excel Column / Cell", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
-        ttk.Label(header_frame, text="SQLITE DB Column", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
         ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
         ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=6, padx=6, sticky='w')
 
@@ -3596,13 +3187,6 @@ class SettingsWindow:
             column_entry.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky="ew")
             ToolTip(column_entry, "Enter the column header for the Excel Log, OR a static cell reference using the format: ='SheetName'!A1")
             widgets_in_row.append(column_entry)
-
-            # Target DB Column Name
-            db_column_entry = ttk.Entry(parent_frame)
-            db_column_entry.insert(0, config.get("db_column_name", ""))
-            db_column_entry.grid(row=grid_row_index, column=4, padx=5, pady=2, sticky="ew")
-            ToolTip(db_column_entry, "Enter the target column name for the SQLite Database.")
-            widgets_in_row.append(db_column_entry)
             
             # Skip Checkbox
             skip_var = tk.BooleanVar(value=config.get("skip", False))
@@ -3627,7 +3211,6 @@ class SettingsWindow:
             self.txt_field_row_widgets.append({
                 "field_entry_widget": current_field_entry_widget,
                 "column_entry": column_entry,
-                "db_column_entry": db_column_entry,
                 "skip_var": skip_var,
                 "preview_label": preview_label,
                 "all_widgets": widgets_in_row # Store list of all widgets in the row
@@ -3778,6 +3361,12 @@ class SettingsWindow:
     def create_monitored_folders_tab(self):
         tab = ttk.Frame(self.notebook)
         self.notebook.add(tab, text="Monitored Folders")
+
+        #Tip for Monitored folders
+        warning_frame = ttk.Frame(tab, padding=5)
+        warning_frame.pack(fill='x', pady=(0, 10))
+        ttk.Label(warning_frame, text="⚠ When changing directories, stop folder monitoring before making the change or the program will not start monitoring for any changes you make.",
+                  wraplength=900, justify=tk.LEFT, foreground='red').pack(fill='x')
         
         ttk.Label(tab, text="Configure additional folders to monitor for their latest file names. The latest file name will be logged in the specified Excel/DB column.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
 
@@ -3836,26 +3425,33 @@ class SettingsWindow:
         self.add_folder_header(self.scrollable_frame)
 
     def add_folder_header(self, parent):
-        # Configure the grid columns directly on the main scrollable frame
+        # Configure the grid columns on the parent frame
         parent.columnconfigure(0, weight=2, minsize=140)  # Folder Type
         parent.columnconfigure(1, weight=4, minsize=250)  # Monitor Path
         parent.columnconfigure(2, weight=0)               # ... button
         parent.columnconfigure(3, weight=2, minsize=150)  # Excel Column
-        parent.columnconfigure(4, weight=2, minsize=150)  # SQLite DB Column
         parent.columnconfigure(5, weight=1, minsize=80)   # File Ext.
-        parent.columnconfigure(6, weight=0, minsize=50)    #Skip?
-        parent.columnconfigure(7, weight=0, minsize=70)   
+        parent.columnconfigure(6, weight=0, minsize=50)   # Skip?
+        parent.columnconfigure(7, weight=0, minsize=70)   # Log 'X'?
 
-        # Header labels placed directly into the parent grid for perfect alignment
-        ttk.Label(parent, text="Folder Type", style="Header.TLabel", padding=5).grid(row=0, column=0, sticky='w')
-        ttk.Label(parent, text="Monitor Path", style="Header.TLabel", padding=5).grid(row=0, column=1, sticky='w')
+        # 1. Create a header frame to contain the labels
+        header_frame = ttk.Frame(parent, style="Header.TFrame")
+        header_frame.grid(row=0, column=0, columnspan=8, sticky="ew")
+
+        # 2. Add header labels to the new frame
+        ttk.Label(header_frame, text="Folder Type", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=0, sticky='w', padx=(15, 5))
+        ttk.Label(header_frame, text="Monitor Path", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=1, sticky='w', padx=5)
         # Empty label for browse button column to maintain spacing
-        ttk.Label(parent, text="", style="Header.TLabel").grid(row=0, column=2)
-        ttk.Label(parent, text="Excel Column", style="Header.TLabel", padding=5).grid(row=0, column=3, sticky='w')
-        ttk.Label(parent, text="SQLite DB Column", style="Header.TLabel", padding=5).grid(row=0, column=4, sticky='w')
-        ttk.Label(parent, text="File Ext.", style="Header.TLabel", padding=5).grid(row=0, column=5, sticky='w')
-        ttk.Label(parent, text="Skip?", style="Header.TLabel", padding=5).grid(row=0, column=6, sticky='w')
-        ttk.Label(parent, text="Log 'X'?", style="Header.TLabel", padding=5).grid(row=0, column=7, sticky='w')
+        ttk.Label(header_frame, text="", style="Header.TLabel").grid(row=0, column=2)
+        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=3, sticky='w', padx=5)
+        ttk.Label(header_frame, text="", style="Header.TLabel", padding=5).grid(row=0, column=4, sticky='w')
+        ttk.Label(header_frame, text="File Ext.", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=5, sticky='w', padx=5)
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=6, sticky='w', padx=5)
+        ttk.Label(header_frame, text="Log 'X'?", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=7, sticky='w', padx=5)
+
+        # Apply the same column configure to the header_frame itself so its internal labels space out correctly
+        for i in range(8):
+             header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0), minsize=parent.grid_columnconfigure(i).get('minsize', 0))
 
     def add_initial_folder_rows(self):
         default_folders = DEFAULT_MONITORED_FOLDERS
@@ -3902,7 +3498,7 @@ class SettingsWindow:
             elif folder_name == "TXT Source 3": folder_path_to_use = self.parent_gui.txt_folder_path_set3 or ""
 
             column_name_to_use = self.parent_gui.folder_columns.get(folder_name, folder_name)
-            db_column_name_to_use = self.parent_gui.folder_db_columns.get(folder_name, "")
+
             extension_to_use = self.parent_gui.file_extensions.get(folder_name, "")
 
             if folder_name in ["Main TXT File", "TXT Source 2", "TXT Source 3"]:
@@ -3911,11 +3507,7 @@ class SettingsWindow:
                 if not extension_to_use:
                     extension_to_use = "txt"
 
-            self.add_folder_row(folder_name=folder_name, folder_path=folder_path_to_use,
-                                 column_name=column_name_to_use,
-                                 db_column_name=db_column_name_to_use,
-                                 extension=extension_to_use,
-                                 skip=self.parent_gui.folder_skips.get(folder_name, False))
+            self.add_folder_row(folder_name=folder_name, folder_path=folder_path_to_use, column_name=column_name_to_use, extension=extension_to_use, skip=self.parent_gui.folder_skips.get(folder_name, False))
         self.master.after_idle(self.update_scroll_region)
 
     def _select_folder_row(self, folder_name):
@@ -3990,7 +3582,7 @@ class SettingsWindow:
             self.remove_folder_btn.config(state=tk.DISABLED)
             self.parent_gui.update_status(f"Removed '{folder_to_remove}' configuration.")
 
-    def add_folder_row(self, folder_name="", folder_path="", column_name="", db_column_name="", extension="", skip=False):
+    def add_folder_row(self, folder_name="", folder_path="", column_name="", extension="", skip=False):
         row_index = len(self.folder_row_widgets) + 1
         parent = self.scrollable_frame # The single grid container
 
@@ -4010,8 +3602,6 @@ class SettingsWindow:
         button = ttk.Button(parent, text="...", width=3, command=select_folder)
         column_entry = ttk.Entry(parent)
         column_entry.insert(0, column_name if column_name else folder_name)
-        db_column_entry = ttk.Entry(parent)
-        db_column_entry.insert(0, db_column_name) 
         extension_entry = ttk.Entry(parent, width=10)
         extension_entry.insert(0, extension)
         skip_var = tk.BooleanVar(value=skip)
@@ -4025,13 +3615,12 @@ class SettingsWindow:
         entry.grid(row=row_index, column=1, padx=5, pady=2, sticky="ew")
         button.grid(row=row_index, column=2, padx=(0,5), pady=2, sticky='w')
         column_entry.grid(row=row_index, column=3, padx=5, pady=2, sticky="ew")
-        db_column_entry.grid(row=row_index, column=4, padx=5, pady=2, sticky="ew")
         extension_entry.grid(row=row_index, column=5, padx=5, pady=2, sticky="ew")
         skip_checkbox.grid(row=row_index, column=6, padx=(15, 5), pady=2, sticky='w')
         log_x_checkbox.grid(row=row_index, column=7, padx=(15, 5), pady=2, sticky='w')
 
         # --- Selection and Tooltip Logic ---
-        widgets_in_row = [label, entry, button, column_entry, db_column_entry, extension_entry, skip_checkbox]
+        widgets_in_row = [label, entry, button, column_entry, extension_entry, skip_checkbox]
         click_handler = lambda e, name=folder_name: self._select_folder_row(name)
         for widget in widgets_in_row:
             widget.bind("<Button-1>", click_handler)
@@ -4041,12 +3630,11 @@ class SettingsWindow:
         ToolTip(extension_entry, "Optional: Monitor only files with this extension (e.g., 'svp').")
         ToolTip(skip_checkbox, f"Check to disable monitoring for the '{folder_name}' folder.")
         ToolTip(log_x_checkbox, "If a file is logging, insert 'X' into the Excel column.\nThe database will still receive the actual filename.")
-        ToolTip(db_column_entry, f"Enter the SQLite DB column name for the latest '{folder_name}' filename.")
+    
 
         # Store references for selection, saving, and removal
         self.folder_entries[folder_name] = entry
         self.folder_column_entries[folder_name] = column_entry
-        self.folder_db_column_entries[folder_name] = db_column_entry
         self.file_extension_entries[folder_name] = extension_entry
         self.folder_skip_vars[folder_name] = skip_var
         self.folder_log_x_vars[folder_name] = log_x_var
@@ -4059,43 +3647,6 @@ class SettingsWindow:
         self.folder_canvas.configure(scrollregion=self.folder_canvas.bbox("all"))
 
 
-
-    def create_sqlite_tab(self):
-        tab = ttk.Frame(self.notebook, padding=20); self.notebook.add(tab, text="SQLite Log")
-        
-        ttk.Label(tab, text="Configure settings for logging data to a SQLite database file.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
-
-        enable_frame = ttk.Frame(tab); enable_frame.pack(fill='x', pady=(0, 15))
-        self.sqlite_enabled_var = tk.BooleanVar()
-        enable_check = ttk.Checkbutton(enable_frame, text="Enable SQLite Database Logging", variable=self.sqlite_enabled_var, style="Large.TCheckbutton")
-        enable_check.pack(side=tk.LEFT, pady=(5, 10)); ToolTip(enable_check, "Check to enable logging events to an SQLite database file.")
-        
-        config_frame = ttk.LabelFrame(tab, text="SQLite Configuration", padding=15)
-        config_frame.pack(fill='x'); config_frame.columnconfigure(1, weight=1)
-
-        # Frame for action buttons
-        action_button_frame = ttk.Frame(config_frame)
-        action_button_frame.grid(row=3, column=1, columnspan=2, sticky="w", pady=15)
-        
-        ttk.Label(config_frame, text="Database File (.db):").grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.sqlite_db_path_entry = ttk.Entry(config_frame, width=70)
-        self.sqlite_db_path_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew"); ToolTip(self.sqlite_db_path_entry, "Full path to the SQLite database file")
-        db_browse_btn = ttk.Button(config_frame, text="Browse", command=self.select_sqlite_file)
-        db_browse_btn.grid(row=0, column=2, padx=5, pady=5); ToolTip(db_browse_btn, "Browse for an existing SQLite file")
-        
-        ttk.Label(config_frame, text="Table Name:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.sqlite_table_entry = ttk.Entry(config_frame, width=40)
-        self.sqlite_table_entry.grid(row=1, column=1, padx=5, pady=5, sticky="w"); ToolTip(self.sqlite_table_entry, "The name of the table within the database where logs will be written (e.g., 'fieldlog'). This table must exist or be created by you.")
-        
-        test_button = ttk.Button(config_frame, text="Test Connection & Table", command=self.test_sqlite_connection)
-        test_button.grid(row=2, column=1, padx=5, pady=15, sticky="w"); ToolTip(test_button, "Verify connection to the database file and check if the specified table exists.")
-
-        generate_sql_button = ttk.Button(action_button_frame, text="Generate Table SQL", command=self.generate_create_table_sql)
-        generate_sql_button.pack(side=tk.LEFT, padx=5)
-        ToolTip(generate_sql_button, "Beta for testing")
-        
-        self.test_result_label = ttk.Label(config_frame, text="", font=("Arial", 9), wraplength=500)
-        self.test_result_label.grid(row=3, column=0, columnspan=3, padx=5, pady=2, sticky="w")
 
     def save_settings_to_parent_vars(self):
         """
@@ -4115,7 +3666,6 @@ class SettingsWindow:
                     field_name = self.parent_gui.txt_field_columns_config[i]["field"]
             
             column_name = row_info["column_entry"].get().strip()
-            db_column_name = row_info["db_column_entry"].get().strip()
             skip_value = row_info["skip_var"].get()
 
             if not field_name and not (field_name in DEFAULT_DATA_FIELDS):
@@ -4124,7 +3674,6 @@ class SettingsWindow:
             new_txt_field_configs.append({
                 "field": field_name,
                 "column_name": column_name if column_name else field_name,
-                "db_column_name": db_column_name,
                 "skip": skip_value
             })
         self.parent_gui.txt_field_columns_config = new_txt_field_configs
@@ -4139,233 +3688,105 @@ class SettingsWindow:
         s = re.sub(r'\s+', '_', s.strip())
         return s    
 
-    def generate_create_table_sql(self):
-        """
-        Generates a CREATE TABLE SQL statement based on the "TXT Column" field
-        and displays it in a new window for the user to copy.
-        """
-        # Ensure we have the latest column names from the UI before proceeding
-        self.save_settings_to_parent_vars()
-
-        table_name = self.sqlite_table_entry.get().strip()
-        if not table_name:
-            messagebox.showerror("Missing Table Name", "Please enter a table name before generating SQL.", parent=self.master)
-            return
-
-        column_defs = []
-        processed_cols = set()
-
-        # 1. Add the primary key column
-        pk_col = "original_excel_row"
-        column_defs.append(f"    [{pk_col}] INTEGER PRIMARY KEY")
-        processed_cols.add(pk_col.lower())
-
-        # 2. Iterate through the configured columns from the "Data Columns" tab
-        for config_item in self.parent_gui.txt_field_columns_config:
-            # CHANGE: Use the 'field' value (from the "TXT Column") as the source
-            source_col_name = config_item.get("field", "").strip()
-            
-            if source_col_name:
-                # CHANGE: Sanitize the name for use in SQL
-                db_col = self._sanitize_for_sql(source_col_name)
-                
-                # Add the column if it has a valid sanitized name and we haven't already added it
-                if db_col and db_col.lower() not in processed_cols:
-                    column_defs.append(f"    [{db_col}] TEXT")
-                    processed_cols.add(db_col.lower())
-        
-        # 3. Add any other special columns that are handled programmatically
-        special_cols = ["time_fix"]
-        for col in special_cols:
-             if col.lower() not in processed_cols:
-                # Sanitize these as well for consistency
-                sanitized_col = self._sanitize_for_sql(col)
-                if sanitized_col:
-                    column_defs.append(f"    [{sanitized_col}] TEXT")
-                    processed_cols.add(sanitized_col.lower())
-
-        # 4. Construct the final SQL statement
-        column_sql = ",\n".join(column_defs)
-        full_sql = f"CREATE TABLE IF NOT EXISTS [{table_name}] (\n{column_sql}\n);"
-
-        # 5. Display the SQL in a new pop-up window
-        sql_window = Toplevel(self.master)
-        sql_window.title("Generated SQL for Table Creation")
-        sql_window.transient(self.master)
-        sql_window.grab_set()
-        sql_window.geometry("600x400")
-
-        main_frame = ttk.Frame(sql_window, padding=10)
-        main_frame.pack(fill="both", expand=True)
-        main_frame.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(0, weight=1)
-
-        sql_text = tk.Text(main_frame, wrap="word", font=("Courier New", 10), height=10, width=70)
-        sql_text.insert("1.0", full_sql)
-        sql_text.config(state="disabled") # Make it read-only
-        sql_text.grid(row=0, column=0, columnspan=2, sticky="nsew")
-
-        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=sql_text.yview)
-        scrollbar.grid(row=0, column=2, sticky="ns")
-        sql_text['yscrollcommand'] = scrollbar.set
-
-        def copy_to_clipboard():
-            self.master.clipboard_clear()
-            self.master.clipboard_append(full_sql)
-            self.parent_gui.update_status("SQL copied to clipboard.")
-
-        button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=1, column=0, columnspan=3, pady=(10, 0), sticky="e")
-
-        copy_btn = ttk.Button(button_frame, text="Copy to Clipboard", command=copy_to_clipboard)
-        copy_btn.pack(side="left", padx=5)
-
-        close_btn = ttk.Button(button_frame, text="Close", command=sql_window.destroy)
-        close_btn.pack(side="left")
-
-    def select_sqlite_file(self):
-        filetypes = [("SQLite Database", "*.db"), ("SQLite Database", "*.sqlite"), ("SQLite3 Database", "*.sqlite3"), ("All Files", "*.*")]
-        current_path = self.sqlite_db_path_entry.get()
-        initial_dir = os.path.dirname(current_path) if current_path else os.getcwd()
-        filepath = filedialog.askopenfilename(parent=self.master, title="Select SQLite Database File", initialdir=initial_dir, filetypes=filetypes, defaultextension="*.sqlite")
-        if filepath: 
-            self.sqlite_db_path_entry.delete(0, tk.END)
-            self.sqlite_db_path_entry.insert(0, filepath)
-        if hasattr(self, 'test_result_label'): 
-            self.test_result_label.config(text="")
-
-    def test_sqlite_connection(self):
-        db_path = self.sqlite_db_path_entry.get().strip()
-        table_name = self.sqlite_table_entry.get().strip() or DEFAULT_TABLE_NAME
-        if not db_path: 
-            self.test_result_label.config(text="❌ Error: Database path is empty.", foreground="red")
-            return
-        conn = None
-        result_text = ""
-        result_color = "red"
-        try:
-            conn = sqlite3.connect(db_path, timeout=3)
-            cursor = conn.cursor()
-            result_text = f"✔️ Connection to '{os.path.basename(db_path)}' successful.\n"
-            try:
-                cursor.execute(f"SELECT 1 FROM [{table_name}] LIMIT 1;")
-                result_text += f"✔️ Table '{table_name}' found."
-                result_color = "green"
-            except sqlite3.OperationalError as e_table:
-                if "no such table" in str(e_table).lower(): 
-                    result_text += f"⚠️ Warning: Table '{table_name}' not found. It needs to be created."
-                    result_color = "#E67E00"
-                else: 
-                    raise e_table
-            except Exception as e: result_text += f"❌ Error checking table: {e}"; result_color = "red"
-        except sqlite3.Error as e: result_text = f"❌ Error connecting/checking DB: {e}"; result_color = "red"
-        except Exception as e: result_text = f"❌ Unexpected Error: {e}"; result_color = "red"
-        finally:
-            if conn: conn.close()
-            self.test_result_label.config(text=result_text, foreground=result_color)
-            self.master.after(15000, lambda: self.test_result_label.config(text=""))
 
     def create_auto_events_tab(self):
-            """Creates the tab for configuring automatic timed events."""
-            tab = ttk.Frame(self.notebook, padding=20)
-            self.notebook.add(tab, text="Programmed Events")
+        """
+        Creates the tab for configuring automatic timed events with an improved layout.
+        """
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="Programmed Events")
 
-            # --- "New Day" Event Configuration ---
-            new_day_frame = ttk.LabelFrame(tab, text="Midnight 'New Day' Event", padding=15)
-            new_day_frame.pack(fill='x', pady=(0, 15))
-            new_day_frame.columnconfigure(1, weight=1)
+        # Use a main grid to structure the tab content
+        tab.columnconfigure(0, weight=1)
+        
+        # 1. Midnight 'New Day' Event Configuration
+        new_day_frame = ttk.LabelFrame(tab, text="Midnight 'New Day' Event", padding=15)
+        new_day_frame.grid(row=0, column=0, sticky='ew', pady=(0, 15))
+        new_day_frame.columnconfigure(1, weight=1) # Allow second column to expand
 
-            new_day_check = ttk.Checkbutton(
-                new_day_frame,
-                text="Enable this automatic event",
-                variable=self.parent_gui.new_day_event_enabled_var,
-                style="Large.TCheckbutton"
-            )
-            new_day_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
-            ToolTip(new_day_check, "If checked, an event will be logged automatically at midnight.")
+        # Row 0: Enable Checkbox
+        new_day_check = ttk.Checkbutton(new_day_frame, text="Enable this automatic event", 
+                                        variable=self.parent_gui.new_day_event_enabled_var,
+                                        style="Large.TCheckbutton")
+        new_day_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        ToolTip(new_day_check, "If checked, an event will be logged automatically at midnight.")
 
-            # Color picker for New Day event
-            self.new_day_bg_color_var, self.new_day_bg_color_label, \
-            self.new_day_font_color_var, self.new_day_font_color_label = self._create_color_picker_row(
-                new_day_frame, 1, "Excel Row Colors:", "New Day" # Changed label text
-        )
+        # Rows 1-2: Color Pickers
+        ttk.Label(new_day_frame, text="Excel Row Colors:").grid(row=1, column=0, sticky='w', padx=5, pady=(2, 0))
+        self._create_color_picker_widgets(new_day_frame, 1, "New Day")
 
-            # --- "Hourly KP Log" Event Configuration ---
-            hourly_frame = ttk.LabelFrame(tab, text="Hourly KP Log Event", padding=15)
-            hourly_frame.pack(fill='x', pady=5)
-            hourly_frame.columnconfigure(1, weight=1)
 
-            hourly_check = ttk.Checkbutton(
-                hourly_frame,
-                text="Enable this automatic event",
-                variable=self.parent_gui.hourly_event_enabled_var,
-                style="Large.TCheckbutton"
-            )
-            hourly_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
-            ToolTip(hourly_check, "If checked, the current KP will be logged automatically every hour.")
+        # 2. Hourly KP Log Event Configuration
+        hourly_frame = ttk.LabelFrame(tab, text="Hourly KP Log Event", padding=15)
+        hourly_frame.grid(row=1, column=0, sticky='ew', pady=5)
+        hourly_frame.columnconfigure(1, weight=1)
 
-            # Color picker for Hourly event
-            self.hourly_bg_color_var, self.hourly_bg_color_label, \
-            self.hourly_font_color_var, self.hourly_font_color_label = self._create_color_picker_row(
-                hourly_frame, 1, "Excel Row Colors:", "Hourly KP Log" # Changed label text
-        )
+        # Row 0: Enable Checkbox
+        hourly_check = ttk.Checkbutton(hourly_frame, text="Enable this automatic event",
+                                    variable=self.parent_gui.hourly_event_enabled_var,
+                                    style="Large.TCheckbutton")
+        hourly_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        ToolTip(hourly_check, "If checked, the current KP will be logged automatically every hour.")
+        
+        # Rows 1-2: Color Pickers
+        ttk.Label(hourly_frame, text="Excel Row Colors:").grid(row=1, column=0, sticky='w', padx=5, pady=(2, 0))
+        self._create_color_picker_widgets(hourly_frame, 1, "Hourly KP Log")
 
-    def _create_color_picker_row(self, parent_frame, row, label_text, event_name):
-        """Helper to create color picker widgets for both background and font colors for the Auto Events tab."""
-        ttk.Label(parent_frame, text=label_text).grid(row=row, column=0, sticky='w', padx=5)
 
-        # Frame for Background Color picker
-        bg_color_frame = ttk.Frame(parent_frame)
-        bg_color_frame.grid(row=row, column=1, sticky='w', padx=5, pady=(2,0)) # Add some top padding
+        # 3. Log off Distance/Speed Calculation
+        logoff_frame = ttk.LabelFrame(tab, text="Log off Distance/Speed Calculation", padding=15)
+        logoff_frame.grid(row=2, column=0, sticky='ew', pady=5)
+        logoff_frame.columnconfigure(1, weight=1)
+        
+        # Row 0: Enable Checkbox
+        logoff_check = ttk.Checkbutton(logoff_frame, text="Calculate distance & speed on Log off",
+                                    variable=self.parent_gui.calculate_logoff_values,
+                                    style="Large.TCheckbutton")
+        logoff_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        ToolTip(logoff_check, "If checked, the Log off button will calculate and display distance and speed based on the last Log on event's KP.")
 
-        # Get initial colors from the master button_colors dictionary
+
+    def _create_color_picker_widgets(self, parent_frame, grid_row, event_name):
+        """
+        Helper to create and place the color picker widgets for both background and font colors.
+        """
         initial_bg_color, initial_font_color = self.parent_gui.button_colors.get(event_name, (None, None))
         
         bg_color_var = tk.StringVar(value=initial_bg_color if initial_bg_color else "")
+        font_color_var = tk.StringVar(value=initial_font_color if initial_font_color else "")
+        
+        # Frame for Background Color picker
+        bg_color_frame = ttk.Frame(parent_frame)
+        bg_color_frame.grid(row=grid_row, column=1, sticky='w', padx=5, pady=(2, 0))
+
         bg_display_label = tk.Label(bg_color_frame, width=4, relief="solid", borderwidth=1,
                                     background=bg_color_var.get() if bg_color_var.get() else 'SystemButtonFace')
         bg_display_label.pack(side="left", padx=(0, 5))
 
-        # Background Clear button
         clear_bg_btn = ttk.Button(bg_color_frame, text="X", width=2, style="Toolbutton",
-                                 command=lambda: self.parent_gui._set_color_on_widget(bg_color_var, bg_display_label, None, self.master))
+                                command=lambda: self.parent_gui._set_color_on_widget(bg_color_var, bg_display_label, None, self.master))
         clear_bg_btn.pack(side="left", padx=1)
-        ToolTip(clear_bg_btn, f"Clear background color for {event_name}.")
-
-        # Background Choose button
+        
         choose_bg_btn = ttk.Button(bg_color_frame, text="...", width=3, style="Toolbutton",
-                                  command=lambda: self.parent_gui._choose_color_dialog(bg_color_var, bg_display_label, self.master, f"{event_name} Background"))
+                                command=lambda: self.parent_gui._choose_color_dialog(bg_color_var, bg_display_label, self.master, f"{event_name} Background"))
         choose_bg_btn.pack(side="left", padx=1)
-        ToolTip(choose_bg_btn, f"Choose a custom background color for {event_name}.")
-
 
         # Frame for Font Color picker
         font_color_frame = ttk.Frame(parent_frame)
-        font_color_frame.grid(row=row + 1, column=1, sticky='w', padx=5, pady=(0,2)) # Place below background, with some bottom padding
+        font_color_frame.grid(row=grid_row + 1, column=1, sticky='w', padx=5, pady=(0, 2))
 
-        font_color_var = tk.StringVar(value=initial_font_color if initial_font_color else "")
         font_display_label = tk.Label(font_color_frame, width=4, relief="solid", borderwidth=1,
-                                      background=font_color_var.get() if font_color_var.get() else 'SystemButtonFace')
+                                    background=font_color_var.get() if font_color_var.get() else 'SystemButtonFace')
         font_display_label.pack(side="left", padx=(0, 5))
 
-        # Font Clear button
         clear_font_btn = ttk.Button(font_color_frame, text="X", width=2, style="Toolbutton",
-                                   command=lambda: self.parent_gui._set_color_on_widget(font_color_var, font_display_label, None, self.master))
+                                    command=lambda: self.parent_gui._set_color_on_widget(font_color_var, font_display_label, None, self.master))
         clear_font_btn.pack(side="left", padx=1)
-        ToolTip(clear_font_btn, f"Clear font color for {event_name}.")
-
-        # Font Choose button
+        
         choose_font_btn = ttk.Button(font_color_frame, text="...", width=3, style="Toolbutton",
                                     command=lambda: self.parent_gui._choose_color_dialog(font_color_var, font_display_label, self.master, f"{event_name} Font"))
         choose_font_btn.pack(side="left", padx=1)
-        ToolTip(choose_font_btn, f"Choose a custom font color for {event_name}.")
-        
-        # Adjust row span for the main label
-        parent_frame.grid_rowconfigure(row, weight=0) # Make sure the label row doesn't expand
-        parent_frame.grid_rowconfigure(row+1, weight=0) # Make sure the font color row doesn't expand
 
-
-        return bg_color_var, bg_display_label, font_color_var, font_display_label # Return all four  
 
     # --- Settings Save/Load Logic ---
     def save_settings(self):
@@ -4389,7 +3810,6 @@ class SettingsWindow:
                     field_name = self.parent_gui.txt_field_columns_config[i]["field"]
             
             column_name = row_info["column_entry"].get().strip()
-            db_column_name = row_info["db_column_entry"].get().strip()
             skip_value = row_info["skip_var"].get()
 
             if not field_name and not (field_name in DEFAULT_DATA_FIELDS):
@@ -4398,7 +3818,7 @@ class SettingsWindow:
             new_txt_field_configs.append({
                 "field": field_name,
                 "column_name": column_name if column_name else field_name,
-                "db_column_name": db_column_name,
+                
                 "skip": skip_value
             })
         self.parent_gui.txt_field_columns_config = new_txt_field_configs
@@ -4415,7 +3835,6 @@ class SettingsWindow:
         for folder_name in self.folder_entries.keys():
             entry_widget = self.folder_entries[folder_name]
             col_entry = self.folder_column_entries[folder_name]
-            db_col_entry = self.folder_db_column_entries[folder_name]
             ext_entry = self.file_extension_entries[folder_name]
             skip_var = self.folder_skip_vars[folder_name]
             log_x_var = self.folder_log_x_vars[folder_name]
@@ -4423,14 +3842,12 @@ class SettingsWindow:
             folder_path = entry_widget.get().strip()
             parent_folder_paths[folder_name] = folder_path
             parent_folder_cols[folder_name] = col_entry.get().strip() if col_entry.get().strip() else folder_name
-            parent_folder_db_cols[folder_name] = db_col_entry.get().strip()
             parent_folder_exts[folder_name] = ext_entry.get().strip().lstrip('.')
             parent_folder_skips[folder_name] = skip_var.get()
             parent_folder_log_x_instead[folder_name] = log_x_var.get()
         
         self.parent_gui.folder_paths = parent_folder_paths
         self.parent_gui.folder_columns = parent_folder_cols
-        self.parent_gui.folder_db_columns = parent_folder_db_cols
         self.parent_gui.file_extensions = parent_folder_exts
         self.parent_gui.folder_skips = parent_folder_skips
         self.parent_gui.folder_log_x_instead = parent_folder_log_x_instead
@@ -4474,73 +3891,75 @@ class SettingsWindow:
         hourly_font_color_hex = self.hourly_font_color_var.get()
         self.parent_gui.button_colors["Hourly KP Log"] = (hourly_bg_color_hex if hourly_bg_color_hex else None, hourly_font_color_hex if hourly_font_color_hex else None)
 
-        
-        
-        # --- SQLite Log Tab ---
-        self.parent_gui.sqlite_enabled = self.sqlite_enabled_var.get()
-        self.parent_gui.sqlite_db_path = self.sqlite_db_path_entry.get().strip()
-        self.parent_gui.sqlite_table = self.sqlite_table_entry.get().strip() or DEFAULT_TABLE_NAME
 
         # --- Final Actions ---
         # Trigger the master save function in the main GUI
         self.parent_gui.save_settings()
         # Refresh the main GUI and services with the new settings
         self.parent_gui.update_custom_buttons()
-        #self.parent_gui.start_monitoring()
-        self.parent_gui.update_db_indicator()
+        
+        
 
     def load_settings(self):
+        """Loads settings from the parent DataLoggerGUI instance and populates the UI."""
+        
+        # --- File Paths Tab ---
         self.log_file_entry.delete(0, tk.END)
-        self.populate_event_codes_tree()
         self.log_file_entry.insert(0, self.parent_gui.log_file_path or "")
         
-        # Load the custom names into the new entry fields
         aliases = self.parent_gui.txt_source_aliases
         self.txt_name_main_var.set(aliases.get("Main TXT", "Main TXT"))
         self.txt_name_set2_var.set(aliases.get("TXT Source 2", "TXT Source 2"))
         self.txt_name_set3_var.set(aliases.get("TXT Source 3", "TXT Source 3"))
 
-        # Load the paths into the path entry fields
         self.txt_path_main_var.set(self.parent_gui.txt_folder_path or "")
         self.txt_path_set2_var.set(self.parent_gui.txt_folder_path_set2 or "")
         self.txt_path_set3_var.set(self.parent_gui.txt_folder_path_set3 or "")
 
-        # Reload TXT field rows based on the (potentially newly loaded) config
+        
+
+        # --- Data Columns Tab ---
         self.recreate_txt_field_rows()
         self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
 
-
-        for name, frame in list(self.folder_row_widgets.items()):
-            if frame and frame.winfo_exists(): frame.destroy()
-        self.folder_row_widgets.clear()
+        # --- Monitored Folders Tab ---
+        for name in list(self.folder_row_widgets.keys()):
+            if name not in self.parent_gui.folder_paths:
+                widgets_to_destroy = self.folder_row_widgets.pop(name, [])
+                for widget in widgets_to_destroy:
+                    if widget and widget.winfo_exists():
+                        widget.destroy()
         self.folder_entries.clear()
         self.folder_column_entries.clear()
+        self.folder_db_column_entries.clear()
         self.file_extension_entries.clear()
         self.folder_skip_vars.clear()
-
+        self.folder_log_x_vars.clear()
         self.add_initial_folder_rows()
         self.master.after_idle(self.update_scroll_region)
 
+        # --- Button Configuration Tab ---
         self.num_buttons_entry.delete(0, tk.END)
         self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
         self.recreate_custom_button_settings()
         
-        # Load colors for the automatic events tab
-        new_day_bg_color, new_day_font_color = self.parent_gui.button_colors.get("New Day", (None, None))
-        self.parent_gui._set_color_on_widget(self.new_day_bg_color_var, self.new_day_bg_color_label, new_day_bg_color, self.master)
-        self.parent_gui._set_color_on_widget(self.new_day_font_color_var, self.new_day_font_color_label, new_day_font_color, self.master)
-
-        hourly_bg_color, hourly_font_color = self.parent_gui.button_colors.get("Hourly KP Log", (None, None))
-        self.parent_gui._set_color_on_widget(self.hourly_bg_color_var, self.hourly_bg_color_label, hourly_bg_color, self.master)
-        self.parent_gui._set_color_on_widget(self.hourly_font_color_var, self.hourly_font_color_label, hourly_font_color, self.master)
+        # --- Programmed Events Tab ---
+        self.parent_gui.new_day_event_enabled_var.set(self.parent_gui.new_day_event_enabled_var.get())
+        self.parent_gui.hourly_event_enabled_var.set(self.parent_gui.hourly_event_enabled_var.get())
+        self.parent_gui.calculate_logoff_values.set(self.parent_gui.calculate_logoff_values.get())
         
+        # Load the color values into the UI variables
+        new_day_bg_color, new_day_font_color = self.parent_gui.button_colors.get("New Day", (None, None))
+        self.new_day_bg_color_var.set(new_day_bg_color or "")
+        self.new_day_font_color_var.set(new_day_font_color or "")
+        
+        hourly_bg_color, hourly_font_color = self.parent_gui.button_colors.get("Hourly KP Log", (None, None))
+        self.hourly_bg_color_var.set(hourly_bg_color or "")
+        self.hourly_font_color_var.set(hourly_font_color or "")
 
-        self.sqlite_enabled_var.set(self.parent_gui.sqlite_enabled)
-        self.sqlite_db_path_entry.delete(0, tk.END)
-        self.sqlite_db_path_entry.insert(0, self.parent_gui.sqlite_db_path or "")
-        self.sqlite_table_entry.delete(0, tk.END)
-        self.sqlite_table_entry.insert(0, self.parent_gui.sqlite_table or DEFAULT_TABLE_NAME)
-        if hasattr(self, 'test_result_label'): self.test_result_label.config(text="")
+        
+        # --- Timezone Tab ---
+        self.parent_gui.time_offset_hours.set(self.parent_gui.time_offset_hours.get())
     
 # --- Main Execution ---
 if __name__ == "__main__":
@@ -4566,6 +3985,8 @@ if __name__ == "__main__":
                 except Exception: pass
                 finally:
                     if name in gui.monitors: del gui.monitors[name]
+                if gui._auto_sync_timer_id:
+                    gui.master.after_cancel(gui._auto_sync_timer_id)
 
         root.destroy()
 
