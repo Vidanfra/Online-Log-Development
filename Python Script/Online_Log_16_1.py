@@ -17,6 +17,7 @@ import re
 import asyncio
 import sys
 from pathlib import Path
+import shutil
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -323,6 +324,9 @@ class DataLoggerGUI:
         # self.start_monitoring() 
         self.update_monitor_indicator_text()  # Initial monitor start & status update
 
+        #schedule sutomatic sync routing
+        self.schedule_auto_sync()
+
         # Open the settings window by default when the app starts
         self.startup_settings()
 
@@ -489,6 +493,10 @@ class DataLoggerGUI:
         self.db_status_label = None
         self.settings_window_instance = None # Track settings window
         self.custom_inline_editor_window = None # To track the open inline editor
+
+        self.auto_sync_enabled_var = tk.BooleanVar(value=False)
+        self.auto_sync_interval_minutes = tk.IntVar(value=30)
+        self._auto_sync_timer_id = None # To store the ID for canceling the task
 
     def init_settings(self):
         ''' Check if the custom settings file exists and loads it. If not, it load the default settings file.'''
@@ -768,6 +776,37 @@ class DataLoggerGUI:
         # If the loop finishes, the header was not found
         raise ValueError(f"Crucial '{required_column}' column not found in the first {max_rows_to_scan} rows.")
     
+    def _create_db_backup(self, db_path):
+        """
+        Creates a backup copy of the SQLite database file in a 'backups' subfolder.
+        """
+        if not db_path or not os.path.exists(db_path):
+            self.update_status("Backup skipped: Database file not found.")
+            return False
+
+        try:
+            db_dir = os.path.dirname(db_path)
+            db_name = os.path.basename(db_path)
+
+            # Create the backups folder if it doesn't exist
+            backup_folder = os.path.join(db_dir, "backups")
+            os.makedirs(backup_folder, exist_ok=True)
+
+            # Construct the backup filename with a timestamp
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            backup_name = f"{os.path.splitext(db_name)[0]}_backup_{timestamp}{os.path.splitext(db_name)[1]}"
+            backup_path = os.path.join(backup_folder, backup_name)
+
+            # Copy the file
+            shutil.copy2(db_path, backup_path)
+            self.update_status(f"Database backup created: {os.path.basename(backup_path)}")
+            print(f"Database backup created at {backup_path}")
+            return True
+        except Exception as e:
+            self.update_status(f"Backup failed: {e}")
+            print(f"Error creating backup: {e}")
+            return False
+    
     def _values_are_different(self, val1, val2):
         """
         Robustly compares two values, handling None, pandas NaT/NaN, and numeric types.
@@ -861,6 +900,8 @@ class DataLoggerGUI:
         if not self.sqlite_db_path:
             messagebox.showerror("Sync Error", "SQLite database path is not set.", parent=self.master)
             return
+        self.update_status("Creating database backup...")
+        self._create_db_backup(self.sqlite_db_path)
 
         try:
             excel_file = self.log_file_path
@@ -1805,6 +1846,8 @@ class DataLoggerGUI:
             "active_logging_threshold_seconds": self.active_logging_threshold_seconds.get(),
             "new_day_event_enabled": self.new_day_event_enabled_var.get(),
             "hourly_event_enabled": self.hourly_event_enabled_var.get(),
+            "auto_sync_enabled": self.auto_sync_enabled_var.get(),
+            "auto_sync_interval_minutes": self.auto_sync_interval_minutes.get(),
             "main_button_configs": self.main_button_configs, # This is the crucial line to save the new setting
             "txt_source_aliases": self.txt_source_aliases,
             "calculate_logoff_values": self.calculate_logoff_values.get()
@@ -2002,6 +2045,8 @@ class DataLoggerGUI:
                 self.always_on_top_var.set(settings.get("always_on_top", True))
                 self.new_day_event_enabled_var.set(settings.get("new_day_event_enabled", True))
                 self.hourly_event_enabled_var.set(settings.get("hourly_event_enabled", True))
+                self.auto_sync_enabled_var.set(settings.get("auto_sync_enabled", False))
+                self.auto_sync_interval_minutes.set(settings.get("auto_sync_interval_minutes", 30))
 
                 self.txt_source_aliases = settings.get("txt_source_aliases", {
                     "Main TXT": "Main TXT",
@@ -2346,6 +2391,34 @@ class DataLoggerGUI:
             print("'Hourly KP Log' event is disabled, skipping log.")
         # Reschedule for the following hour
         self.schedule_hourly_log()
+
+    def schedule_auto_sync(self):
+        """Schedules the next automatic database sync."""
+        if self._auto_sync_timer_id:
+            self.master.after_cancel(self._auto_sync_timer_id)
+
+        if self.auto_sync_enabled_var.get():
+            interval_ms = self.auto_sync_interval_minutes.get() * 60 * 1000
+            if interval_ms > 0:
+                self.update_status(f"Automatic DB sync scheduled for every {self.auto_sync_interval_minutes.get()} minutes.")
+                self._auto_sync_timer_id = self.master.after(interval_ms, self._perform_auto_sync)
+            else:
+                self.update_status("Automatic DB sync is enabled but interval is 0. No sync will run.")
+        else:
+            self.update_status("Automatic DB sync is currently disabled.")
+
+    def _perform_auto_sync(self):
+        """The core logic for the automatic sync, wrapped in a thread."""
+        if self.auto_sync_enabled_var.get() and self.sqlite_enabled:
+            # Run the sync on a new thread to avoid freezing the UI
+            def _sync_worker():
+                success, message = self.perform_excel_to_sqlite_sync()
+                self.master.after(0, self.update_status, f"Auto-sync completed. {message}")
+
+            threading.Thread(target=_sync_worker, daemon=True).start()
+
+        # Reschedule the next run regardless of success
+        self.schedule_auto_sync()
 
     # --- Custom Button Management ---
     def _show_custom_button_context_menu(self, event, button_index):
@@ -3049,6 +3122,7 @@ class SettingsWindow:
         self.create_sqlite_tab()
         self.create_auto_events_tab()
         self.create_timezone_tab()
+        self.create_auto_sync_tab()
 
         # Bottom Buttons
         button_frame = ttk.Frame(self.main_frame)
@@ -4383,6 +4457,40 @@ class SettingsWindow:
         logoff_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
         ToolTip(logoff_check, "If checked, the Log off button will calculate and display distance and speed based on the last Log on event's KP.")
 
+    def create_auto_sync_tab(self):
+        """
+        Creates the UI tab for configuring the automatic database sync feature.
+        """
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="Automatic Sync")
+
+        # Description
+        desc_frame = ttk.Frame(tab)
+        desc_frame.pack(fill='x', pady=(0, 10))
+        ttk.Label(desc_frame, text="Configure settings for a routine sync from the Excel log to the SQLite database. This is useful for automatically pushing changes you make in Excel to the database.", wraplength=900).pack(anchor='w')
+
+        # Main content frame
+        content_frame = ttk.LabelFrame(tab, text="Automatic Sync Settings", padding=15)
+        content_frame.pack(fill='x', expand=False, anchor='n')
+        content_frame.columnconfigure(1, weight=1)
+
+        # Enable Checkbox
+        enable_check = ttk.Checkbutton(content_frame, text="Enable automatic database sync",
+                                      variable=self.parent_gui.auto_sync_enabled_var,
+                                      command=self.parent_gui.schedule_auto_sync, # Call the scheduling function when the checkbox state changes
+                                      style="Large.TCheckbutton")
+        enable_check.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
+        ToolTip(enable_check, "If checked, a sync will run automatically at the specified interval.")
+
+        # Sync Interval
+        ttk.Label(content_frame, text="Sync Interval (minutes):").grid(row=1, column=0, sticky='w', padx=5, pady=5)
+        interval_spinbox = ttk.Spinbox(content_frame, from_=1, to=1440, increment=1,
+                                       textvariable=self.parent_gui.auto_sync_interval_minutes,
+                                       command=self.parent_gui.schedule_auto_sync, # Re-schedule when the value changes
+                                       width=10)
+        interval_spinbox.grid(row=1, column=1, sticky='w', padx=5, pady=5)
+        ToolTip(interval_spinbox, "The frequency in minutes for the automatic sync to run. The timer resets after each sync.")
+
     def _create_color_picker_widgets(self, parent_frame, grid_row, event_name):
         """
         Helper to create and place the color picker widgets for both background and font colors.
@@ -4435,6 +4543,9 @@ class SettingsWindow:
         self.parent_gui.txt_folder_path_set2 = self.txt_path_set2_var.get().strip()
         self.parent_gui.txt_source_aliases["TXT Source 3"] = self.txt_name_set3_var.get().strip()
         self.parent_gui.txt_folder_path_set3 = self.txt_path_set3_var.get().strip()
+        # --- Automatic Sync Tab ---
+        self.parent_gui.auto_sync_enabled_var.set(self.parent_gui.auto_sync_enabled_var.get())
+        self.parent_gui.auto_sync_interval_minutes.set(self.parent_gui.auto_sync_interval_minutes.get())
 
         # --- Data Columns Tab ---
         new_txt_field_configs = []
@@ -4546,6 +4657,7 @@ class SettingsWindow:
         self.parent_gui.update_custom_buttons()
         #self.parent_gui.start_monitoring()
         self.parent_gui.update_db_indicator()
+        self.parent_gui.schedule_auto_sync()
 
     def load_settings(self):
         """Loads settings from the parent DataLoggerGUI instance and populates the UI."""
@@ -4562,6 +4674,9 @@ class SettingsWindow:
         self.txt_path_main_var.set(self.parent_gui.txt_folder_path or "")
         self.txt_path_set2_var.set(self.parent_gui.txt_folder_path_set2 or "")
         self.txt_path_set3_var.set(self.parent_gui.txt_folder_path_set3 or "")
+
+        self.parent_gui.auto_sync_enabled_var.set(self.parent_gui.auto_sync_enabled_var.get())
+        self.parent_gui.auto_sync_interval_minutes.set(self.parent_gui.auto_sync_interval_minutes.get())
 
         # --- Data Columns Tab ---
         self.recreate_txt_field_rows()
@@ -4637,6 +4752,8 @@ if __name__ == "__main__":
                 except Exception: pass
                 finally:
                     if name in gui.monitors: del gui.monitors[name]
+                if gui._auto_sync_timer_id:
+                    gui.master.after_cancel(gui._auto_sync_timer_id)
 
         root.destroy()
 
