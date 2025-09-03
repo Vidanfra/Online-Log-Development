@@ -3240,15 +3240,15 @@ class SettingsWindow:
         parent.grid_columnconfigure(5, weight=0, minsize=80)  # Actions
 
         header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
-        header_frame.grid(row=0, column=0, columnspan=6, sticky="ew") # Span all columns
+        header_frame.grid(row=0, column=0, columnspan=8, sticky="ew") # Span all columns
 
         # Place labels inside the header_frame, but they will align because the parent of header_frame has the config
         ttk.Label(header_frame, text="Order", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
         ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=8, sticky='w')
-        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=8, sticky='w')
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=6, padx=6, sticky='w')
 
         # Also apply the same column configure to the header_frame itself so its internal labels space out correctly
         for i in range(6):
