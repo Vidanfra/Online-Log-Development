@@ -32,7 +32,7 @@ EVENT_CODES_FILE = "settings/event_codes.json"
 
 # DICCTIONARY KEYS #NEEDS TO BE REVIEWED
 EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'event'} 
-DEFAULT_DATA_FIELDS = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "Local Time"} 
+DEFAULT_DATA_FIELDS = {"Date-Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "Local Time"} 
 TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"] 
 DEFAULT_MONITORED_FOLDERS = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
 
@@ -267,6 +267,7 @@ class DataLoggerGUI:
 
         self.init_styles()
         self.init_variables()
+        self.static_field_configs = []
         self.init_settings()
 
         # --- Main Layout ---
@@ -406,8 +407,7 @@ class DataLoggerGUI:
 
         # Modified: Use a list of dicts for TXT field columns to preserve order
         self.txt_field_columns_config = [
-            {"field": "Date", "column_name": "Date", "skip": False},
-            {"field": "Time", "column_name": "Time", "skip": False},
+            {"field": "Date-Time", "column_name": "Time", "skip": False},
             {"field": "Local Time", "column_name": "Local Time", "skip": False}, # Corrected line
             {"field": "KP", "column_name": "KP", "skip": False},
             {"field": "DCC", "column_name": "DCC", "skip": False},
@@ -419,6 +419,8 @@ class DataLoggerGUI:
             {"field": "Event", "column_name": "Event", "skip": False},
             {"field": "Code", "column_name": "Code", "skip": False}
         ]
+
+        self.static_field_configs = []
         # These two will be derived from txt_field_columns_config for backwards compatibility/easier lookup
         self.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.txt_field_columns_config}
         self.txt_field_skips = {cfg["field"]: cfg["skip"] for cfg in self.txt_field_columns_config}
@@ -1043,11 +1045,10 @@ class DataLoggerGUI:
         """
         row_data = {}
         # Use datetime.now(datetime.UTC) for an explicit, timezone-aware UTC timestamp
-        utc_now = datetime.datetime.now(datetime.UTC) # <--- FIX 1: Use modern, non-deprecated function
+        utc_now = datetime.datetime.now(datetime.UTC)
         
         # Calculate local time by applying the configured offset
-        # The 'DataLoggerGUI' object refers to its own attributes with 'self', not 'self.parent_gui'.
-        offset_delta = datetime.timedelta(hours=self.time_offset_hours.get()) # <--- FIX 2: Corrected attribute reference to 'self'
+        offset_delta = datetime.timedelta(hours=self.time_offset_hours.get())
         local_time = utc_now + offset_delta
 
         latest_txt_file_path = None
@@ -1057,7 +1058,6 @@ class DataLoggerGUI:
                 latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".csv")
         else:
             print(f"TXT folder path is invalid or empty: {folder_path}")
-            # Still return time data even if the folder path is bad
             pass
 
         temp_txt_data = {}
@@ -1069,7 +1069,6 @@ class DataLoggerGUI:
                 read_success = False
                 for enc in encodings_to_try:
                     try:
-                        # Add a small delay to avoid file contention
                         time.sleep(0.05)
                         with open(latest_txt_file_path, "r", encoding=enc) as file:
                             lines = file.readlines()
@@ -1093,22 +1092,20 @@ class DataLoggerGUI:
             except Exception as e:
                 print(f"Major error during TXT parsing: {e}")
 
-        # --- Time and Date Population ---
-        # --- Time and Date Population ---
-        date_col = next((c['column_name'] for c in self.txt_field_columns_config if c['field'] == 'Date'), None)
-        utc_time_col = next((c['column_name'] for c in self.txt_field_columns_config if c['field'] == 'Time'), None)
+        
+        # Look up the actual Excel column name for the 'Time' field.
+        # This should correspond to "UTC Date-Time" from the Excel sheet.
+        utc_datetime_col = next((c['column_name'] for c in self.txt_field_columns_config if c['field'] == 'Date-Time'), None)
         local_time_col = next((c['column_name'] for c in self.txt_field_columns_config if c['field'] == 'Local Time'), None)
 
-        # ❗ FIX: Use utc_now for both Date and Time to ensure timestamp consistency.
-        if date_col and not self.txt_field_skips.get("Date"):
-            row_data[date_col] = utc_now.strftime("%Y-%m-%d")
+        # Populate the UTC Date-Time column if configured and not skipped
+        if utc_datetime_col and not self.txt_field_skips.get("Date-Time"):
+            combined_utc_string = utc_now.strftime("%Y-%m-%d %H:%M:%S")
+            row_data[utc_datetime_col] = combined_utc_string
 
-        if utc_time_col and not self.txt_field_skips.get("Time"):
-            row_data[utc_time_col] = utc_now.strftime("%H:%M:%S")
-
-        # This part is correct and will now work as long as "Local Time" is configured in settings.
-        if local_time_col and not self.txt_field_skips.get("Local Time"):
-            row_data[local_time_col] = local_time.strftime("%H:%M:%S")
+        # Populate the Local Time column if configured
+        if local_time_col and not self.txt_field_skips.get("Local Date-Time"):
+            row_data[local_time_col] = local_time.strftime("%Y-%m-%d %H:%M:%S")
 
         for col, val in temp_txt_data.items():
             if col not in row_data:
@@ -1192,10 +1189,7 @@ class DataLoggerGUI:
         """
         static_data = {}
         # Filter for configs that use the static cell lookup syntax
-        cell_lookup_configs = [
-            item for item in self.txt_field_columns_config
-            if str(item.get("column_name")).startswith('=') and not item.get("skip")
-        ]
+        cell_lookup_configs = self.static_field_configs
 
         if not cell_lookup_configs:
             return static_data  # Return empty if no lookups are configured
@@ -1221,9 +1215,13 @@ class DataLoggerGUI:
             # Process each defined cell lookup
             for config in cell_lookup_configs:
                 lookup_str = config["column_name"]
-                # The key for the returned dictionary is the "Excel Column" name itself,
-                # as this is what the rest of the pipeline expects.
-                excel_col_key = config["column_name"]
+                excel_col_key = config["field"] # The desired Excel column name
+                description = config.get("description", "") # <-- NEW: Get the description
+
+                if config.get("skip"): # <-- Check for skip flag
+                    static_data[excel_col_key] = "Skipped" # Or some other indicator
+                    continue
+
                 try:
                     # Parse the syntax: ='SheetName'!CellRef
                     # Using a more robust regex for parsing
@@ -1332,6 +1330,7 @@ class DataLoggerGUI:
             "txt_folder_path_set2": self.txt_folder_path_set2,
             "txt_folder_path_set3": self.txt_folder_path_set3,
             "txt_field_columns_config": self.txt_field_columns_config,
+            "static_field_configs": self.static_field_configs,
             "folder_paths": self.folder_paths,
             "folder_columns": self.folder_columns,
             "file_extensions": self.file_extensions, 
@@ -1400,7 +1399,8 @@ class DataLoggerGUI:
         try:
             if os.path.exists(self.settings_file):
                 print("Loading Settings from: {self.settings_file}")
-                with open(self.settings_file, 'r') as f: settings = json.load(f)
+                with open(self.settings_file, 'r') as f:
+                    settings = json.load(f)
                 self.log_file_path = settings.get("log_file_path")
                 self.time_offset_hours.set(settings.get("time_offset_hours", 0.0))
 
@@ -1417,9 +1417,16 @@ class DataLoggerGUI:
                 self.txt_folder_path_set2 = settings.get("txt_folder_path_set2")
                 self.txt_folder_path_set3 = settings.get("txt_folder_path_set3")
                 loaded_txt_config = settings.get("txt_field_columns_config")
+                loaded_static_config = settings.get("static_field_configs")
 
                 if loaded_txt_config:
+                    # Separate the loaded configs into two lists
+                    self.txt_field_columns_config = [c for c in loaded_txt_config if not str(c.get("column_name", "")).startswith('=')]
+                    self.static_field_configs = [c for c in loaded_txt_config if str(c.get("column_name", "")).startswith('=')]
+                elif loaded_static_config:
+                    # Backward compatibility for old format with separate static list
                     self.txt_field_columns_config = loaded_txt_config
+                    self.static_field_configs = loaded_static_config
                 else: # Fallback for old settings structure
                     old_txt_cols = settings.get("txt_field_columns", {"Event": "Event"})
                     old_txt_skips = settings.get("txt_field_skips", {})
@@ -1441,9 +1448,11 @@ class DataLoggerGUI:
                             new_config.append({
                                 "field": field_key,
                                 "column_name": col_name,
+                                "description": "", 
                                 "skip": old_txt_skips.get(field_key, False)
                             })
                     self.txt_field_columns_config = new_config
+                    self.static_field_configs = []
 
                     # --- Verification to ensure core time fields exist ---
                     essential_fields_in_order = [
@@ -1458,9 +1467,18 @@ class DataLoggerGUI:
                                 if config['field'] not in existing_field_names:
                                     self.txt_field_columns_config.insert(0, config)
                 
+                self.txt_field_columns_config = settings.get("txt_field_columns_config", self.txt_field_columns_config)
+                self.static_field_configs = settings.get("static_field_configs", self.static_field_configs)
+
+                # Fallback for old settings that combined them
+                if not self.static_field_configs and not all('column_name' in cfg and not str(cfg['column_name']).startswith('=') for cfg in self.txt_field_columns_config):
+                    all_configs = self.txt_field_columns_config
+                    self.txt_field_columns_config = [c for c in all_configs if not str(c.get("column_name", "")).startswith('=')]
+                    self.static_field_configs = [c for c in all_configs if str(c.get("column_name", "")).startswith('=')]
+                
                 # Re-derive these for backward compatibility
-                self.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.txt_field_columns_config}
-                self.txt_field_skips = {cfg["field"]: cfg["skip"] for cfg in self.txt_field_columns_config}
+                self.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.txt_field_columns_config + self.static_field_configs}
+                self.txt_field_skips = {cfg["field"]: cfg["skip"] for cfg in self.txt_field_columns_config + self.static_field_configs}
 
 
                 self.folder_paths.clear()
@@ -2569,6 +2587,9 @@ class SettingsWindow:
         self.selected_txt_row_index = -1  # -1 means no row is selected
         self.txt_move_up_btn = None
         self.txt_move_down_btn = None
+        self.selected_static_row_index = -1
+        self.static_move_up_btn = None
+        self.static_move_down_btn = None
         
         # Initialize color picker variables here for the new layout
         self.new_day_bg_color_var = tk.StringVar()
@@ -2579,6 +2600,7 @@ class SettingsWindow:
         # --- Create tabs (ensure each is called only ONCE) ---
         self.create_file_paths_tab()
         self.create_txt_column_mapping_tab()
+        self.create_static_fields_tab()
         self.create_button_configuration_tab()
         self.create_event_codes_tab()
         self.create_monitored_folders_tab()
@@ -2597,6 +2619,211 @@ class SettingsWindow:
         self.master.destroy()
 
     # --- Tab Creation Methods ---
+
+    def create_static_fields_tab(self):
+        """
+        Creates a new tab for configuring static fields read directly from Excel cells.
+        """
+        tab = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(tab, text="Static Fields")
+
+        ttk.Label(tab, text="Map static values from specific Excel cells to new columns in your log. Use the format: ='SheetName'!A1. Check 'Skip' to ignore a field entirely.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
+
+        # Control buttons for adding/removing fields
+        controls_frame = ttk.Frame(tab)
+        controls_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Button(controls_frame, text="Add New Field", command=self.add_static_field_row).pack(side=tk.LEFT, padx=5)
+        
+        # Keep the spacer to push the next button to the right
+        spacer = ttk.Frame(controls_frame)
+        spacer.pack(side=tk.LEFT, expand=True, fill='x')
+
+        # Remove the Move Up and Move Down buttons
+        self.static_move_up_btn = None
+        self.static_move_down_btn = None
+
+        # Canvas and Scrollbar for the dynamic field list
+        self.static_fields_canvas = tk.Canvas(tab, borderwidth=0, background="#ffffff")
+        static_scrollbar = ttk.Scrollbar(tab, orient="vertical", command=self.static_fields_canvas.yview)
+        self.static_fields_scrollable_frame = ttk.Frame(self.static_fields_canvas, style="Row0.TFrame")
+        self.static_fields_scrollable_frame.bind("<Configure>", lambda e: self.static_fields_canvas.configure(scrollregion=self.static_fields_canvas.bbox("all")))
+        self.static_fields_canvas_window = self.static_fields_canvas.create_window((0, 0), window=self.static_fields_scrollable_frame, anchor="nw")
+        self.static_fields_canvas.configure(yscrollcommand=static_scrollbar.set)
+        self.static_fields_canvas.pack(side="left", fill="both", expand=True, padx=(0,0), pady=0)
+        static_scrollbar.pack(side="right", fill="y", padx=(0,0), pady=0)
+        
+        def _on_mousewheel_static(event):
+            if event.num == 4: delta = -1
+            elif event.num == 5: delta = 1
+            elif hasattr(event, 'delta'): delta = -int(event.delta / 120)
+            else: delta = 0
+            self.static_fields_canvas.yview_scroll(delta, "units")
+        self.static_fields_canvas.bind("<MouseWheel>", _on_mousewheel_static)
+        self.static_fields_canvas.bind("<Button-4>", _on_mousewheel_static)
+        self.static_fields_canvas.bind("<Button-5>", _on_mousewheel_static)
+
+        # Store widgets for each row dynamically
+        self.static_field_row_widgets = []
+        self.add_static_field_header(self.static_fields_scrollable_frame)
+        self.recreate_static_field_rows()
+        self._update_static_move_buttons_state()
+
+    # --- New helper methods for Static Fields tab ---
+    def add_static_field_header(self, parent):
+        """Adds a header row to the static field mapping section."""
+        # New column configuration
+        parent.grid_columnconfigure(0, weight=2, minsize=150) # Description
+        parent.grid_columnconfigure(1, weight=2, minsize=150) # Excel Column Name
+        parent.grid_columnconfigure(2, weight=2, minsize=250) # Static Cell Reference
+        parent.grid_columnconfigure(3, weight=0, minsize=50)  # Skip?
+        parent.grid_columnconfigure(4, weight=0, minsize=80)  # Actions
+
+        header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
+        header_frame.grid(row=0, column=0, columnspan=5, sticky="ew") # Update columnspan
+
+        # Update the header labels with the new 'Description' column
+        ttk.Label(header_frame, text="Description", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w') 
+        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Static Cell Reference", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
+
+        for i in range(5): # Update range to 5
+            header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0), minsize=parent.grid_columnconfigure(i).get('minsize', 0))
+
+    def recreate_static_field_rows(self, reselect_index=None):
+        # Clear existing widgets except the header
+        for widget in self.static_fields_scrollable_frame.winfo_children():
+            if int(widget.grid_info()["row"]) > 0:
+                widget.destroy()
+        self.static_field_row_widgets.clear()
+        
+        # Iterate over the static_field_configs list to create each row
+        for i, config in enumerate(self.parent_gui.static_field_configs):
+            # All of the following lines must be indented
+            grid_row_index = i + 1
+            parent_frame = self.static_fields_scrollable_frame
+            widgets_in_row = []
+
+            # Create the widget for the 'Excel Column' field
+            column_entry = ttk.Entry(parent_frame)
+            column_entry.insert(0, config.get("field", ""))
+            column_entry.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
+            widgets_in_row.append(column_entry)
+            ToolTip(column_entry, "The header for the column in your Excel log.")
+
+            # Create the widget for the 'Description' field
+            description_entry = ttk.Entry(parent_frame)
+            description_entry.insert(0, config.get("description", ""))
+            description_entry.grid(row=grid_row_index, column=1, padx=5, pady=2, sticky='ew')
+            widgets_in_row.append(description_entry)
+            ToolTip(description_entry, "A brief description of this static field.")
+
+            # Create the widget for the 'Static Cell Reference' field
+            cell_entry = ttk.Entry(parent_frame)
+            cell_entry.insert(0, config.get("column_name", ""))
+            cell_entry.grid(row=grid_row_index, column=2, padx=5, pady=2, sticky="ew")
+            widgets_in_row.append(cell_entry)
+            ToolTip(cell_entry, "Enter the static cell reference, e.g., ='SheetName'!A1")
+
+            # Create the widget for the 'Skip' checkbox
+            skip_var = tk.BooleanVar(value=config.get("skip", False))
+            skip_checkbox = ttk.Checkbutton(parent_frame, variable=skip_var)
+            skip_checkbox.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky='w')
+            widgets_in_row.append(skip_checkbox)
+
+            # Create the widget for the 'Remove' button
+            remove_btn = ttk.Button(parent_frame, text="Remove", width=8, style="Toolbutton",
+                                    command=lambda idx=i: self.remove_static_field_row(idx))
+            remove_btn.grid(row=grid_row_index, column=4, padx=5, pady=2, sticky='w')
+            widgets_in_row.append(remove_btn)
+
+            # Bind the click handler to all widgets in the row for selection
+            click_handler = lambda e, idx=i: self._select_static_row(idx)
+            for widget in widgets_in_row:
+                widget.bind("<Button-1>", click_handler)
+
+            # Store the widget references in the instance variable
+            self.static_field_row_widgets.append({
+                "column_entry": column_entry,
+                "description_entry": description_entry,
+                "cell_entry": cell_entry,
+                "skip_var": skip_var,
+                "all_widgets": widgets_in_row
+            })
+        if reselect_index is not None:
+            self._select_static_row(reselect_index)
+        else:
+            self._select_static_row(-1)
+
+        self.master.after_idle(lambda: self.static_fields_canvas.config(scrollregion=self.static_fields_canvas.bbox("all")))
+
+    def _select_static_row(self, index):
+        """Highlights the selected row in the Static Fields tab."""
+        if self.selected_static_row_index != -1 and self.selected_static_row_index < len(self.static_field_row_widgets):
+            prev_row_info = self.static_field_row_widgets[self.selected_static_row_index]
+            for widget in prev_row_info.get("all_widgets", []):
+                try: widget.configure(style=f"T{type(widget).__name__}")
+                except tk.TclError: pass
+        self.selected_static_row_index = index
+        if index != -1 and index < len(self.static_field_row_widgets):
+            current_row_info = self.static_field_row_widgets[index]
+            for widget in current_row_info.get("all_widgets", []):
+                try: widget.configure(style=f"Selected.T{type(widget).__name__}")
+                except tk.TclError: pass
+        self._update_static_move_buttons_state()
+
+    def _update_static_move_buttons_state(self):
+        """Enables/disables move buttons for the Static Fields tab."""
+        can_move_up = (self.selected_static_row_index > 0)
+        can_move_down = (self.selected_static_row_index != -1 and self.selected_static_row_index < len(self.parent_gui.static_field_configs) - 1)
+        if self.static_move_up_btn: self.static_move_up_btn.config(state=tk.NORMAL if can_move_up else tk.DISABLED)
+        if self.static_move_down_btn: self.static_move_down_btn.config(state=tk.NORMAL if can_move_down else tk.DISABLED)
+    
+    def add_static_field_row(self):
+        """Adds a new row for a custom static field."""
+        new_field_index = len(self.parent_gui.static_field_configs) + 1
+        
+        # Correctly append the new configuration to the parent GUI's list
+        # The 'skip' field needs to be explicitly included with a default value.
+        self.parent_gui.static_field_configs.append({
+            "field": f"Static_Col_{new_field_index}",
+            "description": "", 
+            "column_name": f"='SheetName'!A{new_field_index}",
+            "skip": False  # <-- ADD THIS LINE
+        })
+        
+        newly_added_index = len(self.parent_gui.static_field_configs) - 1
+        self.recreate_static_field_rows(reselect_index=newly_added_index)
+        self.parent_gui.update_status(f"Added new static field 'Static_Col_{new_field_index}'.")
+
+    def remove_static_field_row(self, index_to_remove):
+        """Removes a static field row by index."""
+        if not (0 <= index_to_remove < len(self.parent_gui.static_field_configs)):
+            return
+        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove this static field?", parent=self.master):
+            del self.parent_gui.static_field_configs[index_to_remove]
+            if self.selected_static_row_index == index_to_remove: self.selected_static_row_index = -1
+            elif self.selected_static_row_index > index_to_remove: self.selected_static_row_index -= 1
+            self.recreate_static_field_rows(reselect_index=self.selected_static_row_index)
+            self.parent_gui.update_status("Static field removed.")
+    
+    def move_selected_static_field(self, direction):
+        """Moves the selected static field up or down."""
+        current_index = self.selected_static_row_index
+        if current_index == -1:
+            messagebox.showinfo("No Selection", "Please select a row to move.", parent=self.master)
+            return
+        total_items = len(self.parent_gui.static_field_configs)
+        if direction == "up" and current_index > 0:
+            self.parent_gui.static_field_configs[current_index], self.parent_gui.static_field_configs[current_index - 1] = self.parent_gui.static_field_configs[current_index - 1], self.parent_gui.static_field_configs[current_index]
+            self.selected_static_row_index -= 1
+            self.recreate_static_field_rows(reselect_index=self.selected_static_row_index)
+        elif direction == "down" and current_index < total_items - 1:
+            self.parent_gui.static_field_configs[current_index], self.parent_gui.static_field_configs[current_index + 1] = self.parent_gui.static_field_configs[current_index + 1], self.parent_gui.static_field_configs[current_index]
+            self.selected_static_row_index += 1
+            self.recreate_static_field_rows(reselect_index=self.selected_static_row_index)
 
     def create_timezone_tab(self):
         """Creates the UI tab for managing the UTC offset."""
@@ -2889,9 +3116,9 @@ class SettingsWindow:
 
     def create_txt_column_mapping_tab(self):
         tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(tab, text="Data Columns")
+        self.notebook.add(tab, text="Data Columns") # The tab name stays the same
         
-        ttk.Label(tab, text="Map header found in TXT files to your desired Excel and Database column names. Check 'Skip' to ignore a field entirely. Click on a row to select it, then use the Move Up/Down buttons to reorder.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
+        ttk.Label(tab, text="Map header found in TXT files to your desired Excel column names. Check 'Skip' to ignore a field entirely. Click on a row to select it, then use the Move Up/Down buttons to reorder.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
 
         # Control buttons for adding/removing/reordering fields
         controls_frame = ttk.Frame(tab)
@@ -2937,14 +3164,12 @@ class SettingsWindow:
             else: delta = 0
             self.txt_fields_canvas.yview_scroll(delta, "units")
         self.txt_fields_canvas.bind("<MouseWheel>", _on_mousewheel_txt) 
-        self.txt_fields_canvas.bind("<Button-4>", _on_mousewheel_txt)   
-        self.txt_fields_canvas.bind("<Button-5>", _on_mousewheel_txt)   
+        self.txt_fields_canvas.bind("<Button-4>", _on_mousewheel_txt)  
+        self.txt_fields_canvas.bind("<Button-5>", _on_mousewheel_txt)  
         
         # Store widgets for each row dynamically
-        self.txt_field_row_widgets = [] # List of dictionaries, each holding refs for a row
-        self.add_txt_field_header(self.txt_fields_scrollable_frame) # Initial header
-
-        # Populate with existing fields
+        self.txt_field_row_widgets = []
+        self.add_txt_field_header(self.txt_fields_scrollable_frame)
         self.recreate_txt_field_rows() # Will be called by load_settings too
         self._update_txt_move_buttons_state() # Initial state of move buttons
 
@@ -3010,26 +3235,24 @@ class SettingsWindow:
         parent.grid_columnconfigure(0, weight=2, minsize=50) # TXT Field Name
         parent.grid_columnconfigure(1, weight=2, minsize=150) # TXT Field Name
         parent.grid_columnconfigure(2, weight=2, minsize=150) # Target Excel Column
-        parent.grid_columnconfigure(3, weight=2, minsize=150) # Target DB Column
-        parent.grid_columnconfigure(4, weight=2, minsize=150) # Preview Data
-        parent.grid_columnconfigure(5, weight=0, minsize=50)  # Skip
-        parent.grid_columnconfigure(6, weight=0, minsize=80)  # Actions
+        parent.grid_columnconfigure(3, weight=2, minsize=150) # Preview Data
+        parent.grid_columnconfigure(4, weight=0, minsize=50)  # Skip
+        parent.grid_columnconfigure(5, weight=0, minsize=80)  # Actions
 
         header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
-        header_frame.grid(row=0, column=0, columnspan=8, sticky="ew") # Span all columns
+        header_frame.grid(row=0, column=0, columnspan=6, sticky="ew") # Span all columns
 
         # Place labels inside the header_frame, but they will align because the parent of header_frame has the config
         ttk.Label(header_frame, text="Order", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
         ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=8, sticky='w')
-        ttk.Label(header_frame, text="Excel Column / Cell", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
-        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=6, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Preview TXT Data", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=8, sticky='w')
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
 
         # Also apply the same column configure to the header_frame itself so its internal labels space out correctly
         for i in range(6):
-            header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0))
-            header_frame.grid_columnconfigure(i, minsize=parent.grid_columnconfigure(i).get('minsize', 0))
+            header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0), minsize=parent.grid_columnconfigure(i).get('minsize', 0))
 
     def _select_txt_row(self, index):
         """Highlights the selected row by changing the background of all its widgets."""
@@ -3197,8 +3420,7 @@ class SettingsWindow:
             # Remove Button
             remove_btn = ttk.Button(parent_frame, text="Remove", width=8, style="Toolbutton",
                                      command=lambda idx=i: self.remove_txt_field_row(idx))
-            if config["field"] in default_fixed_fields:
-                remove_btn.config(state=tk.DISABLED)
+            
             remove_btn.grid(row=grid_row_index, column=6, padx=5, pady=2, sticky='w')
             widgets_in_row.append(remove_btn)
 
@@ -3798,32 +4020,43 @@ class SettingsWindow:
         self.parent_gui.txt_folder_path_set2 = self.txt_path_set2_var.get().strip()
         self.parent_gui.txt_source_aliases["TXT Source 3"] = self.txt_name_set3_var.get().strip()
         self.parent_gui.txt_folder_path_set3 = self.txt_path_set3_var.get().strip()
+        
+        # --- Data Columns Tab and Static Fields Tab ---
+        # Collect data from both tabs into a single list before saving
+        all_new_configs = []
 
-        # --- Data Columns Tab ---
-        new_txt_field_configs = []
+        # Collect from TXT Data Columns Tab
         for i, row_info in enumerate(self.txt_field_row_widgets):
-            field_name = ""
-            if row_info["field_entry_widget"]:
-                field_name = row_info["field_entry_widget"].get().strip()
-            else: # For fixed fields, get the name from the original config
-                if i < len(self.parent_gui.txt_field_columns_config):
-                    field_name = self.parent_gui.txt_field_columns_config[i]["field"]
-            
+            field_name = row_info["field_entry_widget"].get().strip() if row_info["field_entry_widget"] else self.parent_gui.txt_field_columns_config[i]["field"]
             column_name = row_info["column_entry"].get().strip()
             skip_value = row_info["skip_var"].get()
-
-            if not field_name and not (field_name in DEFAULT_DATA_FIELDS):
-                field_name = f"Custom_Field_{i+1}"
-
-            new_txt_field_configs.append({
+            all_new_configs.append({
                 "field": field_name,
                 "column_name": column_name if column_name else field_name,
-                
                 "skip": skip_value
             })
-        self.parent_gui.txt_field_columns_config = new_txt_field_configs
-        self.parent_gui.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.parent_gui.txt_field_columns_config}
-        self.parent_gui.txt_field_skips = {cfg["field"]: cfg["skip"] for cfg in self.parent_gui.txt_field_columns_config}
+
+        # Collect from Static Fields Tab
+        for i, row_info in enumerate(self.static_field_row_widgets):
+            field_name = row_info["column_entry"].get().strip()
+            description = row_info["description_entry"].get().strip()
+            cell_ref = row_info["cell_entry"].get().strip()
+            skip_value = row_info["skip_var"].get()
+
+            all_new_configs.append({
+                "field": field_name,
+                "description": description,
+                "column_name": cell_ref,
+                "skip": skip_value
+            })
+
+        # Update the parent GUI's main configuration lists
+        self.parent_gui.txt_field_columns_config = [c for c in all_new_configs if not str(c.get("column_name", "")).startswith('=')]
+        self.parent_gui.static_field_configs = [c for c in all_new_configs if str(c.get("column_name", "")).startswith('=')]
+
+        # Re-derive the dictionaries for lookup
+        self.parent_gui.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in self.parent_gui.txt_field_columns_config + self.parent_gui.static_field_configs}
+        self.parent_gui.txt_field_skips = {cfg["field"]: cfg["skip"] for cfg in self.parent_gui.txt_field_columns_config + self.parent_gui.static_field_configs}
 
         # --- Monitored Folders Tab ---
         parent_folder_paths = {}
@@ -3919,6 +4152,7 @@ class SettingsWindow:
         
 
         # --- Data Columns Tab ---
+        self.parent_gui.load_settings()
         self.recreate_txt_field_rows()
         self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
 
@@ -3942,6 +4176,12 @@ class SettingsWindow:
         self.num_buttons_entry.delete(0, tk.END)
         self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
         self.recreate_custom_button_settings()
+
+        # This logic is handled inside the recreate_txt_field_rows and recreate_static_field_rows methods now.
+        self.recreate_txt_field_rows()
+        self.recreate_static_field_rows()
+        self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
+        self.master.after_idle(lambda: self.static_fields_canvas.config(scrollregion=self.static_fields_canvas.bbox("all")))
         
         # --- Programmed Events Tab ---
         self.parent_gui.new_day_event_enabled_var.set(self.parent_gui.new_day_event_enabled_var.get())
