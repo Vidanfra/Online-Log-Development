@@ -4727,6 +4727,8 @@ class SettingsWindow:
         
         # --- Timezone Tab ---
         self.parent_gui.time_offset_hours.set(self.parent_gui.time_offset_hours.get())
+        
+        self.populate_event_codes_tree()
     
 # --- Main Execution ---
 if __name__ == "__main__":

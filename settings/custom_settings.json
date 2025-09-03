@@ -8,64 +8,67 @@
         {
             "field": "Date-Time",
             "column_name": "UTC Date-Time",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Local Time",
             "column_name": "Local Date-Time",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "KP",
             "column_name": "KP",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "DCC",
             "column_name": "DCC",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Line name",
-            "column_name": "Line name",
+            "column_name": "Runline",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Latitude",
             "column_name": "Latitude",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Longitude",
             "column_name": "Longitude",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Easting",
-            "column_name": "Easting",
+            "column_name": "Easting [m]",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Northing",
-            "column_name": "Northing",
+            "column_name": "Northing [m]",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Event",
             "column_name": "Event",
+            "db_column_name": "",
             "skip": false
         },
         {
             "field": "Code",
             "column_name": "Code",
-            "skip": false
-        }
-    ],
-    "static_field_configs": [
-        {
-            "field": "Notes",
-            "description": "dsfdsf",
-            "column_name": "='Resources'!B2",
+            "db_column_name": "",
             "skip": false
         }
     ],
@@ -104,6 +107,24 @@
         "Cathx": "Cathx",
         "Hypack RAW": "Hypack RAW",
         "Eiva NaviPac": "Eiva NaviPac"
+    },
+    "folder_db_columns": {
+        "Main TXT File": "",
+        "TXT Source 2": "",
+        "TXT Source 3": "",
+        "Qinsy DB": "",
+        "Naviscan": "",
+        "SIS": "",
+        "SSS": "",
+        "SBP": "",
+        "Mag": "",
+        "Grad": "",
+        "SVP": "",
+        "SpintINS": "",
+        "Video": "",
+        "Cathx": "",
+        "Hypack RAW": "",
+        "Eiva NaviPac": ""
     },
     "file_extensions": {
         "Main TXT File": "txt",
@@ -212,10 +233,15 @@
             null
         ]
     },
+    "sqlite_enabled": false,
+    "sqlite_db_path": "",
+    "sqlite_table": "fieldlog",
     "always_on_top": false,
     "active_logging_threshold_seconds": 15,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
+    "auto_sync_enabled": false,
+    "auto_sync_interval_minutes": 30,
     "main_button_configs": {
         "Log on": {
             "event_text": "Log on event occurred",
