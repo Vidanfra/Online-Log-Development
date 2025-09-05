@@ -1708,6 +1708,8 @@ class DataLoggerGUI:
                 if font_color:
                     format_range.font.color = font_color
             
+            wb.save()
+            
             excel_message = "Excel: OK."
             success_excel = True
             
