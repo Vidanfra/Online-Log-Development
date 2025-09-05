@@ -417,7 +417,8 @@ class DataLoggerGUI:
             {"field": "Easting", "column_name": "Easting", "skip": False},
             {"field": "Northing", "column_name": "Northing", "skip": False},
             {"field": "Event", "column_name": "Event", "skip": False},
-            {"field": "Code", "column_name": "Code", "skip": False}
+            {"field": "Code", "column_name": "Code", "skip": False},
+            {"field": "KP Ref.", "column_name": "KP Ref.", "skip": False}
         ]
 
         self.static_field_configs = []
@@ -4243,8 +4244,6 @@ if __name__ == "__main__":
                 except Exception: pass
                 finally:
                     if name in gui.monitors: del gui.monitors[name]
-                if gui._auto_sync_timer_id: #REMOVE
-                    gui.master.after_cancel(gui._auto_sync_timer_id)
 
         root.destroy()
 
