@@ -32,7 +32,7 @@ EVENT_CODES_FILE = "settings/event_codes.json"
 
 # DICCTIONARY KEYS #NEEDS TO BE REVIEWED
 EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'event'} 
-DEFAULT_DATA_FIELDS = {"Date-Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "Local Time"} 
+DEFAULT_DATA_FIELDS = {"Date-Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "KP Ref."} 
 TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"] 
 DEFAULT_MONITORED_FOLDERS = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
 
@@ -826,7 +826,6 @@ class DataLoggerGUI:
             
         self._perform_log_action(event_type=event_type,
                                  event_text_for_excel=event_text_for_excel,
-                                 skip_latest_files=skip_files,
                                  triggering_button=button_widget,
                                  txt_source_key=source_key_for_log) # Use the new, configurable source key
 
@@ -878,7 +877,7 @@ class DataLoggerGUI:
                                  triggering_button=button_widget,
                                  txt_source_key=txt_source_key) 
 
-    def _perform_log_action(self, event_type, event_text_for_excel, skip_latest_files=False, triggering_button=None, txt_source_key="Main TXT"):
+    def _perform_log_action(self, event_type, event_text_for_excel, triggering_button, txt_source_key):
         """Initiates a logging action on a background thread to prevent GUI freezing."""
         # Check for invalid TXT source early on the main thread
         if txt_source_key == "None":
@@ -961,12 +960,15 @@ class DataLoggerGUI:
 
                 # 2. Get static data from Excel cells
                 static_data_from_cells = self._get_static_excel_data()
-                if static_data_from_cells: row_data.update(static_data_from_cells)
+                if static_data_from_cells: 
+                    row_data.update(static_data_from_cells)
+                else:
+                    self.update_status("Warning: Could not read static data from Excel.")
 
                 # 3. Get latest files from monitored folders (using the OPTIMIZED function)
-                if not skip_latest_files:
-                    latest_files_data = self.get_latest_files_data_fast()
-                    if latest_files_data: row_data.update(latest_files_data)
+                latest_files_data = self.get_latest_files_data_fast()
+                if latest_files_data: 
+                    row_data.update(latest_files_data)
                 
                 # Update the Event column with the FINAL, determined string
                 event_column_name = self.txt_field_columns.get("Event")
@@ -987,12 +989,27 @@ class DataLoggerGUI:
                 if code_column_name and event_code_to_log:
                     row_data[code_column_name] = event_code_to_log
 
+                # Find the KP Ref from the button config
+                txt_source_file = ""
+                if event_type in self.main_button_configs: # Search main buttons
+                    txt_source_file = self.main_button_configs[event_type].get("txt_source_key", "")
+                else: # Search custom buttons
+                    for cfg in self.custom_button_configs:
+                        if cfg['text'] == event_type:
+                            txt_source_file = cfg.get("txt_source_key", "")
+                            break
+                kp_ref_to_log = self.txt_source_aliases.get(txt_source_file, "")
+                kp_ref_column_name = self.txt_field_columns.get("KP Ref.")
+                if kp_ref_column_name and kp_ref_to_log:
+                    row_data[kp_ref_column_name] = kp_ref_to_log
+
                 # Get colors from dictionary
                 color_tuple = self.button_colors.get(event_type, (None, None))
                 row_color = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
                 font_color = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
 
                 # Attempt to save to Excel
+                print(f"Logging event '{event_type}' with data: {row_data}")
                 excel_success, success_sqlite, excel_message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
                 
                 # **FIX:** Define the 'message' variable here based on the result
@@ -1432,7 +1449,7 @@ class DataLoggerGUI:
                     old_txt_skips = settings.get("txt_field_skips", {})
                     # Reconstruct the ordered list from old dicts, prioritizing new fields
                     new_config = []
-                    default_order_fields = ["Date", "Time", "Local Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code"]
+                    default_order_fields = DEFAULT_DATA_FIELDS
                     for field in default_order_fields:
                         new_config.append({
                             "field": field,
@@ -4226,7 +4243,7 @@ if __name__ == "__main__":
                 except Exception: pass
                 finally:
                     if name in gui.monitors: del gui.monitors[name]
-                if gui._auto_sync_timer_id:
+                if gui._auto_sync_timer_id: #REMOVE
                     gui.master.after_cancel(gui._auto_sync_timer_id)
 
         root.destroy()
