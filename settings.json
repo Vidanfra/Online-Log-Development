@@ -1,0 +1,59 @@
+{
+    "db_path": "C:/reachsubsea/HorizonLogbook/db.sqlite",
+    "excel_path": "C:/reachsubsea/HorizonLogbook/FieldLogViewer.xlsx",
+    "keywords": [
+        "Log on",
+        "Log off",
+        "",
+        "SVP",
+        "",
+        ""
+    ],
+    "colors_rgb": [
+        [
+            255,
+            204,
+            204
+        ],
+        [
+            255,
+            255,
+            153
+        ],
+        [
+            204,
+            255,
+            204
+        ],
+        [
+            204,
+            229,
+            255
+        ],
+        [
+            255,
+            229,
+            204
+        ],
+        [
+            229,
+            204,
+            255
+        ]
+    ],
+    "selected_columns": [
+        "datetime",
+        "runline",
+        "kp",
+        "kp_ref",
+        "event",
+        "rov_video",
+        "code",
+        "easting_m",
+        "northing_m",
+        "dcc",
+        "sbd_files",
+        "qinsy_db",
+        "notes"
+    ]
+}

@@ -793,7 +793,7 @@ class DataLoggerGUI:
             os.makedirs(backup_folder, exist_ok=True)
 
             # Construct the backup filename with a timestamp
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S")
             backup_name = f"{os.path.splitext(db_name)[0]}_backup_{timestamp}{os.path.splitext(db_name)[1]}"
             backup_path = os.path.join(backup_folder, backup_name)
 
@@ -1498,14 +1498,14 @@ class DataLoggerGUI:
 
         # ❗ FIX: Use utc_now for both Date and Time to ensure timestamp consistency.
         if date_col and not self.txt_field_skips.get("Date"):
-            row_data[date_col] = utc_now.strftime("%Y-%m-%d")
+            row_data[date_col] = utc_now.strftime("%Y-%m-%d %H:%M:%S")
 
         if utc_time_col and not self.txt_field_skips.get("Time"):
-            row_data[utc_time_col] = utc_now.strftime("%H:%M:%S")
+            row_data[utc_time_col] = utc_now.strftime("%Y-%m-%d %H:%M:%S")
 
         # This part is correct and will now work as long as "Local Time" is configured in settings.
         if local_time_col and not self.txt_field_skips.get("Local Time"):
-            row_data[local_time_col] = local_time.strftime("%H:%M:%S")
+            row_data[local_time_col] = local_time.strftime("%Y-%m-%d %H:%M:%S")
 
         for col, val in temp_txt_data.items():
             if col not in row_data:
