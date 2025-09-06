@@ -34,7 +34,7 @@ EVENT_CODES_FILE = "settings/event_codes.json"
 
 # DICCTIONARY KEYS #NEEDS TO BE REVIEWED
 EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'event'} 
-DEFAULT_DATA_FIELDS = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "Local Time"} 
+DEFAULT_DATA_FIELDS = {"Date", "Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "KP Ref.", "Local Time"} 
 TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"] 
 DEFAULT_MONITORED_FOLDERS = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
 
@@ -425,7 +425,8 @@ class DataLoggerGUI:
             {"field": "Easting", "column_name": "Easting", "skip": False},
             {"field": "Northing", "column_name": "Northing", "skip": False},
             {"field": "Event", "column_name": "Event", "skip": False}, # Default "Event" field is still here
-            {"field": "Code", "column_name": "Code", "skip": False}
+            {"field": "Code", "column_name": "Code", "skip": False},
+            {"field": "KP Ref.", "column_name": "KP Ref.", "skip": False}
 
         ]
         # These two will be derived from txt_field_columns_config for backwards compatibility/easier lookup
@@ -1388,13 +1389,34 @@ class DataLoggerGUI:
                 if code_column_name and event_code_to_log:
                     row_data[code_column_name] = event_code_to_log
 
+                # Find the KP Ref from the button config
+                txt_source_file = ""
+                if event_type in self.main_button_configs: # Search main buttons
+                    txt_source_file = self.main_button_configs[event_type].get("txt_source_key", "")
+                else: # Search custom buttons
+                    for cfg in self.custom_button_configs:
+                        if cfg['text'] == event_type:
+                            txt_source_file = cfg.get("txt_source_key", "")
+                            break
+                kp_ref_to_log = self.txt_source_aliases.get(txt_source_file, "")
+                kp_ref_column_name = self.txt_field_columns.get("KP Ref.")
+                if kp_ref_column_name and kp_ref_to_log:
+                    row_data[kp_ref_column_name] = kp_ref_to_log
+
                 # Get colors from dictionary
                 color_tuple = self.button_colors.get(event_type, (None, None))
                 row_color = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
                 font_color = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
 
-                # Perform the blocking save operation
-                success_excel, success_sqlite, message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
+                # Attempt to save to Excel
+                print(f"Logging event '{event_type}' with data: {row_data}")
+                excel_success, success_sqlite, excel_message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
+                
+                # **FIX:** Define the 'message' variable here based on the result
+                if excel_success:
+                    message = f"'{event_type}' logged successfully. {excel_message}"
+                else:
+                    message = f"Error logging '{event_type}'. {excel_message}"
 
                 # Use master.after to schedule the GUI update on the main thread
                 if triggering_button:
@@ -1420,7 +1442,7 @@ class DataLoggerGUI:
                     ))
                 else:
                     self.master.after(0, self.update_status, status_msg)
-        
+            
         # Start the background thread
         log_thread = threading.Thread(target=_log_worker, daemon=True)
         log_thread.start()
@@ -1440,11 +1462,10 @@ class DataLoggerGUI:
         """
         row_data = {}
         # Use datetime.now(datetime.UTC) for an explicit, timezone-aware UTC timestamp
-        utc_now = datetime.datetime.now(datetime.UTC) # <--- FIX 1: Use modern, non-deprecated function
+        utc_now = datetime.datetime.now(datetime.UTC)
         
         # Calculate local time by applying the configured offset
-        # The 'DataLoggerGUI' object refers to its own attributes with 'self', not 'self.parent_gui'.
-        offset_delta = datetime.timedelta(hours=self.time_offset_hours.get()) # <--- FIX 2: Corrected attribute reference to 'self'
+        offset_delta = datetime.timedelta(hours=self.time_offset_hours.get())
         local_time = utc_now + offset_delta
 
         latest_txt_file_path = None
@@ -1454,7 +1475,6 @@ class DataLoggerGUI:
                 latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".csv")
         else:
             print(f"TXT folder path is invalid or empty: {folder_path}")
-            # Still return time data even if the folder path is bad
             pass
 
         temp_txt_data = {}
@@ -1466,7 +1486,6 @@ class DataLoggerGUI:
                 read_success = False
                 for enc in encodings_to_try:
                     try:
-                        # Add a small delay to avoid file contention
                         time.sleep(0.05)
                         with open(latest_txt_file_path, "r", encoding=enc) as file:
                             lines = file.readlines()
@@ -1490,7 +1509,6 @@ class DataLoggerGUI:
             except Exception as e:
                 print(f"Major error during TXT parsing: {e}")
 
-        # --- Time and Date Population ---
         # --- Time and Date Population ---
         date_col = next((c['column_name'] for c in self.txt_field_columns_config if c['field'] == 'Date'), None)
         utc_time_col = next((c['column_name'] for c in self.txt_field_columns_config if c['field'] == 'Time'), None)
@@ -1930,7 +1948,7 @@ class DataLoggerGUI:
                     old_txt_skips = settings.get("txt_field_skips", {})
                     # Reconstruct the ordered list from old dicts, prioritizing new fields
                     new_config = []
-                    default_order_fields = ["Date", "Time", "Local Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code"]
+                    default_order_fields = DEFAULT_DATA_FIELDS
                     for field in default_order_fields:
                         new_config.append({
                             "field": field,
@@ -1946,6 +1964,7 @@ class DataLoggerGUI:
                             new_config.append({
                                 "field": field_key,
                                 "column_name": col_name,
+                                "description": "", 
                                 "skip": old_txt_skips.get(field_key, False)
                             })
                     self.txt_field_columns_config = new_config
