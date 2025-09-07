@@ -89,27 +89,32 @@
     "folder_paths": {
         "Main TXT File": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
         "TXT Source 4": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
-        "Qinsy DB": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/Database"
+        "Qinsy DB": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/Database",
+        "S-File": "C:/Users/Administrator/Desktop/PYTHON/Executables"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File",
         "TXT Source 4": "TXT_Set4_File",
-        "Qinsy DB": "Qinsy DB"
+        "Qinsy DB": "Qinsy DB",
+        "S-File": "S-Files"
     },
     "file_extensions": {
         "Main TXT File": "txt",
         "TXT Source 4": "txt",
-        "Qinsy DB": "db"
+        "Qinsy DB": "db",
+        "S-File": "_S.NPD"
     },
     "folder_skips": {
         "Main TXT File": false,
         "TXT Source 4": false,
-        "Qinsy DB": false
+        "Qinsy DB": false,
+        "S-File": false
     },
     "folder_log_x_instead": {
         "Main TXT File": false,
         "TXT Source 4": false,
-        "Qinsy DB": false
+        "Qinsy DB": false,
+        "S-File": false
     },
     "num_custom_buttons": 3,
     "custom_button_configs": [

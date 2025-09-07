@@ -828,6 +828,47 @@ class DataLoggerGUI:
             # This can happen if the widget is destroyed between the check and the config call
             pass
 
+    def _find_closest_sfile(self, historic_dt):
+        """
+        Finds the S-File with the timestamp closest to, but before, the historic datetime.
+        S-Files are expected in a monitored folder named 'S-File' and formatted as YYYYMMDD_HHMMSS_S.
+        """
+        # NOTE: This assumes your monitored folder for S-Files is named "S-File" in the settings.
+        sfile_folder_key = "S-File" 
+        sfile_folder_path = self.folder_paths.get(sfile_folder_key)
+
+        if not sfile_folder_path or not os.path.isdir(sfile_folder_path):
+            self.update_status(f"Warning: S-File folder '{sfile_folder_key}' not configured or found.")
+            return None
+
+        candidate_files = []
+        # Walk through the directory and all subdirectories to find all files
+        for root, _, files in os.walk(sfile_folder_path):
+            for filename in files:
+                # Parse filename to get datetime
+                basename, _ = os.path.splitext(filename)
+                try:
+                    # >>> THIS LINE IS CHANGED <<<
+                    # The format string now includes the literal "_S" at the end.
+                    file_dt = datetime.datetime.strptime(basename, "%Y%m%d_%H%M%S_S")
+                    
+                    # Make the historic_dt timezone-unaware for a direct comparison
+                    historic_dt_unaware = historic_dt.replace(tzinfo=None)
+
+                    # Only consider files created *before* the historic event
+                    if file_dt < historic_dt_unaware:
+                        candidate_files.append((file_dt, os.path.join(root, filename)))
+                except ValueError:
+                    # Ignore any files that don't match the YYYYMMDD_HHMMSS_S format
+                    continue
+        
+        if not candidate_files:
+            self.update_status(f"No S-Files found before {historic_dt.strftime('%Y-%m-%d %H:%M:%S')}.")
+            return None
+
+        # From the valid candidates, find the one with the latest timestamp
+        closest_file_tuple = max(candidate_files, key=lambda item: item[0])
+        return closest_file_tuple[1] # Return the full path of the best match
 
     # --- Logging Actions ---
     def log_event(self, event_type, button_widget, txt_source_key="Main TXT"):
@@ -890,23 +931,48 @@ class DataLoggerGUI:
 
         file_to_search = details['file_path']
         user_time = details['time_obj']
+        # >>> CHANGE START <<<
+        # Use the original time string from the dialog for the file search
+        time_str_to_find = details['time_str'] 
+        # >>> CHANGE END <<<
+        insert_sfile = details['insert_sfile']
 
-        # 2. Construct the final datetime for the log entry from the file's metadata
+        # 2. Construct the final datetime (unchanged)
         final_datetime = None
         try:
             file_mtime = os.path.getmtime(file_to_search)
             file_date = datetime.date.fromtimestamp(file_mtime)
-            final_datetime = datetime.datetime.combine(file_date, user_time)
+            final_datetime = datetime.datetime.combine(file_date, user_time).replace(tzinfo=datetime.timezone.utc)
         except Exception as e:
             messagebox.showerror("File Error", f"Could not read the file's modification date:\n{e}", parent=self.master)
             return
 
+        # 2.5 Handle S-File search (unchanged)
+        additional_data_to_log = {}
+        if insert_sfile:
+            # ... (S-File logic remains the same)
+            sfile_folder_key = "S-File" 
+            sfile_column_name = self.folder_columns.get(sfile_folder_key)
+            if not sfile_column_name:
+                messagebox.showwarning("Configuration Error",
+                                     f"The target column for '{sfile_folder_key}' is not configured in Folder Settings.",
+                                     parent=self.master)
+            else:
+                self.update_status("Searching for corresponding S-File...")
+                closest_sfile_path = self._find_closest_sfile(final_datetime)
+                if closest_sfile_path:
+                    sfile_name, _ = os.path.splitext(os.path.basename(closest_sfile_path))
+                    additional_data_to_log[sfile_column_name] = sfile_name
+                    self.update_status(f"Found S-File: {sfile_name}")
+                else:
+                    additional_data_to_log[sfile_column_name] = "N/A"
+                    self.update_status("No matching S-File found.")
+
         # 3. Search for the time within the chosen file
-        time_str_to_find = user_time.strftime('%H:%M')
+        # >>> CHANGE START <<<
+        # The line that formatted time_str_to_find is no longer needed, as we get it directly from the dialog.
+        # >>> CHANGE END <<<
         
-        # >>> THE FIX: A more precise regular expression pattern <<<
-        # This pattern ensures the HH:MM is either at the start of a line
-        # or is not preceded by a digit or a colon, solving the matching issue.
         search_pattern = r"(?:^|[^A-Za-z0-9:])" + re.escape(time_str_to_find)
         
         self.update_status(f"Searching for time '{time_str_to_find}' in {os.path.basename(file_to_search)}...")
@@ -934,7 +1000,11 @@ class DataLoggerGUI:
             txt_source_key="Manual/Historic",
             override_txt_data=parsed_data,
             override_utc_datetime=final_datetime,
-            skip_monitored_folders=True 
+            skip_monitored_folders=True,
+            # >>> CHANGE START <<<
+            # Pass the S-File data (if any) to the logging function
+            additional_data=additional_data_to_log
+            # >>> CHANGE END <<<
         )
     
     
@@ -968,8 +1038,10 @@ class DataLoggerGUI:
                                  triggering_button=button_widget,
                                  txt_source_key=txt_source_key) 
 
-    def _perform_log_action(self, event_type, event_text_for_excel, triggering_button, txt_source_key, override_txt_data=None, override_utc_datetime=None, skip_monitored_folders=False):
+    def _perform_log_action(self, event_type, event_text_for_excel, triggering_button, txt_source_key, override_txt_data=None, override_utc_datetime=None, skip_monitored_folders=False, additional_data=None):
         """Initiates a logging action on a background thread to prevent GUI freezing."""
+        # >>> The only change here is adding `additional_data=None` to the function signature
+        
         original_text = None
         if triggering_button and isinstance(triggering_button, ttk.Button) and triggering_button.winfo_exists():
             original_text = triggering_button['text']
@@ -999,6 +1071,12 @@ class DataLoggerGUI:
                     latest_files_data = self.get_latest_files_data_fast()
                     if latest_files_data:
                         row_data.update(latest_files_data)
+
+                # >>> CHANGE START <<<
+                # Add the extra data (like the S-File name) to the row
+                if additional_data:
+                    row_data.update(additional_data)
+                # >>> CHANGE END <<<
 
                 # --- PROCESSING AND GENERATED FIELDS ---
                 final_event_text = event_text_for_excel
@@ -1132,8 +1210,9 @@ class DataLoggerGUI:
         
         # --- Variables ---
         now = datetime.datetime.now()
-        time_var = tk.StringVar(value=now.strftime('%H:%M'))
+        time_var = tk.StringVar(value=now.strftime('%H:%M:%S')) # Default to more precise format
         file_path_var = tk.StringVar(value="No file selected...")
+        insert_sfile_var = tk.BooleanVar(value=False)
 
         # --- Widgets ---
         def browse_file():
@@ -1145,7 +1224,7 @@ class DataLoggerGUI:
             if file_path:
                 file_path_var.set(file_path)
 
-        # Row 0: File Selection
+        # Row 0: File Selection (unchanged)
         ttk.Label(frame, text="Log File:").grid(row=0, column=0, sticky='w', pady=5, padx=5)
         file_entry = ttk.Entry(frame, textvariable=file_path_var, state="readonly", width=50)
         file_entry.grid(row=0, column=1, sticky='ew', pady=5, padx=5)
@@ -1153,29 +1232,53 @@ class DataLoggerGUI:
         browse_btn.grid(row=0, column=2, sticky='ew', pady=5, padx=5)
 
         # Row 1: Time Entry
-        ttk.Label(frame, text="Time to Find (HH:MM):").grid(row=1, column=0, sticky='w', pady=5, padx=5)
+        # >>> CHANGE START <<<
+        # Update the label to show both accepted formats
+        ttk.Label(frame, text="Time to Find (HH:MM:SS or HH:MM):").grid(row=1, column=0, sticky='w', pady=5, padx=5)
+        # >>> CHANGE END <<<
         time_entry = ttk.Entry(frame, textvariable=time_var, width=15)
         time_entry.grid(row=1, column=1, sticky='w', pady=5, padx=5)
+
+        # Row 2: S-File Checkbox (unchanged)
+        sfile_check = ttk.Checkbutton(frame, text="Insert S-File ID", variable=insert_sfile_var)
+        sfile_check.grid(row=2, column=0, columnspan=2, sticky='w', pady=(10, 5), padx=5)
+        ToolTip(sfile_check, "If checked, finds the closest S-File before this time and logs its name.\nRequires 'S-File' folder to be configured in Settings.")
 
         # --- OK / Cancel Logic ---
         def on_ok():
             file_path = file_path_var.get()
-            time_str = time_var.get()
+            time_str = time_var.get().strip() # Get the user's input
 
             if not os.path.isfile(file_path):
                 messagebox.showwarning("Input Error", "Please select a valid log file first.", parent=dialog)
                 return
 
+            # >>> CHANGE START <<<
+            # New logic to handle both HH:MM:SS and HH:MM
+            t_obj = None
             try:
-                t_obj = datetime.datetime.strptime(time_str, '%H:%M').time()
-                result['file_path'] = file_path
-                result['time_obj'] = t_obj
-                dialog.destroy()
+                # First, try parsing the more specific HH:MM:SS format
+                t_obj = datetime.datetime.strptime(time_str, '%H:%M:%S').time()
             except ValueError:
-                messagebox.showwarning("Invalid Format", "Please enter the time in HH:MM format.", parent=dialog)
+                # If that fails, try parsing the HH:MM format
+                try:
+                    t_obj = datetime.datetime.strptime(time_str, '%H:%M').time()
+                except ValueError:
+                    # If both formats fail, show a single, clear error message
+                    messagebox.showwarning("Invalid Format", "Please enter the time in HH:MM:SS or HH:MM format.", parent=dialog)
+                    return
+            
+            # If either format succeeded, t_obj will have a value.
+            # Now, populate the results dictionary.
+            result['file_path'] = file_path
+            result['time_obj'] = t_obj
+            result['time_str'] = time_str # Also pass the original string for the file search
+            result['insert_sfile'] = insert_sfile_var.get()
+            dialog.destroy()
+            # >>> CHANGE END <<<
         
         button_frame = ttk.Frame(frame)
-        button_frame.grid(row=2, column=0, columnspan=3, pady=(10,0), sticky='e')
+        button_frame.grid(row=3, column=0, columnspan=3, pady=(10,0), sticky='e')
         ttk.Button(button_frame, text="OK", command=on_ok, style="Accent.TButton").pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT)
         
