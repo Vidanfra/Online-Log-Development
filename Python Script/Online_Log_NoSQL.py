@@ -505,24 +505,24 @@ class DataLoggerGUI:
 
     # --- GUI Creation ---
     def create_main_buttons(self):
-        '''
+        """
         Builds and renders all the buttons in the GUI dynamically, grouped for better intuitiveness.
         Custom buttons are now organized into tabs within a ttk.Notebook.
-        '''
-        # Clear existing widgets from all three frames
+        """
+        # (The first part of this function that clears frames is unchanged)
         for frame in [self.custom_buttons_frame, self.general_buttons_frame, self.config_frame]:
             for widget in frame.winfo_children():
                 widget.destroy()
-        self.custom_buttons = [] # Reset custom_buttons list
+        self.custom_buttons = []
 
         # --- Section 1: Custom Events (Left Side) ---
+        # (This entire section for creating the custom button notebook is unchanged)
         custom_lf = ttk.LabelFrame(self.custom_buttons_frame, text="Custom Events")
         custom_lf.pack(fill="both", expand=True)
         self.custom_buttons_notebook = ttk.Notebook(custom_lf)
         self.custom_buttons_notebook.pack(fill="both", expand=True, padx=5, pady=5)
         self.custom_buttons_notebook.bind("<Button-3>", self._show_tab_context_menu)
         self.custom_button_tab_frames = {}
-
         all_tab_groups = sorted(list(set(self.custom_button_tab_groups)))
         for tab_group_name in all_tab_groups:
             if tab_group_name:
@@ -530,16 +530,12 @@ class DataLoggerGUI:
                 self.custom_buttons_notebook.add(tab_frame, text=tab_group_name)
                 self.custom_button_tab_frames[tab_group_name] = tab_frame
                 tab_frame.bind("<Button-3>", self._show_add_button_context_menu)
-
-        # Prepare and sort custom button data by tab
         custom_buttons_by_tab = {group: [] for group in all_tab_groups if group}
         for config in self.custom_button_configs[:self.num_custom_buttons]:
             tab_group = config.get("tab_group", "Main")
             if tab_group not in custom_buttons_by_tab:
                 custom_buttons_by_tab[tab_group] = []
             custom_buttons_by_tab[tab_group].append(config)
-
-        # Create and grid custom buttons inside their tabs
         for tab_group, configs in custom_buttons_by_tab.items():
             if tab_group in self.custom_button_tab_frames:
                 tab_frame = self.custom_button_tab_frames[tab_group]
@@ -547,46 +543,25 @@ class DataLoggerGUI:
                     button_text = config.get("text", "Custom")
                     event_desc = config.get("event_text", "Triggered")
                     txt_source = config.get("txt_source_key", "None")
-
-                    # Retrieve configured background and font colors for this specific button
-                    # Fallback to source_based_colors for background if button-specific not set
                     bg_color_hex, font_color_hex = self.button_colors.get(button_text, (None, None))
-                    
-                    # If button-specific background is not set, try source_based_colors
                     if not bg_color_hex:
                         bg_color_hex = self.source_based_colors.get(txt_source)
-                    
-                    # Create a unique style name for this button
-                    # Use a clean version of button_text for the style name
                     cleaned_button_text = ''.join(e for e in button_text if e.isalnum()) 
                     style_name = f"CustomBtn_{cleaned_button_text}.TButton"
-                    
-                    # Configure the specific style for this button
                     style_config = {}
                     if bg_color_hex:
                         style_config['background'] = bg_color_hex
                     if font_color_hex:
-                        style_config['foreground'] = font_color_hex # This is where font color is applied
-
-                    # Configure or re-configure the style based on collected colors
-                    # Ensure font is always set, and padding is maintained
+                        style_config['foreground'] = font_color_hex
                     self.style.configure(style_name, font=("Arial", 10, "bold"), padding=4, **style_config)
-                    
                     button = ttk.Button(tab_frame, text=button_text, style=style_name)
-                    # Corrected: lambda function for command
                     button.config(command=lambda c=config, b=button: self.log_custom_event(c, b))
-                    
-
-                    # Calculate row and column based on the number of columns
                     num_columns = LAYOUT_BUTTON_COLUMNS
                     row = i // num_columns
                     col = i % num_columns
-
                     button.grid(row=row, column=col, padx=3, pady=3, sticky="nsew")
-                    
                     tab_frame.columnconfigure(col, weight=1)
                     tab_frame.rowconfigure(row, weight=1)
-                    
                     original_index = self.custom_button_configs.index(config)
                     button.bind("<Button-3>", lambda e, idx=original_index: self._show_custom_button_context_menu(e, idx))
                     ToolTip(button, f"Log '{event_desc}' (Source: {txt_source})")
@@ -596,67 +571,51 @@ class DataLoggerGUI:
         general_lf = ttk.LabelFrame(self.general_buttons_frame, text="General Events")
         general_lf.pack(fill="both", expand=True)
         general_lf.columnconfigure((0, 1), weight=1)
+        # >>> CHANGE 1: Configure a 3rd row for the new button
         general_lf.rowconfigure((0, 1, 2), weight=1)
 
-        # --- Helper function to create styled main buttons ---
+        # Helper function to create styled main buttons (unchanged)
         def create_main_button(parent, text, command_func, tooltip_text, grid_row, grid_col):
-            # 1. Get the configured colors (background, font)
             bg_color_hex, font_color_hex = self.button_colors.get(text, (None, None))
-            
-            # 2. Create a unique style for this button
             cleaned_text = ''.join(e for e in text if e.isalnum()) 
             style_name = f"MainBtn_{cleaned_text}.TButton"
-            
-            # 3. Configure the style with the colors, if they are set
             style_config = {}
             if bg_color_hex:
                 style_config['background'] = bg_color_hex
             if font_color_hex:
                 style_config['foreground'] = font_color_hex
-            
-            # Ensure font is always set, and padding is maintained
             self.style.configure(style_name, font=("Arial", 10, "bold"), padding=4, **style_config)
-            
-            # 4. Create the button with the dynamic style
-            btn = ttk.Button(parent, text=text, style=style_name, command=command_func) # Command is now correctly passed
+            btn = ttk.Button(parent, text=text, style=style_name, command=command_func)
             btn.grid(row=grid_row, column=grid_col, padx=4, pady=4, sticky="nsew")
-            
-            # 5. Add right-click menu and tooltip
             btn.bind("<Button-3>", lambda e, name=text: self._show_main_button_context_menu(e, name))
             ToolTip(btn, tooltip_text)
             return btn
 
-        # --- Create the buttons using the helper function ---
-        # The lambda for the command needs to wrap the function call to ensure the button itself is passed
-        # and that the logging function is called *when the button is clicked*, not when it's created.
+        # Create the standard buttons
         create_main_button(general_lf, "Log on", lambda b=None: self.log_event("Log on", b, "Main TXT"), "Record a 'Log on' marker.", 0, 0)
         create_main_button(general_lf, "Log off", lambda b=None: self.log_event("Log off", b, "Main TXT"), "Record a 'Log off' marker.", 1, 0)
         create_main_button(general_lf, "Event", lambda b=None: self.log_event("Event", b, "Main TXT"), "Record data from the Main TXT source.", 0, 1)
         create_main_button(general_lf, "SVP", lambda b=None: self.log_svp("SVP", b, "Main TXT"), "Record data and insert latest SVP filename.", 1, 1)
 
-
+        # >>> CHANGE 2: Add the new "Add Historic Event" button to the grid
+        historic_btn = ttk.Button(general_lf, text="Add Historic Event", command=self.add_historic_event)
+        historic_btn.grid(row=2, column=0, columnspan=2, padx=4, pady=4, sticky="nsew")
+        ToolTip(historic_btn, "Add an event from a past date/time by searching the Main data source file.")
+        
         # --- Section 3: Configuration Buttons (Right Side) ---
-
+        # (This entire section is unchanged)
         config_lf = ttk.LabelFrame(self.config_frame, text="Configuration")
         config_lf.grid(row=0, column=0, sticky="nsew")
         self.config_frame.columnconfigure(0, weight=1)
-
-        # CHANGE 1: Configure a 2x2 grid layout with equal weighting.
         config_lf.columnconfigure((0, 1), weight=1)
         config_lf.rowconfigure((0, 1), weight=1)
-
         self.monitoring_button = ttk.Button(config_lf, text="Start Monitoring", style="Small.TButton", command=self.toggle_monitoring)
-        # CHANGE 2: Place the monitoring button on the top row, spanning both columns.
         self.monitoring_button.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=4, pady=(4, 2))
         ToolTip(self.monitoring_button, "Start or stop monitoring all configured folders for file changes.")
-        self.update_monitoring_button_ui() # Set initial button text and style
-
+        self.update_monitoring_button_ui()
         btn_settings = ttk.Button(config_lf, text="Settings", style="Small.TButton", command=self.open_settings)
-        # CHANGE 3: Place the settings button on the bottom row, first column.
         btn_settings.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=4, pady=(2, 4))
         ToolTip(btn_settings, "Open the configuration window.")
-
-    # PASTE THESE TWO METHODS INTO THE DataLoggerGUI CLASS
 
     def preview_data_file(self):
         """Finds the latest TXT or NPD file and displays the data in the settings window preview."""
@@ -900,23 +859,85 @@ class DataLoggerGUI:
                                  txt_source_key=source_key_for_log) # Use the new, configurable source key
 
     def log_custom_event(self, config, button_widget):
-        '''
+        """
         This function is called when a custom event button is pressed.
-        It retrieves the button text and event text from the configuration, then calls _perform_log_action to log the event.
-        Arguments:
-        * config: The configuration dictionary for the custom button, containing "text" and "event_text".
-        * button_widget: The button widget that was pressed, used to temporarily disable it during processing.
-        * txt_source_set: The set number (1 or 2) indicating which TXT source to use for logging.
-        '''
+        It retrieves the button text and event text from the configuration, 
+        then calls _perform_log_action to log the event.
+        """
         button_text = config.get("text", "Unknown Custom")
         event_text_for_excel = config.get("event_text", f"{button_text} Triggered")
-        txt_source_key = config.get("txt_source_key", "None") # This is correctly getting the key
+        txt_source_key = config.get("txt_source_key", "None")
         
-        self._perform_log_action(event_type=button_text,
-                                 event_text_for_excel=event_text_for_excel,
-                                 triggering_button=button_widget,
-                                 txt_source_key=txt_source_key) # This is correctly passing it
+        self._perform_log_action(
+            event_type=button_text,
+            event_text_for_excel=event_text_for_excel,
+            triggering_button=button_widget,
+            txt_source_key=txt_source_key
+        )
 
+    def add_historic_event(self):
+        """
+        Adds a historic event by letting the user choose a file and enter a time
+        in a single dialog. The log date is derived from the chosen file's 
+        'last modified' date.
+        """
+        # 1. Open the combined dialog to get all details from the user
+        details = self._ask_for_historic_event_details_dialog()
+        
+        if not details:
+            self.update_status("Historic event entry cancelled.")
+            return
+
+        file_to_search = details['file_path']
+        user_time = details['time_obj']
+
+        # 2. Construct the final datetime for the log entry from the file's metadata
+        final_datetime = None
+        try:
+            file_mtime = os.path.getmtime(file_to_search)
+            file_date = datetime.date.fromtimestamp(file_mtime)
+            final_datetime = datetime.datetime.combine(file_date, user_time)
+        except Exception as e:
+            messagebox.showerror("File Error", f"Could not read the file's modification date:\n{e}", parent=self.master)
+            return
+
+        # 3. Search for the time within the chosen file
+        time_str_to_find = user_time.strftime('%H:%M')
+        
+        # >>> THE FIX: A more precise regular expression pattern <<<
+        # This pattern ensures the HH:MM is either at the start of a line
+        # or is not preceded by a digit or a colon, solving the matching issue.
+        search_pattern = r"(?:^|[^A-Za-z0-9:])" + re.escape(time_str_to_find)
+        
+        self.update_status(f"Searching for time '{time_str_to_find}' in {os.path.basename(file_to_search)}...")
+        found_line = self._search_file_for_line(file_to_search, search_pattern)
+        
+        if not found_line:
+            messagebox.showinfo("Time Not Found",
+                                f"The time '{time_str_to_find}' was not found within the selected file.",
+                                parent=self.master)
+            self.update_status(f"Time '{time_str_to_find}' not found.")
+            return
+            
+        # 4. Parse and log the data
+        parsed_data = self._parse_txt_line(found_line)
+        if not parsed_data:
+            messagebox.showerror("Parse Error", "Could not parse the found line. The line might be empty or malformed.", parent=self.master)
+            self.update_status("Error parsing the found line.")
+            return
+        
+        self.update_status(f"Found line for '{time_str_to_find}'. Logging...")
+        self._perform_log_action(
+            event_type="Historic Event",
+            event_text_for_excel=f"Historic data for {final_datetime.strftime('%Y-%m-%d %H:%M')}",
+            triggering_button=None,
+            txt_source_key="Manual/Historic",
+            override_txt_data=parsed_data,
+            override_utc_datetime=final_datetime,
+            skip_monitored_folders=True 
+        )
+    
+    
     def log_svp(self, event_type, button_widget, txt_source_key="Main TXT"):
         '''
         This function is called when the "SVP" button is pressed.
@@ -947,13 +968,8 @@ class DataLoggerGUI:
                                  triggering_button=button_widget,
                                  txt_source_key=txt_source_key) 
 
-    def _perform_log_action(self, event_type, event_text_for_excel, triggering_button, txt_source_key):
+    def _perform_log_action(self, event_type, event_text_for_excel, triggering_button, txt_source_key, override_txt_data=None, override_utc_datetime=None, skip_monitored_folders=False):
         """Initiates a logging action on a background thread to prevent GUI freezing."""
-        # Check for invalid TXT source early on the main thread
-        if txt_source_key == "None":
-            # Allow events with no source to proceed but they might be missing data
-            pass
-
         original_text = None
         if triggering_button and isinstance(triggering_button, ttk.Button) and triggering_button.winfo_exists():
             original_text = triggering_button['text']
@@ -964,75 +980,85 @@ class DataLoggerGUI:
         def _log_worker():
             """The function that runs on the background thread."""
             try:
-                # Start with an empty row
                 row_data = {}
-
                 # --- DATA GATHERING ---
-
-                # 1. Get data parsed from the TXT file if a source is specified
-                if txt_source_key != "None":
-                    source_folder_path = None
-                    if txt_source_key == "Main TXT": source_folder_path = self.txt_folder_path
-                    elif txt_source_key == "TXT Source 2": source_folder_path = self.txt_folder_path_set2
-                    elif txt_source_key == "TXT Source 3": source_folder_path = self.txt_folder_path_set3
-                    elif txt_source_key == "TXT Source 4": source_folder_path = self.txt_folder_path_set4
-                    elif txt_source_key == "TXT Source 5": source_folder_path = self.txt_folder_path_set5
-
+                if override_txt_data is not None:
+                    row_data.update(override_txt_data)
+                elif txt_source_key != "None":
+                    source_folder_path = self._get_path_from_source_key(txt_source_key)
                     if source_folder_path and os.path.isdir(source_folder_path):
                         txt_data = self._get_txt_data_from_source(source_folder_path)
                         if txt_data:
                             row_data.update(txt_data)
-
-                # 2. Get static data from Excel cells
+                
                 static_data_from_cells = self._get_static_excel_data()
                 if static_data_from_cells:
                     row_data.update(static_data_from_cells)
 
-                # 3. Get latest files from monitored folders
-                latest_files_data = self.get_latest_files_data_fast()
-                if latest_files_data:
-                    row_data.update(latest_files_data)
+                if not skip_monitored_folders:
+                    latest_files_data = self.get_latest_files_data_fast()
+                    if latest_files_data:
+                        row_data.update(latest_files_data)
 
                 # --- PROCESSING AND GENERATED FIELDS ---
+                final_event_text = event_text_for_excel
 
-                final_event_text = event_text_for_excel # Start with default event text
-
-                # NEW: Add back the "Log on" data capture logic
+                # >>> CHANGE: Reworked Log On/Log Off logic for robustness and feedback <<<
                 if event_type == "Log on":
                     kp_col_name = self.txt_field_columns.get("KP")
-                    if kp_col_name and kp_col_name in row_data:
+                    if kp_col_name and kp_col_name in row_data and row_data[kp_col_name] is not None:
                         try:
-                            self.last_log_on_kp = float(row_data[kp_col_name])
-                            self.log_on_time = datetime.datetime.now()
-                            self.update_status(f"KP for Log on event stored: {self.last_log_on_kp}")
+                            # Attempt to parse KP and store it
+                            kp_value = float(row_data[kp_col_name])
+                            self.last_log_on_kp = kp_value
+                            self.log_on_time = datetime.datetime.now(datetime.UTC) # Use timezone-aware time
+                            self.update_status(f"Log On successful. Stored KP: {self.last_log_on_kp:.3f}")
                         except (ValueError, TypeError):
+                            # Failed to parse the KP value
                             self.last_log_on_kp = None
                             self.log_on_time = None
-                            self.update_status("Could not parse KP for Log on. Calculations disabled.")
+                            self.update_status("Log On Warning: Could not parse KP value. Calculation disabled.")
+                    else:
+                        # KP column was not found in the parsed data
+                        self.last_log_on_kp = None
+                        self.log_on_time = None
+                        self.update_status("Log On Warning: 'KP' data not found in source file. Calculation disabled.")
 
-                # Check for "Log off" and perform calculation
                 elif event_type == "Log off" and self.calculate_logoff_values.get():
                     kp_col_name = self.txt_field_columns.get("KP")
-                    if self.last_log_on_kp is not None and self.log_on_time is not None and kp_col_name in row_data:
-                        try:
-                            current_kp = float(row_data[kp_col_name])
-                            current_time = datetime.datetime.now()
-                            time_diff_seconds = (current_time - self.log_on_time).total_seconds()
-                            distance_km = abs(current_kp - self.last_log_on_kp)
-                            speed_knots = 0
-                            if time_diff_seconds > 0:
-                                distance_nm = distance_km / 1.852
-                                time_hours = time_diff_seconds / 3600
-                                speed_knots = distance_nm / time_hours
-                            
-                            final_event_text = f"Log off - Distance travelled: {distance_km:.2f}km - Speed: {speed_knots:.2f} Knots"
-                            self.last_log_on_kp = None # Reset after calculation
-                            self.log_on_time = None
-                        except (ValueError, TypeError):
-                            pass # Keep default text if calculation fails
-                
+                    # Check if we have the necessary data from a previous "Log on"
+                    if self.last_log_on_kp is not None and self.log_on_time is not None:
+                        if kp_col_name and kp_col_name in row_data and row_data[kp_col_name] is not None:
+                            try:
+                                current_kp = float(row_data[kp_col_name])
+                                current_time = datetime.datetime.now(datetime.UTC)
+                                
+                                time_diff_seconds = (current_time - self.log_on_time).total_seconds()
+                                distance_km = abs(current_kp - self.last_log_on_kp)
+                                speed_knots = 0
+                                if time_diff_seconds > 1: # Avoid division by zero
+                                    distance_nm = distance_km / 1.852
+                                    time_hours = time_diff_seconds / 3600
+                                    speed_knots = distance_nm / time_hours
+                                
+                                final_event_text = f"Log off - Traveled: {distance_km:.3f} km @ {speed_knots:.2f} kts"
+                            except (ValueError, TypeError):
+                                self.update_status("Log Off Warning: Could not parse current KP. Using default text.")
+                        else:
+                            self.update_status("Log Off Warning: Could not find current KP data. Using default text.")
+                        # Reset values after any Log Off attempt (success or failure) to prevent using stale data
+                        self.last_log_on_kp = None 
+                        self.log_on_time = None
+                    else:
+                        # Log on data was never stored, so just log the default text
+                        self.update_status("Log Off Info: No prior 'Log On' data to calculate from.")
+
                 # Add all other generated fields
-                utc_now = datetime.datetime.now(datetime.UTC)
+                if override_utc_datetime:
+                    utc_now = override_utc_datetime.replace(tzinfo=datetime.timezone.utc)
+                else:
+                    utc_now = datetime.datetime.now(datetime.UTC)
+                
                 offset_delta = datetime.timedelta(hours=self.time_offset_hours.get())
                 local_time = utc_now + offset_delta
 
@@ -1046,6 +1072,7 @@ class DataLoggerGUI:
                 event_col = get_gen_col_name("Event")
                 if event_col: row_data[event_col] = final_event_text
                 
+                # (The rest of the function is unchanged)
                 code_col = get_gen_col_name("Code")
                 if code_col:
                     event_code_to_log = ""
@@ -1058,22 +1085,17 @@ class DataLoggerGUI:
                                 break
                     if event_code_to_log:
                         row_data[code_col] = event_code_to_log
-
                 kp_ref_col = get_gen_col_name("KP Ref.")
                 if kp_ref_col and txt_source_key != "None":
                     kp_ref_to_log = self.txt_source_aliases.get(txt_source_key, "")
                     if kp_ref_to_log:
                         row_data[kp_ref_col] = kp_ref_to_log
                 
-                # --- FINAL ACTIONS ---
                 color_tuple = self.button_colors.get(event_type, (None, None))
                 row_color = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
                 font_color = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
-
                 excel_success, _, excel_message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
-                
                 message = f"'{event_type}' logged successfully. {excel_message}" if excel_success else f"Error logging '{event_type}'. {excel_message}"
-
                 if triggering_button:
                     self.master.after(0, lambda: self._re_enable_button_and_update_status(triggering_button, original_text, message))
                 else:
@@ -1088,9 +1110,77 @@ class DataLoggerGUI:
                 else:
                     self.master.after(0, self.update_status, status_msg)
 
-        # Start the background thread
         log_thread = threading.Thread(target=_log_worker, daemon=True)
         log_thread.start()
+    
+    def _ask_for_historic_event_details_dialog(self):
+        """
+        Opens a single dialog for the user to select a file and enter a time.
+        Returns a dictionary {'file_path': str, 'time_obj': datetime.time} or None.
+        """
+        dialog = Toplevel(self.master)
+        dialog.title("Add Historic Event")
+        dialog.transient(self.master)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        frame = ttk.Frame(dialog, padding="15")
+        frame.pack(fill='both', expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        result = {}
+        
+        # --- Variables ---
+        now = datetime.datetime.now()
+        time_var = tk.StringVar(value=now.strftime('%H:%M'))
+        file_path_var = tk.StringVar(value="No file selected...")
+
+        # --- Widgets ---
+        def browse_file():
+            file_path = filedialog.askopenfilename(
+                parent=dialog,
+                title="Select the log file to search",
+                filetypes=[("Data Files", "*.txt *.npd *.csv"), ("All files", "*.*")]
+            )
+            if file_path:
+                file_path_var.set(file_path)
+
+        # Row 0: File Selection
+        ttk.Label(frame, text="Log File:").grid(row=0, column=0, sticky='w', pady=5, padx=5)
+        file_entry = ttk.Entry(frame, textvariable=file_path_var, state="readonly", width=50)
+        file_entry.grid(row=0, column=1, sticky='ew', pady=5, padx=5)
+        browse_btn = ttk.Button(frame, text="Browse...", command=browse_file)
+        browse_btn.grid(row=0, column=2, sticky='ew', pady=5, padx=5)
+
+        # Row 1: Time Entry
+        ttk.Label(frame, text="Time to Find (HH:MM):").grid(row=1, column=0, sticky='w', pady=5, padx=5)
+        time_entry = ttk.Entry(frame, textvariable=time_var, width=15)
+        time_entry.grid(row=1, column=1, sticky='w', pady=5, padx=5)
+
+        # --- OK / Cancel Logic ---
+        def on_ok():
+            file_path = file_path_var.get()
+            time_str = time_var.get()
+
+            if not os.path.isfile(file_path):
+                messagebox.showwarning("Input Error", "Please select a valid log file first.", parent=dialog)
+                return
+
+            try:
+                t_obj = datetime.datetime.strptime(time_str, '%H:%M').time()
+                result['file_path'] = file_path
+                result['time_obj'] = t_obj
+                dialog.destroy()
+            except ValueError:
+                messagebox.showwarning("Invalid Format", "Please enter the time in HH:MM format.", parent=dialog)
+        
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=2, column=0, columnspan=3, pady=(10,0), sticky='e')
+        ttk.Button(button_frame, text="OK", command=on_ok, style="Accent.TButton").pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT)
+        
+        dialog.wait_window()
+        return result if result else None
 
     def _re_enable_button_and_update_status(self, button, original_text, status_message):
         """A helper function to run on the main thread after a background task completes."""
@@ -1098,6 +1188,67 @@ class DataLoggerGUI:
             button.config(state=tk.NORMAL)
             if original_text: button.config(text=original_text)
         self.update_status(status_message)
+
+    def _get_path_from_source_key(self, source_key):
+        """Translates a txt_source_key string to its corresponding folder path."""
+        path_map = {
+            "Main TXT": self.txt_folder_path,
+            "TXT Source 2": self.txt_folder_path_set2,
+            "TXT Source 3": self.txt_folder_path_set3,
+            "TXT Source 4": self.txt_folder_path_set4,
+            "TXT Source 5": self.txt_folder_path_set5
+        }
+        return path_map.get(source_key)
+
+    def _search_file_for_line(self, file_path, search_pattern):
+        """
+        Searches a file line by line using a regular expression pattern.
+        Returns the first matching line, or None if not found.
+        """
+        if not search_pattern:
+            return None
+        try:
+            # Compile the regex for efficiency
+            regex = re.compile(search_pattern)
+            encodings_to_try = ['utf-8', 'latin-1', 'cp1252']
+            for enc in encodings_to_try:
+                try:
+                    with open(file_path, "r", encoding=enc) as f:
+                        for line in f:
+                            # Use the more precise regex search
+                            if regex.search(line):
+                                return line.strip()
+                    return None 
+                except UnicodeDecodeError:
+                    continue 
+            self.update_status(f"Error: Could not decode file {os.path.basename(file_path)}.")
+            return None
+        except FileNotFoundError:
+            self.update_status(f"Error: File not found for search: {file_path}")
+            return None
+        except Exception as e:
+            self.update_status(f"Error reading file for search: {e}")
+            return None
+
+    def _parse_txt_line(self, line_str):
+        """
+        Parses a single comma-separated line string into a data dictionary
+        based on the current txt_mapping_config.
+        """
+        parsed_data = {}
+        if not line_str:
+            return parsed_data
+        
+        latest_line_parts = line_str.split(",")
+
+        for i, field_config in enumerate(self.txt_mapping_config):
+            excel_col = field_config["column_name"]
+            if not field_config.get("skip", False):
+                if i < len(latest_line_parts):
+                    parsed_data[excel_col] = latest_line_parts[i].strip()
+                else:
+                    parsed_data[excel_col] = None
+        return parsed_data
 
     # --- TXT Reading and Writting ---
     def _get_txt_data_from_source(self, folder_path):
@@ -2343,7 +2494,7 @@ class DataLoggerGUI:
 
         editor_window.update_idletasks()
         dialog_width = editor_window.winfo_reqwidth() or 350
-        dialog_height = editor_window.winfo_reqheight() or 300 # Slightly increased height for new field
+        dialog_height = editor_window.winfo_reqheight() or 300 
 
         center_x = main_x + (main_width // 2) - (dialog_width // 2)
         center_y = main_y + (main_height // 2) - (dialog_height // 2)
@@ -2351,25 +2502,21 @@ class DataLoggerGUI:
 
         frame = ttk.Frame(editor_window, padding="15")
         frame.pack(fill="both", expand=True)
-        frame.columnconfigure(1, weight=1) # Allow column 1 to expand for entry fields
+        frame.columnconfigure(1, weight=1)
 
-        # Get current colors
         current_bg_color, current_font_color = self.button_colors.get(button_config.get("text"), (None, None))
 
         button_text_var = tk.StringVar(value=button_config.get("text", f"Custom {button_index+1}"))
         event_text_var = tk.StringVar(value=button_config.get("event_text", f"{button_config.get('text', f'Custom {button_index+1}')} Triggered"))
         tab_group_var = tk.StringVar(value=button_config.get("tab_group", "Main"))
         
-        
         current_event_code = button_config.get("event_code", "")
-        # Find the full "Code - Description" string for the current code
         initial_display_value = ""
         if current_event_code and current_event_code in self.event_codes:
             initial_display_value = f"{current_event_code} - {self.event_codes[current_event_code]}"
         elif current_event_code:
             initial_display_value = f"{current_event_code} - <no description>"
         event_code_display_var = tk.StringVar(value=initial_display_value)
-        
         
         button_bg_color_var = tk.StringVar(value=current_bg_color if current_bg_color else "")
         button_font_color_var = tk.StringVar(value=current_font_color if current_font_color else "")
@@ -2392,71 +2539,51 @@ class DataLoggerGUI:
         row_idx += 1
         # Event Code Combobox
         ttk.Label(frame, text="Event Code:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        
-        
-        # Create a list of "Code - Description" strings
         event_code_display_list = [""]
         for code, desc in sorted(self.event_codes.items()):
             event_code_display_list.append(f"{code} - {desc}")
-            
-        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_display_var, # Use display var
-                                           values=event_code_display_list,             # Use display list
-                                           state="readonly", width=27)
-        
-        
+        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_display_var,
+                                           values=event_code_display_list, state="readonly", width=27)
         event_code_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
 
         row_idx += 1
-        # --- Event Source Combobox (Now Dynamic) ---
+        # Event Source Combobox
         ttk.Label(frame, text="Event Source:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-
-        # 1. Get the aliases and build the lists for the dropdown
         aliases = self.txt_source_aliases
         internal_keys = TXT_FILES_KEYS
-        
-        # This list will be shown to the user in the dropdown
         display_names = ["None"] + [aliases.get(key, key) for key in internal_keys[1:]]
-
-        # 2. Create translation maps to go between the display name and internal key
         display_to_internal_map = {display: internal for display, internal in zip(display_names, internal_keys)}
         internal_to_display_map = {internal: display for display, internal in zip(display_names, internal_keys)}
-
-        # 3. Set the combobox's initial value based on the current configuration
         current_internal_key = button_config.get("txt_source_key", "None")
         txt_source_display_var = tk.StringVar(value=internal_to_display_map.get(current_internal_key, "None"))
-        
         source_combobox = ttk.Combobox(frame, textvariable=txt_source_display_var,
-                                           values=display_names, state="readonly", width=27)
+                                       values=display_names, state="readonly", width=27)
         source_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
-        ToolTip(source_combobox, "Select which data source this button should use. Names are configured in Settings -> File Paths.")
-
+        ToolTip(source_combobox, "Select which data source this button should use.")
 
         row_idx += 1
         # Tab Group selection
         ttk.Label(frame, text="Tab Group:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         all_tab_groups = sorted(self.custom_button_tab_groups[:])
         tab_group_combobox = ttk.Combobox(frame, textvariable=tab_group_var,
-                                              values=all_tab_groups, width=27) # Not readonly, allows user to type new group
+                                          values=all_tab_groups, width=27)
         tab_group_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
-        ToolTip(tab_group_combobox, "Assign this button to a tab group. You can type a new group name or select an existing one.")
+        ToolTip(tab_group_combobox, "Assign this button to a tab group.")
 
         row_idx += 1
+        # Color Pickers and Save button... (This part is unchanged)
         # Button Background Color Picker
         ttk.Label(frame, text="Button Background:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        
         bg_color_widget_frame = ttk.Frame(frame)
         bg_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=2, padx=5)
-
         bg_color_display_label = tk.Label(bg_color_widget_frame, width=4, relief="solid", borderwidth=1,
                                             background=button_bg_color_var.get() if button_bg_color_var.get() else 'SystemButtonFace')
         bg_color_display_label.pack(side="left", padx=(0, 5))
-
         clear_bg_btn = ttk.Button(bg_color_widget_frame, text="X", width=2, style="Toolbutton",
                                   command=lambda: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, None, editor_window))
         clear_bg_btn.pack(side="left", padx=1)
         ToolTip(clear_bg_btn, "Clear button background color (use default appearance).")
-
         pastel_colors_for_picker = ["#FFB3BA", "#FFDFBA", "#FFFFBA", "#BAFFC9", "#BAE1FF"]
         for p_color in pastel_colors_for_picker:
             try:
@@ -2464,87 +2591,64 @@ class DataLoggerGUI:
                                   command=lambda c=p_color: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, c, editor_window))
                 b.pack(side=tk.LEFT, padx=1)
             except tk.TclError: pass
-
         choose_bg_btn = ttk.Button(bg_color_widget_frame, text="...", width=3, style="Toolbutton",
                                    command=lambda v=button_bg_color_var, l=bg_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Background"))
         choose_bg_btn.pack(side="left", padx=1)
         ToolTip(choose_bg_btn, "Choose a custom background color.")
-
         row_idx += 1
         # Button Font Color Picker
         ttk.Label(frame, text="Button Font Color:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        
         font_color_widget_frame = ttk.Frame(frame)
         font_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=2, padx=5)
-
         font_color_display_label = tk.Label(font_color_widget_frame, width=4, relief="solid", borderwidth=1,
                                               background=button_font_color_var.get() if button_font_color_var.get() else 'SystemButtonFace')
         font_color_display_label.pack(side="left", padx=(0, 5))
-
         clear_font_btn = ttk.Button(font_color_widget_frame, text="X", width=2, style="Toolbutton",
                                       command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
         clear_font_btn.pack(side="left", padx=1)
         ToolTip(clear_font_btn, "Clear button font color (use default appearance).")
-
-        default_font_colors_for_picker = ["#000000", "#FFFFFF"] # Black, White
+        default_font_colors_for_picker = ["#000000", "#FFFFFF"]
         for f_color in default_font_colors_for_picker:
             try:
                 b = tk.Button(font_color_widget_frame, bg=f_color, width=1, height=1, relief="raised", bd=1,
-                                  fg='white' if f_color == '#000000' else 'black', # Make text visible on button
+                                  fg='white' if f_color == '#000000' else 'black',
                                   command=lambda c=f_color: self._set_color_on_widget(button_font_color_var, font_color_display_label, c, editor_window))
                 b.pack(side=tk.LEFT, padx=1)
             except tk.TclError: pass
-
         choose_font_btn = ttk.Button(font_color_widget_frame, text="...", width=3, style="Toolbutton",
                                        command=lambda v=button_font_color_var, l=font_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Font"))
         choose_font_btn.pack(side="left", padx=1)
         ToolTip(choose_font_btn, "Choose a custom font color.")
-
-
         row_idx += 1
+        
         button_controls_frame = ttk.Frame(frame)
         button_controls_frame.grid(row=row_idx, column=0, columnspan=3, pady=(15,0), sticky="e")
 
         def save_changes():
             old_button_text = button_config.get("text")
-            
             button_config["text"] = button_text_var.get().strip() or f"Custom {button_index+1}"
             button_config["event_text"] = event_text_var.get().strip() or f"{button_config['text']} Triggered"
-            
-            # Get the full "Code - Description" string and parse it
             selected_display_string = event_code_display_var.get()
             code_to_save = ""
             if " - " in selected_display_string:
                 code_to_save = selected_display_string.split(" - ", 1)[0]
             button_config["event_code"] = code_to_save
-            
-            
             button_config["tab_group"] = tab_group_var.get().strip() or "Main"
-
-            # Translate the selected display name back to its internal key before saving
             selected_display_name = txt_source_display_var.get()
             button_config["txt_source_key"] = display_to_internal_map.get(selected_display_name, "None")
-            
-
+            # The line for saving "search_for_time" has been removed.
             new_bg_color_hex = button_bg_color_var.get() if button_bg_color_var.get() else None
             new_font_color_hex = button_font_color_var.get() if button_font_color_var.get() else None
-            
             if old_button_text in self.button_colors and old_button_text != button_config["text"]:
                 del self.button_colors[old_button_text]
-            
-            # Save the color as a tuple (background_color, font_color)
             self.button_colors[button_config["text"]] = (new_bg_color_hex, new_font_color_hex)
-
-            # Tab Saving Logic 
             new_group = button_config["tab_group"]
             if new_group not in self.custom_button_tab_groups:
                 self.custom_button_tab_groups.append(new_group)
                 self.custom_button_tab_groups.sort()
-
             self.save_settings()
             self.update_custom_buttons()
             editor_window.destroy()
-
 
         ttk.Button(button_controls_frame, text="Save", command=save_changes, style="Accent.TButton").pack(side="right", padx=5)
         ttk.Button(button_controls_frame, text="Cancel", command=editor_window.destroy).pack(side="right")
@@ -2587,7 +2691,6 @@ class DataLoggerGUI:
 # --- Settings Window Class ---
 class SettingsWindow:
 
-    # In class SettingsWindow...
     def __init__(self, master, parent_gui):
         self.master = master
         self.parent_gui = parent_gui
