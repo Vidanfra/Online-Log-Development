@@ -1,6 +1,6 @@
 {
-    "db_path": "C:/reachsubsea/HorizonLogbook/db.sqlite",
-    "excel_path": "C:/reachsubsea/HorizonLogbook/FieldLogViewer.xlsx",
+    "db_path": "J:/ODE_600056/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01 Online Log/SQLITE DB/600056_ODE_New_log.db",
+    "excel_path": "C:/Users/Administrator/Desktop/PYTHON/Executables/Field log viewer test.xlsx",
     "keywords": [
         "Log on",
         "Log off",
@@ -42,18 +42,15 @@
         ]
     ],
     "selected_columns": [
-        "datetime",
         "runline",
         "kp",
         "kp_ref",
         "event",
-        "rov_video",
-        "code",
-        "easting_m",
-        "northing_m",
-        "dcc",
+        "coustom_value_1",
+        "coustom_value_2",
         "sbd_files",
-        "qinsy_db",
-        "notes"
+        "notes",
+        "timestamp_utc",
+        "Local Time"
     ]
 }

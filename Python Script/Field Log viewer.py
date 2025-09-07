@@ -177,7 +177,6 @@ class ExcelUpdaterApp:
             self.excel_path.set(settings.get("excel_path", ""))
             self.saved_selected_columns = settings.get("selected_columns", [])
             
-            # If a DB path was loaded, try to load its columns
             if self.db_path.get():
                 self._load_and_set_db_columns()
 
@@ -264,7 +263,7 @@ class ExcelUpdaterApp:
         thread.start()
 
     def update_sheet(self):
-        app, wb, we_started_app = None, None, False
+        app, wb = None, None
         try:
             self.status_label.config(text="Fetching data from database...")
             safe_columns = [f'"{col}"' for col in self.selected_db_columns]
@@ -290,13 +289,11 @@ class ExcelUpdaterApp:
                         highlight_rules.append({'phrases': phrases, 'color': self.selected_colors_rgb[i]})
 
             self.status_label.config(text="Connecting to Excel...")
-            try:
-                wb = xw.Book(self.excel_path.get())
-                app = wb.app
-            except Exception:
-                app = xw.App(visible=True)
-                we_started_app = True
-                wb = app.books.open(self.excel_path.get())
+            # --- FIX: Simplified connection logic ---
+            # This will connect to an open instance or start a new one.
+            # We no longer track if we started it; we will never try to close it.
+            wb = xw.Book(self.excel_path.get())
+            app = wb.app
             sheet, app.screen_updating = wb.sheets[0], False
 
             self.status_label.config(text="Analyzing sheet layout...")
@@ -327,17 +324,12 @@ class ExcelUpdaterApp:
                     for rule in highlight_rules:
                         if any(phrase in cell_content for phrase in rule['phrases']):
                             row_to_format = data_range.rows[i]
-                            # Apply background color
                             row_to_format.color = rule['color']
-                            
-                            # --- FIX: RE-APPLY BORDERS TO SIMULATE GRIDLINES ---
-                            # Border constants: 7-11 correspond to left, top, bottom, right, and inside vertical
                             for border_id in [7, 8, 9, 10, 11]:
                                 border = row_to_format.api.Borders(border_id)
-                                border.LineStyle = 1  # xlContinuous
-                                border.Weight = 2     # xlThin
-                                border.ColorIndex = 15 # Grey-25%, a good approximation for gridlines
-                            # --- END FIX ---
+                                border.LineStyle = 1
+                                border.Weight = 2
+                                border.ColorIndex = 15
                             break
 
             sheet.autofit()
@@ -347,12 +339,13 @@ class ExcelUpdaterApp:
             self.status_label.config(text=f"An error occurred: {e}")
             messagebox.showerror("Error", f"An unexpected error occurred:\n\n{e}")
         finally:
+            # --- FIX: Simplified cleanup logic ---
+            # Only re-enable screen updating. Do not quit the app.
+            # The connection will be released cleanly when the function finishes.
             if app:
                 try: app.screen_updating = True
                 except Exception as e: print(f"Could not re-enable screen updating: {e}")
-            if we_started_app and app:
-                try: app.quit()
-                except Exception as e: print(f"Error quitting Excel instance: {e}")
+            
             self.root.after(0, lambda: self.update_button.config(state=tk.NORMAL, text="Update Excel Sheet"))
 
 if __name__ == "__main__":

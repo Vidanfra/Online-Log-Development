@@ -652,20 +652,33 @@ class DataLoggerGUI:
 
     # PASTE THESE TWO METHODS INTO THE DataLoggerGUI CLASS
 
-    def preview_txt_data(self):
-        """Finds the latest TXT file and displays the data in the settings window preview."""
+    def preview_data_file(self):
+        """Finds the latest TXT or NPD file and displays the data in the settings window preview."""
         if not self.settings_gui_instance:
             self.update_status("Settings window is not open.")
             return
 
-        txt_folder = self.txt_folder_path
-        if not txt_folder or not os.path.isdir(txt_folder):
-            messagebox.showerror("Path Error", "The 'Main Navigation TXT Data Folder' is not set.", parent=self.settings_window_instance)
+        # Assuming self.txt_folder_path stores the path to the folder containing the data files.
+        # It might be beneficial to rename this attribute to something like self.data_folder_path.
+        data_folder = self.txt_folder_path
+        if not data_folder or not os.path.isdir(data_folder):
+            messagebox.showerror("Path Error", "The 'Main Navigation Data Folder' is not set.", parent=self.settings_window_instance)
             return
 
-        latest_file = self.find_latest_file_in_folder(txt_folder, ".txt")
+        # Find the latest file of each type
+        latest_txt = self.find_latest_file_in_folder(data_folder, ".txt")
+        latest_npd = self.find_latest_file_in_folder(data_folder, ".npd")
+
+        latest_file = None
+        # Determine which file is the most recent
+        if latest_txt and latest_npd:
+            latest_file = latest_txt if os.path.getmtime(latest_txt) > os.path.getmtime(latest_npd) else latest_npd
+        else:
+            # This will select whichever file exists, or remain None if neither exists
+            latest_file = latest_txt or latest_npd
+
         if not latest_file:
-            messagebox.showinfo("File Not Found", f"No .txt files were found in:\n{txt_folder}", parent=self.settings_window_instance)
+            messagebox.showinfo("File Not Found", f"No .txt or .npd files were found in:\n{data_folder}", parent=self.settings_window_instance)
             return
 
         try:
@@ -689,7 +702,7 @@ class DataLoggerGUI:
         except Exception as e:
             messagebox.showerror("Read Error", f"An error occurred while reading the file:\n{e}", parent=self.settings_window_instance)
 
-    def clear_txt_preview(self):
+    def clear_data_preview(self):
         """Clears the text from all preview labels in the settings window."""
         if self.settings_gui_instance:
             # Use the correct reference to the SettingsWindow instance's widgets
@@ -3063,8 +3076,8 @@ class SettingsWindow:
         controls_frame = ttk.Frame(tab)
         controls_frame.pack(fill='x', pady=(0, 10))
         
-        ttk.Button(controls_frame, text="Preview Latest TXT Data", command=self.parent_gui.preview_txt_data).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(controls_frame, text="Clear Preview", command=self.parent_gui.clear_txt_preview).pack(side=tk.LEFT, padx=(0, 20))
+        ttk.Button(controls_frame, text="Preview Latest Data", command=self.parent_gui.preview_data_file).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(controls_frame, text="Clear Preview", command=self.parent_gui.clear_data_preview).pack(side=tk.LEFT, padx=(0, 20))
 
         spacer = ttk.Frame(controls_frame)
         spacer.pack(side=tk.LEFT, expand=True, fill='x')
