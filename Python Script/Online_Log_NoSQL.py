@@ -33,7 +33,7 @@ EVENT_CODES_FILE = "settings/event_codes.json"
 # DICCTIONARY KEYS #NEEDS TO BE REVIEWED
 EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'event'} 
 DEFAULT_DATA_FIELDS = {"Date-Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "KP Ref."} 
-TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3"] 
+TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3", "TXT Source 4", "TXT Source 5"]
 DEFAULT_MONITORED_FOLDERS = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
 
 
@@ -388,19 +388,25 @@ class DataLoggerGUI:
         # New TXT paths for additional sources
         self.txt_folder_path_set2 = None
         self.txt_folder_path_set3 = None
+        self.txt_folder_path_set4 = None
+        self.txt_folder_path_set5 = None
 
         # Dictionary to hold user-defined aliases for TXT sources
         self.txt_source_aliases = {
             "Main TXT": "Main TXT",
             "TXT Source 2": "TXT Source 2",
-            "TXT Source 3": "TXT Source 3"
+            "TXT Source 3": "TXT Source 3",
+            "TXT Source 4": "TXT Source 4",
+            "TXT Source 5": "TXT Source 5"
         }
 
         self.source_based_colors = {
-            "Main TXT": "#BAE1FF",    # Light Blue
+            "Main TXT": "#BAE1FF",      # Light Blue
             "TXT Source 2": "#BAFFC9",    # Light Green
             "TXT Source 3": "#FFFFBA",    # Light Yellow
-            "None": None         # No color for buttons with no source
+            "TXT Source 4": "#FFB3BA",    # Light Red/Pink
+            "TXT Source 5": "#E0BBE4",    # Light Purple
+            "None": None          # No color for buttons with no source
         }
 
         self.txt_file_path = None # This will now be dynamic based on source
@@ -969,6 +975,8 @@ class DataLoggerGUI:
                     if txt_source_key == "Main TXT": source_folder_path = self.txt_folder_path
                     elif txt_source_key == "TXT Source 2": source_folder_path = self.txt_folder_path_set2
                     elif txt_source_key == "TXT Source 3": source_folder_path = self.txt_folder_path_set3
+                    elif txt_source_key == "TXT Source 4": source_folder_path = self.txt_folder_path_set4
+                    elif txt_source_key == "TXT Source 5": source_folder_path = self.txt_folder_path_set5
 
                     if source_folder_path and os.path.isdir(source_folder_path):
                         txt_data = self._get_txt_data_from_source(source_folder_path)
@@ -1356,6 +1364,8 @@ class DataLoggerGUI:
             "txt_folder_path": self.txt_folder_path,
             "txt_folder_path_set2": self.txt_folder_path_set2,
             "txt_folder_path_set3": self.txt_folder_path_set3,
+            "txt_folder_path_set4": self.txt_folder_path_set4,
+            "txt_folder_path_set5": self.txt_folder_path_set5,
             # NEW: Save the three separate config lists
             "txt_mapping_config": self.txt_mapping_config,
             "generated_fields_config": self.generated_fields_config,
@@ -1437,6 +1447,8 @@ class DataLoggerGUI:
                 self.txt_folder_path = settings.get("txt_folder_path")
                 self.txt_folder_path_set2 = settings.get("txt_folder_path_set2")
                 self.txt_folder_path_set3 = settings.get("txt_folder_path_set3")
+                self.txt_folder_path_set4 = settings.get("txt_folder_path_set4")
+                self.txt_folder_path_set5 = settings.get("txt_folder_path_set5")
 
                 # --- Load the three separate config lists ---
                 self.txt_mapping_config = settings.get("txt_mapping_config", self.txt_mapping_config)
@@ -1700,7 +1712,9 @@ class DataLoggerGUI:
         monitored_sources_data = {
             "Main TXT File": self.txt_folder_path,
             "TXT Source 2": self.txt_folder_path_set2,
-            "TXT Source 3": self.txt_folder_path_set3
+            "TXT Source 3": self.txt_folder_path_set3,
+            "TXT Source 4": self.txt_folder_path_set4,
+            "TXT Source 5": self.txt_folder_path_set5
         }
         
         for source_name, source_path in monitored_sources_data.items():
@@ -1952,7 +1966,17 @@ class DataLoggerGUI:
         
         # --- Create StringVars ---
         event_text_var = tk.StringVar(value=current_event_text)
-        event_code_var = tk.StringVar(value=current_event_code)
+
+        
+        # Find the full "Code - Description" string for the current code to display it initially
+        initial_display_value = ""
+        if current_event_code and current_event_code in self.event_codes:
+            initial_display_value = f"{current_event_code} - {self.event_codes[current_event_code]}"
+        elif current_event_code:
+            initial_display_value = f"{current_event_code} - <no description>"
+        event_code_display_var = tk.StringVar(value=initial_display_value)
+        
+
         # Create a StringVar for the source name to display in the Combobox
         # Find the display name from the alias map
         current_display_name = self.txt_source_aliases.get(current_source_key, current_source_key)
@@ -1972,14 +1996,23 @@ class DataLoggerGUI:
         row_idx += 1
         # Event Code Combobox
         ttk.Label(frame, text="Event Code:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
-        event_code_options = [""] + sorted(list(self.event_codes.keys()))
-        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_var,
-                                         values=event_code_options, state="readonly", width=37)
+        
+       
+        # Create a list of "Code - Description" strings for the dropdown
+        event_code_display_list = [""] # Start with a blank option
+        for code, desc in sorted(self.event_codes.items()):
+            event_code_display_list.append(f"{code} - {desc}")
+        
+        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_display_var, # Use the new display variable
+                                           values=event_code_display_list,             # Use the new display list
+                                           state="readonly", width=37)
+       
+
         event_code_combobox.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
         ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
         
         row_idx += 1
-        # START NEW CODE: Add Event Source Combobox for main buttons
+        # Add Event Source Combobox for main buttons
         ttk.Label(frame, text="Event Source:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
         
         # Build list for the dropdown using aliases for display
@@ -1988,10 +2021,10 @@ class DataLoggerGUI:
         display_names = [aliases.get(key, key) for key in internal_keys] # Get names from aliases or use defaults
         
         source_combobox = ttk.Combobox(frame, textvariable=source_display_var,
-                                        values=display_names, state="readonly", width=37)
+                                           values=display_names, state="readonly", width=37)
         source_combobox.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
         ToolTip(source_combobox, "Select which data source this button should use. Names are configured in Settings -> File Paths.")
-        # END NEW CODE
+        
         
         row_idx += 1
         # Button Background Color Picker
@@ -2001,7 +2034,7 @@ class DataLoggerGUI:
         bg_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
 
         bg_color_display_label = tk.Label(bg_color_widget_frame, width=4, relief="solid", borderwidth=1,
-                                         background=button_bg_color_var.get() if button_bg_color_var.get() else 'SystemButtonFace')
+                                          background=button_bg_color_var.get() if button_bg_color_var.get() else 'SystemButtonFace')
         bg_color_display_label.pack(side="left", padx=(0, 5))
 
         clear_bg_btn = ttk.Button(bg_color_widget_frame, text="X", width=2,
@@ -2010,7 +2043,7 @@ class DataLoggerGUI:
         ToolTip(clear_bg_btn, "Clear button background color.")
 
         choose_bg_btn = ttk.Button(bg_color_widget_frame, text="...", width=3,
-                                  command=lambda v=button_bg_color_var, l=bg_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Background"))
+                                   command=lambda v=button_bg_color_var, l=bg_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Background"))
         choose_bg_btn.pack(side="left", padx=1)
         ToolTip(choose_bg_btn, "Choose a custom background color.")
 
@@ -2026,12 +2059,12 @@ class DataLoggerGUI:
         font_color_display_label.pack(side="left", padx=(0, 5))
 
         clear_font_btn = ttk.Button(font_color_widget_frame, text="X", width=2,
-                                   command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
+                                      command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
         clear_font_btn.pack(side="left", padx=1)
         ToolTip(clear_font_btn, "Clear button font color.")
 
         choose_font_btn = ttk.Button(font_color_widget_frame, text="...", width=3,
-                                   command=lambda v=button_font_color_var, l=font_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Font"))
+                                       command=lambda v=button_font_color_var, l=font_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Font"))
         choose_font_btn.pack(side="left", padx=1)
         ToolTip(choose_font_btn, "Choose a custom font color.")
 
@@ -2042,16 +2075,25 @@ class DataLoggerGUI:
         button_controls_frame.grid(row=row_idx, column=0, columnspan=2, pady=(15,0), sticky="e")
 
         def save_main_button_changes():
-            # Save the new event text and code
+            # Save the new event text
             self.main_button_configs[button_name]['event_text'] = event_text_var.get()
-            self.main_button_configs[button_name]['event_code'] = event_code_var.get()
-            # START NEW CODE: Save the selected source key
+            
+            
+            # Get the full "Code - Description" string and parse it to save only the code
+            selected_display_string = event_code_display_var.get()
+            code_to_save = ""
+            if " - " in selected_display_string:
+                code_to_save = selected_display_string.split(" - ", 1)[0]
+            self.main_button_configs[button_name]['event_code'] = code_to_save
+            
+            
+            #Save the selected source key
             # We need to map the display name back to the internal key
             internal_to_display_map = {internal: display for display, internal in zip(display_names, internal_keys)}
             selected_display_name = source_combobox.get()  # Use source_combobox.get()
             selected_source_key = next((key for key, value in internal_to_display_map.items() if value == selected_display_name), "None")
             self.main_button_configs[button_name]['txt_source_key'] = selected_source_key
-            # END NEW CODE
+            
 
             # Save the new colors as a tuple
             new_bg_color_hex = button_bg_color_var.get() if button_bg_color_var.get() else None
@@ -2317,7 +2359,17 @@ class DataLoggerGUI:
         button_text_var = tk.StringVar(value=button_config.get("text", f"Custom {button_index+1}"))
         event_text_var = tk.StringVar(value=button_config.get("event_text", f"{button_config.get('text', f'Custom {button_index+1}')} Triggered"))
         tab_group_var = tk.StringVar(value=button_config.get("tab_group", "Main"))
-        event_code_var = tk.StringVar(value=button_config.get("event_code", ""))
+        
+        
+        current_event_code = button_config.get("event_code", "")
+        # Find the full "Code - Description" string for the current code
+        initial_display_value = ""
+        if current_event_code and current_event_code in self.event_codes:
+            initial_display_value = f"{current_event_code} - {self.event_codes[current_event_code]}"
+        elif current_event_code:
+            initial_display_value = f"{current_event_code} - <no description>"
+        event_code_display_var = tk.StringVar(value=initial_display_value)
+        
         
         button_bg_color_var = tk.StringVar(value=current_bg_color if current_bg_color else "")
         button_font_color_var = tk.StringVar(value=current_font_color if current_font_color else "")
@@ -2340,9 +2392,18 @@ class DataLoggerGUI:
         row_idx += 1
         # Event Code Combobox
         ttk.Label(frame, text="Event Code:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
-        event_code_options = [""] + sorted(list(self.event_codes.keys()))
-        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_var, 
-                                             values=event_code_options, state="readonly", width=27)
+        
+        
+        # Create a list of "Code - Description" strings
+        event_code_display_list = [""]
+        for code, desc in sorted(self.event_codes.items()):
+            event_code_display_list.append(f"{code} - {desc}")
+            
+        event_code_combobox = ttk.Combobox(frame, textvariable=event_code_display_var, # Use display var
+                                           values=event_code_display_list,             # Use display list
+                                           state="readonly", width=27)
+        
+        
         event_code_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(event_code_combobox, "Select an event code to write to the 'Code' column when this button is pressed.")
 
@@ -2366,7 +2427,7 @@ class DataLoggerGUI:
         txt_source_display_var = tk.StringVar(value=internal_to_display_map.get(current_internal_key, "None"))
         
         source_combobox = ttk.Combobox(frame, textvariable=txt_source_display_var,
-                                        values=display_names, state="readonly", width=27)
+                                           values=display_names, state="readonly", width=27)
         source_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(source_combobox, "Select which data source this button should use. Names are configured in Settings -> File Paths.")
 
@@ -2376,7 +2437,7 @@ class DataLoggerGUI:
         ttk.Label(frame, text="Tab Group:").grid(row=row_idx, column=0, sticky="w", pady=2, padx=5)
         all_tab_groups = sorted(self.custom_button_tab_groups[:])
         tab_group_combobox = ttk.Combobox(frame, textvariable=tab_group_var,
-                                            values=all_tab_groups, width=27) # Not readonly, allows user to type new group
+                                              values=all_tab_groups, width=27) # Not readonly, allows user to type new group
         tab_group_combobox.grid(row=row_idx, column=1, columnspan=2, sticky="ew", pady=2, padx=5)
         ToolTip(tab_group_combobox, "Assign this button to a tab group. You can type a new group name or select an existing one.")
 
@@ -2400,12 +2461,12 @@ class DataLoggerGUI:
         for p_color in pastel_colors_for_picker:
             try:
                 b = tk.Button(bg_color_widget_frame, bg=p_color, width=1, height=1, relief="raised", bd=1,
-                                command=lambda c=p_color: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, c, editor_window))
+                                  command=lambda c=p_color: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, c, editor_window))
                 b.pack(side=tk.LEFT, padx=1)
             except tk.TclError: pass
 
         choose_bg_btn = ttk.Button(bg_color_widget_frame, text="...", width=3, style="Toolbutton",
-                                  command=lambda v=button_bg_color_var, l=bg_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Background"))
+                                   command=lambda v=button_bg_color_var, l=bg_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Background"))
         choose_bg_btn.pack(side="left", padx=1)
         ToolTip(choose_bg_btn, "Choose a custom background color.")
 
@@ -2417,11 +2478,11 @@ class DataLoggerGUI:
         font_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=2, padx=5)
 
         font_color_display_label = tk.Label(font_color_widget_frame, width=4, relief="solid", borderwidth=1,
-                                            background=button_font_color_var.get() if button_font_color_var.get() else 'SystemButtonFace')
+                                              background=button_font_color_var.get() if button_font_color_var.get() else 'SystemButtonFace')
         font_color_display_label.pack(side="left", padx=(0, 5))
 
         clear_font_btn = ttk.Button(font_color_widget_frame, text="X", width=2, style="Toolbutton",
-                                   command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
+                                      command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
         clear_font_btn.pack(side="left", padx=1)
         ToolTip(clear_font_btn, "Clear button font color (use default appearance).")
 
@@ -2429,13 +2490,13 @@ class DataLoggerGUI:
         for f_color in default_font_colors_for_picker:
             try:
                 b = tk.Button(font_color_widget_frame, bg=f_color, width=1, height=1, relief="raised", bd=1,
-                                fg='white' if f_color == '#000000' else 'black', # Make text visible on button
-                                command=lambda c=f_color: self._set_color_on_widget(button_font_color_var, font_color_display_label, c, editor_window))
+                                  fg='white' if f_color == '#000000' else 'black', # Make text visible on button
+                                  command=lambda c=f_color: self._set_color_on_widget(button_font_color_var, font_color_display_label, c, editor_window))
                 b.pack(side=tk.LEFT, padx=1)
             except tk.TclError: pass
 
         choose_font_btn = ttk.Button(font_color_widget_frame, text="...", width=3, style="Toolbutton",
-                                    command=lambda v=button_font_color_var, l=font_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Font"))
+                                       command=lambda v=button_font_color_var, l=font_color_display_label, n=button_text_var.get(): self._choose_color_dialog(v, l, editor_window, n + " Font"))
         choose_font_btn.pack(side="left", padx=1)
         ToolTip(choose_font_btn, "Choose a custom font color.")
 
@@ -2449,7 +2510,15 @@ class DataLoggerGUI:
             
             button_config["text"] = button_text_var.get().strip() or f"Custom {button_index+1}"
             button_config["event_text"] = event_text_var.get().strip() or f"{button_config['text']} Triggered"
-            button_config["event_code"] = event_code_var.get()
+            
+            # Get the full "Code - Description" string and parse it
+            selected_display_string = event_code_display_var.get()
+            code_to_save = ""
+            if " - " in selected_display_string:
+                code_to_save = selected_display_string.split(" - ", 1)[0]
+            button_config["event_code"] = code_to_save
+            
+            
             button_config["tab_group"] = tab_group_var.get().strip() or "Main"
 
             # Translate the selected display name back to its internal key before saving
@@ -2523,49 +2592,96 @@ class SettingsWindow:
         self.master = master
         self.parent_gui = parent_gui
         self.master.title("Settings")
-        self.master.geometry("1150x850")
+        # Keep the default size, scrolling will handle overflow
+        self.master.geometry("1150x850") 
         self.master.minsize(800, 500)
         self.style = parent_gui.style
 
+        # Main frame now uses grid for canvas and scrollbar
         self.main_frame = ttk.Frame(self.master)
         self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        self.main_frame.rowconfigure(0, weight=1)
-        self.main_frame.columnconfigure(0, weight=1)
+        self.main_frame.rowconfigure(0, weight=1)    # Row for canvas/scrollbar
+        self.main_frame.rowconfigure(1, weight=0)    # Row for buttons
+        self.main_frame.columnconfigure(0, weight=1) # Column for canvas
+        self.main_frame.columnconfigure(1, weight=0) # Column for scrollbar
 
-        self.notebook = ttk.Notebook(self.main_frame)
-        self.notebook.grid(row=0, column=0, sticky="nsew")
+        # --- Create Scrollable Area ---
+        self.canvas = tk.Canvas(self.main_frame, borderwidth=0, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.main_frame, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        # Initialize selection tracking for TXT data columns
-        self.selected_txt_row_index = -1  # -1 means no row is selected
+        # This frame goes INSIDE the canvas and will contain the notebook
+        self.scrollable_content_frame = ttk.Frame(self.canvas)
+        self.canvas_frame_id = self.canvas.create_window((0, 0), window=self.scrollable_content_frame, anchor="nw")
+
+        # Bind events to make scrolling work
+        self.scrollable_content_frame.bind("<Configure>", self.on_frame_configure)
+        self.canvas.bind("<Configure>", self.on_canvas_configure)
+        self.canvas.bind_all("<MouseWheel>", self.on_mousewheel) # Use bind_all for better capture
+
+        # Place canvas and scrollbar on the grid
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+
+        # --- Place Notebook inside the SCROLLABLE frame ---
+        self.notebook = ttk.Notebook(self.scrollable_content_frame)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Initialize selection tracking
+        self.selected_txt_row_index = -1
         self.txt_move_up_btn = None
         self.txt_move_down_btn = None
         self.selected_static_row_index = -1
         self.static_move_up_btn = None
         self.static_move_down_btn = None
         
-        # Initialize color picker variables here for the new layout
+        # Initialize color picker variables
         self.new_day_bg_color_var = tk.StringVar()
         self.new_day_font_color_var = tk.StringVar()
         self.hourly_bg_color_var = tk.StringVar()
         self.hourly_font_color_var = tk.StringVar()
 
-        # --- Create tabs (ensure each is called only ONCE) ---
+        # --- Create tabs (no changes here) ---
         self.create_file_paths_tab()
-        self.create_txt_mapping_tab()       # NEW
-        self.create_generated_fields_tab()  # NEW
+        self.create_txt_mapping_tab()
+        self.create_generated_fields_tab()
         self.create_static_fields_tab()
         self.create_button_configuration_tab()
         self.create_event_codes_tab()
         self.create_monitored_folders_tab()
         self.create_auto_events_tab()
         self.create_timezone_tab()
-        
 
-        # Bottom Buttons
+        # --- Bottom Buttons (remain in the main_frame) ---
         button_frame = ttk.Frame(self.main_frame)
-        button_frame.grid(row=1, column=0, pady=(10, 0), sticky="e")
+        # Span both columns (canvas and scrollbar)
+        button_frame.grid(row=1, column=0, columnspan=2, pady=(10, 0), sticky="e")
         ttk.Button(button_frame, text="Save and Close", command=self.save_and_close, style="Accent.TButton").pack(side=tk.RIGHT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=self.master.destroy).pack(side=tk.RIGHT)
+
+    
+
+    def on_frame_configure(self, event=None):
+        """Updates the canvas scroll region when the inner frame's size changes."""
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def on_canvas_configure(self, event=None):
+        """Ensures the inner frame width matches the canvas width."""
+        self.canvas.itemconfig(self.canvas_frame_id, width=event.width)
+
+    def on_mousewheel(self, event):
+        """Handles cross-platform mouse wheel scrolling."""
+        # Check if the mouse is over the main canvas before scrolling
+        if self.canvas.winfo_containing(event.x_root, event.y_root) == self.canvas:
+            if sys.platform == "win32":
+                delta = -1 * int(event.delta / 120)
+            elif event.num == 4: # Linux scroll up
+                delta = -1
+            elif event.num == 5: # Linux scroll down
+                delta = 1
+            else: # Fallback for other systems/events
+                delta = 0
+            self.canvas.yview_scroll(delta, "units")
 
     def save_and_close(self):
         self.save_settings()
@@ -3005,11 +3121,17 @@ class SettingsWindow:
         self.txt_path_set2_var = tk.StringVar()
         self.txt_name_set3_var = tk.StringVar()
         self.txt_path_set3_var = tk.StringVar()
+        self.txt_name_set4_var = tk.StringVar()
+        self.txt_path_set4_var = tk.StringVar()
+        self.txt_name_set5_var = tk.StringVar()
+        self.txt_path_set5_var = tk.StringVar()
 
         # Create the three source blocks using the helper
         create_txt_source_frame(txt_sources_container, "Main Vehicle Navigation (Main TXT Data)", self.txt_name_main_var, self.txt_path_main_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 2)", self.txt_name_set2_var, self.txt_path_set2_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 3)", self.txt_name_set3_var, self.txt_path_set3_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 4)", self.txt_name_set4_var, self.txt_path_set4_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 5)", self.txt_name_set5_var, self.txt_path_set5_var)
    
         # Frame for restoring default settings ---
         restore_frame = ttk.LabelFrame(tab, text="Restore Default Settings", padding=15)
@@ -3536,7 +3658,9 @@ class SettingsWindow:
         ordered_specific_txt_folders = [
             ("Main TXT File", self.parent_gui.txt_folder_path),
             ("TXT Source 2", self.parent_gui.txt_folder_path_set2),
-            ("TXT Source 3", self.parent_gui.txt_folder_path_set3)
+            ("TXT Source 3", self.parent_gui.txt_folder_path_set3),
+            ("TXT Source 4", self.parent_gui.txt_folder_path_set4),
+            ("TXT Source 5", self.parent_gui.txt_folder_path_set5)
         ]
         
         all_folder_names = []
@@ -3556,6 +3680,12 @@ class SettingsWindow:
                 if name == "Main TXT File" and not self.parent_gui.folder_columns.get(name):
                     self.parent_gui.folder_columns[name] = "Main_TXT_File"
                     self.parent_gui.file_extensions[name] = "txt"
+                if name == "TXT Source 4" and not self.parent_gui.folder_columns.get(name):
+                    self.parent_gui.folder_columns[name] = "TXT_Set4_File"
+                    self.parent_gui.file_extensions[name] = "txt"
+                if name == "TXT Source 5" and not self.parent_gui.folder_columns.get(name):
+                    self.parent_gui.folder_columns[name] = "TXT_Set5_File"
+                    self.parent_gui.file_extensions[name] = "txt"
 
 
         for name in default_folders:
@@ -3573,12 +3703,14 @@ class SettingsWindow:
             if folder_name == "Main TXT File": folder_path_to_use = self.parent_gui.txt_folder_path or ""
             elif folder_name == "TXT Source 2": folder_path_to_use = self.parent_gui.txt_folder_path_set2 or ""
             elif folder_name == "TXT Source 3": folder_path_to_use = self.parent_gui.txt_folder_path_set3 or ""
+            elif folder_name == "TXT Source 4": folder_path_to_use = self.parent_gui.txt_folder_path_set4 or ""
+            elif folder_name == "TXT Source 5": folder_path_to_use = self.parent_gui.txt_folder_path_set5 or ""
 
             column_name_to_use = self.parent_gui.folder_columns.get(folder_name, folder_name)
 
             extension_to_use = self.parent_gui.file_extensions.get(folder_name, "")
 
-            if folder_name in ["Main TXT File", "TXT Source 2", "TXT Source 3"]:
+            if folder_name in ["Main TXT File", "TXT Source 2", "TXT Source 3", "TXT Source 4", "TXT Source 5"]:
                 if not column_name_to_use or column_name_to_use == folder_name:
                     column_name_to_use = folder_name.replace(" ", "_")
                 if not extension_to_use:
@@ -3875,6 +4007,10 @@ class SettingsWindow:
         self.parent_gui.txt_folder_path_set2 = self.txt_path_set2_var.get().strip()
         self.parent_gui.txt_source_aliases["TXT Source 3"] = self.txt_name_set3_var.get().strip()
         self.parent_gui.txt_folder_path_set3 = self.txt_path_set3_var.get().strip()
+        self.parent_gui.txt_source_aliases["TXT Source 4"] = self.txt_name_set4_var.get().strip()
+        self.parent_gui.txt_folder_path_set4 = self.txt_path_set4_var.get().strip()
+        self.parent_gui.txt_source_aliases["TXT Source 5"] = self.txt_name_set5_var.get().strip()
+        self.parent_gui.txt_folder_path_set5 = self.txt_path_set5_var.get().strip()
         
         # --- TXT File Mapping Tab ---
         new_txt_mapping_configs = []
@@ -3950,10 +4086,14 @@ class SettingsWindow:
         self.txt_name_main_var.set(aliases.get("Main TXT", "Main TXT"))
         self.txt_name_set2_var.set(aliases.get("TXT Source 2", "TXT Source 2"))
         self.txt_name_set3_var.set(aliases.get("TXT Source 3", "TXT Source 3"))
+        self.txt_name_set4_var.set(aliases.get("TXT Source 4", "TXT Source 4"))
+        self.txt_name_set5_var.set(aliases.get("TXT Source 5", "TXT Source 5"))
 
         self.txt_path_main_var.set(self.parent_gui.txt_folder_path or "")
         self.txt_path_set2_var.set(self.parent_gui.txt_folder_path_set2 or "")
         self.txt_path_set3_var.set(self.parent_gui.txt_folder_path_set3 or "")
+        self.txt_path_set4_var.set(self.parent_gui.txt_folder_path_set4 or "")
+        self.txt_path_set5_var.set(self.parent_gui.txt_folder_path_set5 or "")
 
         
 
