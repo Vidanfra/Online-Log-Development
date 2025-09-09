@@ -1,10 +1,11 @@
 {
-    "log_file_path": "C:/reachsubsea/HorizonLogbook/DailyLog-Horizon_v14.xlsb",
+    "log_file_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/Excel TEmplate/DailyLog-Horizon_v14.xlsb",
+    "sqlite_db_path": "C:/Users/Administrator/Desktop/PYTHON/Online-Log-Development/SQL Database/test.db",
     "time_offset_hours": 1.0,
     "txt_folder_path": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
-    "txt_folder_path_set2": "",
+    "txt_folder_path_set2": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Vessel Navigation",
     "txt_folder_path_set3": "",
-    "txt_folder_path_set4": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
+    "txt_folder_path_set4": "",
     "txt_folder_path_set5": "",
     "txt_mapping_config": [
         {
@@ -88,33 +89,38 @@
     "static_field_configs": [],
     "folder_paths": {
         "Main TXT File": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
-        "TXT Source 4": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
-        "Qinsy DB": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/Database",
-        "S-File": "C:/Users/Administrator/Desktop/PYTHON/Executables"
+        "TXT Source 2": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Vessel Navigation",
+        "Naviscan": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "SSS": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "SVP": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/SQL Database"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File",
-        "TXT Source 4": "TXT_Set4_File",
-        "Qinsy DB": "Qinsy DB",
-        "S-File": "S-Files"
+        "TXT Source 2": "TXT_Source_2",
+        "Naviscan": "SBD Files",
+        "SSS": "ROV SSS",
+        "SVP": "SVP"
     },
     "file_extensions": {
         "Main TXT File": "txt",
-        "TXT Source 4": "txt",
-        "Qinsy DB": "db",
-        "S-File": "_S.NPD"
+        "TXT Source 2": "txt",
+        "Naviscan": "",
+        "SSS": "",
+        "SVP": ""
     },
     "folder_skips": {
         "Main TXT File": false,
-        "TXT Source 4": false,
-        "Qinsy DB": false,
-        "S-File": false
+        "TXT Source 2": false,
+        "Naviscan": false,
+        "SSS": false,
+        "SVP": false
     },
     "folder_log_x_instead": {
         "Main TXT File": false,
-        "TXT Source 4": false,
-        "Qinsy DB": false,
-        "S-File": false
+        "TXT Source 2": false,
+        "Naviscan": false,
+        "SSS": false,
+        "SVP": false
     },
     "num_custom_buttons": 3,
     "custom_button_configs": [
@@ -135,10 +141,9 @@
         {
             "text": "Custom Event 3",
             "event_text": "Custom Event 3 Triggered",
-            "txt_source_key": "TXT Source 4",
+            "txt_source_key": "None",
             "tab_group": "Main",
-            "event_code": "V-OTH",
-            "search_for_time": true
+            "event_code": ""
         }
     ],
     "custom_button_tab_groups": [
@@ -191,8 +196,7 @@
         },
         "Event": {
             "event_text": "Event",
-            "event_code": "",
-            "txt_source_key": "Main TXT"
+            "event_code": ""
         },
         "SVP": {
             "event_text": "SVP applied",
@@ -203,8 +207,10 @@
         "Main TXT": "VIRE",
         "TXT Source 2": "TXT Source 2",
         "TXT Source 3": "TXT Source 3",
-        "TXT Source 4": "Vessel 2",
+        "TXT Source 4": "TXT Source 4",
         "TXT Source 5": "TXT Source 5"
     },
-    "calculate_logoff_values": true
+    "calculate_logoff_values": true,
+    "auto_sync_enabled": true,
+    "auto_sync_interval_min": 15
 }
