@@ -1551,9 +1551,30 @@ class DataLoggerGUI:
 
         excel_message = "Excel: Fail."
         success_excel = False
+        wb = None  # Initialize workbook object to None
 
         try:
-            wb = xw.Book(self.log_file_path)
+            # --- START: New robust connection logic ---
+            target_norm_path = os.path.normcase(os.path.abspath(self.log_file_path))
+            
+            # First, try to find the workbook in any running Excel instance
+            for app in xw.apps:
+                for book in app.books:
+                    try:
+                        if os.path.normcase(os.path.abspath(book.fullname)) == target_norm_path:
+                            wb = book
+                            break
+                    except Exception:
+                        # Some workbooks might be protected or inaccessible; skip them
+                        continue
+                if wb:
+                    break
+            
+            # If the workbook wasn't found in any open instance, then open it.
+            if wb is None:
+                wb = xw.Book(self.log_file_path)
+            # --- END: New robust connection logic ---
+
             sheet = wb.sheets[0]
 
             header_row_index = -1
@@ -1601,7 +1622,7 @@ class DataLoggerGUI:
             excel_message = f"Excel: Fail ({type(e).__name__})."
             return False, False, f"{excel_message}"
 
-        return success_excel, True, excel_message # NOTE: returns true for SQL part to avoid errors, but it won't be used
+        return success_excel, True, excel_message
 
 
     # --- Settings Saving and Loading ---
