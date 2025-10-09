@@ -16,6 +16,7 @@ import asyncio
 import sys
 from pathlib import Path
 import sqlite3
+import uuid
 
 
 if sys.platform == "win32":
@@ -33,7 +34,7 @@ EVENT_CODES_FILE = "settings/event_codes.json"
 
 # DICCTIONARY KEYS #NEEDS TO BE REVIEWED
 EXCEL_LOG_REQUIRED_COLS = {'runline', 'kp', 'event'} 
-DEFAULT_DATA_FIELDS = {"Date-Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "KP Ref."} 
+DEFAULT_DATA_FIELDS = {"Date-Time", "KP", "DCC", "Line name", "Latitude", "Longitude", "Easting", "Northing", "Event", "Code", "KP Ref.", "UUID"} 
 TXT_FILES_KEYS = ["None", "Main TXT", "TXT Source 2", "TXT Source 3", "TXT Source 4", "TXT Source 5"]
 DEFAULT_MONITORED_FOLDERS = ["Qinsy DB", "Naviscan", "SIS", "SSS", "SBP", "Mag", "Grad", "SVP", "SpintINS", "Video", "Cathx", "Hypack RAW", "Eiva NaviPac"]
 
@@ -162,6 +163,15 @@ class SQLiteManager:
         except sqlite3.Error as e:
             print(f"Error connecting to SQLite database: {e}")
             raise e
+            
+    def close(self):
+        """Closes the connection to the SQLite database."""
+        if self.conn:
+            try:
+                self.conn.close()
+                print("SQLite connection successfully closed.")
+            except sqlite3.Error as e:
+                print(f"Error closing SQLite connection: {e}")
 
     def _sanitize_column_name(self, name):
         """Converts an Excel header into a valid SQL column name."""
@@ -170,51 +180,168 @@ class SQLiteManager:
         # Replace spaces and hyphens with underscores, remove other invalid chars
         return re.sub(r'[^A-Za-z0-9_]', '', name.replace(' ', '_').replace('-', '_'))
 
+    def _apply_date_conversion(self, df, possible_excel_header_names):
+        """
+        Helper method to locate an Excel date column in the DataFrame and convert
+        the Excel date floats to standardized strings, including pre-cleaning
+        to handle unexpected spacing/string data types.
+        """
+        date_time_df_col = None
+        
+        # 1. Find the actual column in the DataFrame that matches one of the expected headers.
+        for expected_header in possible_excel_header_names:
+            for col in df.columns:
+                if str(col).strip().lower() == expected_header.lower():
+                    date_time_df_col = col
+                    break
+            if date_time_df_col:
+                break
+        
+        if date_time_df_col is not None:
+            print(f"Applying date conversion fix to DataFrame column '{date_time_df_col}' (matched '{expected_header}')...")
+            try:
+                # CRITICAL FIX: Clean the column. Replace ALL whitespace (including non-breaking spaces) 
+                # with an empty string, then force convert to float.
+                df[date_time_df_col] = df[date_time_df_col].astype(str).str.replace(r'\s+', '', regex=True)
+                df[date_time_df_col] = pd.to_numeric(df[date_time_df_col], errors='coerce')
+                
+                # Convert Excel's float date (days since 1899-12-30) to datetime objects
+                df[date_time_df_col] = pd.to_datetime(
+                    df[date_time_df_col],
+                    errors='coerce',        
+                    origin='1899-12-30',    
+                    unit='D'                
+                )
+                # Format the datetime objects back to a standardized SQLite TEXT string
+                df[date_time_df_col] = df[date_time_df_col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                # Fill NaT values with empty strings
+                df[date_time_df_col] = df[date_time_df_col].fillna('')
+                
+            except Exception as e:
+                # Re-raise error to show column details in traceback
+                raise Exception(f"Failed to convert or clean column '{date_time_df_col}' for date conversion. Original error: {e}")
+        
+        return df
+    
+    def _apply_uuid_generation(self, df):
+        """Generates a UUID for any row where the UUID column is empty (e.g., historical entries)."""
+        
+        # 1. Determine the expected Excel header for the UUID column
+        uuid_header = "UUID" 
+        uuid_df_col = None
+        
+        for col in df.columns:
+            if str(col).strip().lower() == uuid_header.lower():
+                uuid_df_col = col
+                break
+        
+        if uuid_df_col is not None:
+            print(f"Checking column '{uuid_df_col}' for missing UUIDs...")
+            
+            # Identify rows where the UUID column is empty (or NaN/None)
+            mask = df[uuid_df_col].isna() | (df[uuid_df_col] == '') | (df[uuid_df_col].astype(str).str.len() < 10) 
+            
+            if mask.any():
+                num_new_uuids = mask.sum()
+                print(f"Generating {num_new_uuids} new UUIDs for historical/empty entries...")
+                
+                # Generate new UUIDs only for the rows where the mask is True
+                new_uuids = [str(uuid.uuid4()) for _ in range(num_new_uuids)]
+                
+                # Apply the new UUIDs to the masked rows
+                df.loc[mask, uuid_df_col] = new_uuids
+
+        return df
+
     def sync_excel_to_db(self, excel_path, header_finder_func):
         """
-        Performs a full synchronization from the Excel file to the SQLite DB using xlwings.
-        This will drop the existing table and recreate it from the Excel sheet.
+        Performs a full synchronization from the Excel file to the SQLite DB.
+        Corrects column conflicts by ensuring all columns in the DataFrame are
+        accounted for in the final table creation.
         """
         if not self.conn:
             raise ConnectionError("Database connection is not available.")
+            
+        print("Starting full sync from Excel to SQLite...")
         
-        print("Starting full sync from Excel to SQLite using xlwings...")
-        app, book, sheet = None, None, None
+        df = None
+        header_row_index = -1
+        
+        # --- Step 1 & 2: Header finding and DataFrame reading (omitted for brevity) ---
         try:
-            # 1. Find header row using the provided xlwings-based function
             header_row_index = header_finder_func(excel_path)
-            
-            # 2. Read Excel data using xlwings and convert to a pandas DataFrame
-            app = xw.App(visible=False)
-            book = app.books.open(excel_path)
-            sheet = book.sheets[0]
+            if header_row_index == -1: return
 
-            # Read from the header row downwards
-            df = sheet.range(f'A{header_row_index + 1}').expand().options(pd.DataFrame, header=1).value
-            df.dropna(how='all', inplace=True) # Remove completely empty rows
-            df.reset_index(inplace=True) # Ensure the index is clean
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    print(f"DEBUG (Attempt {attempt + 1}): Reading full data using pd.read_excel, skipping {header_row_index} rows.")
+                    df = pd.read_excel(
+                        excel_path,
+                        sheet_name=0,
+                        header=header_row_index,
+                        skiprows=header_row_index
+                    )
+                    df.dropna(how='all', inplace=True) 
+                    df.reset_index(inplace=True)
+                    break
+                except Exception:
+                    if attempt == max_retries - 1: raise 
+                    time.sleep(1)
+        except Exception as e:
+            print(f"Error during initial read: {e}")
+            traceback.print_exc()
+            return
+        
+        # --- FIXES: Data Conversion & Generation ---
+        utc_headers = ["UTC Date-Time", "Date-Time", "Date-Time (UTC)"]
+        df = self._apply_date_conversion(df, utc_headers)
+        local_headers = ["Local Time", "Local Date-Time", "Local Date"]
+        df = self._apply_date_conversion(df, local_headers)
 
-            # 3. Use the original Excel row number as the primary key
-            # The "+2" accounts for 1-based Excel rows and the header row itself
-            df['excel_row_number'] = df.index + header_row_index + 2
-            
-            # 4. Sanitize column names for SQL
-            df.columns = [self._sanitize_column_name(h) for h in df.columns]
+        # 1. Add/Update 'excel_row_number' column
+        df['excel_row_number'] = df.index + header_row_index + 2
+        
+        # 2. Add/Generate 'UUID' column
+        df = self._apply_uuid_generation(df)
 
-            # 5. Drop the old table and write the new data
+        # 3. Sanitize column names for SQL
+        df.columns = [self._sanitize_column_name(h) for h in df.columns]
+
+
+        # --- Step 3, 4, 5: Process and Write to SQLite (Corrected Logic) ---
+        try:
             table_name = Path(excel_path).stem
-            pk_col = self._sanitize_column_name('excel_row_number')
-
-            # Use a more robust method to create the table with the primary key
+            
+            # Use the sanitized UUID column as the DB PRIMARY KEY
+            uuid_pk_col = self._sanitize_column_name('UUID')
+            # Use the sanitized row number column name
+            excel_row_col = self._sanitize_column_name('excel_row_number')
+            
+            # Write everything to the temp table (including excel_row_number)
             df.to_sql(f"{table_name}_temp", self.conn, if_exists='replace', index=False)
             
             cursor = self.conn.cursor()
-            cols_with_types = [f'"{col}" TEXT' for col in df.columns if col != pk_col]
-            create_sql = f'CREATE TABLE "{table_name}" ("{pk_col}" INTEGER PRIMARY KEY, {", ".join(cols_with_types)})'
+            
+            # Build the correct CREATE TABLE statement for the final table
+            # Iterate over ALL sanitized columns from the DataFrame
+            cols_with_types = []
+            for col in df.columns:
+                if col == uuid_pk_col:
+                    cols_with_types.append(f'"{col}" TEXT PRIMARY KEY')
+                # Explicitly add the excel_row_number column as a normal TEXT column
+                # The original error occurred because this column was missing from the CREATE statement
+                elif col == excel_row_col:
+                     cols_with_types.append(f'"{col}" INTEGER')
+                else:
+                    cols_with_types.append(f'"{col}" TEXT')
+            
+            create_sql = f'CREATE TABLE "{table_name}" ({", ".join(cols_with_types)})'
             
             cursor.execute(f"DROP TABLE IF EXISTS \"{table_name}\"")
             cursor.execute(create_sql)
             
+            # Insert ALL columns from the temp table (including excel_row_number) into the final table
             all_cols_str = ", ".join(f'"{col}"' for col in df.columns)
             cursor.execute(f'INSERT INTO "{table_name}" ({all_cols_str}) SELECT {all_cols_str} FROM "{table_name}_temp"')
             cursor.execute(f'DROP TABLE "{table_name}_temp"')
@@ -231,23 +358,23 @@ class SQLiteManager:
         except Exception as e:
             print(f"An unexpected error occurred during full sync: {e}")
             traceback.print_exc()
-        finally:
-            # Always clean up the xlwings Excel instance
-            if book: book.close()
-            if app: app.quit()
-
+            
     def upsert_row(self, table_name, data_dict, excel_row_pk):
         """
-        Inserts a new row or updates an existing one based on the primary key.
-        Retries a few times if the database is locked.
-        Returns a tuple (bool, str) indicating success and a status message.
+        Inserts a new row or updates an existing one based on the primary key (UUID if available, else Excel row number).
         """
         if not self.conn:
             return False, "No Connection."
-
-        pk_col_name = 'excel_row_number'
-        data_dict[pk_col_name] = excel_row_pk
         
+        # Use UUID if available, otherwise fall back to excel_row_number
+        uuid_col = self._sanitize_column_name('UUID')
+        pk_col_name = uuid_col if uuid_col in data_dict else 'excel_row_number'
+        
+        # Ensure the PK field is always present in the data dict for the WHERE clause (if updating) 
+        # or for the INSERT OR REPLACE.
+        if pk_col_name == 'excel_row_number':
+            data_dict[pk_col_name] = excel_row_pk
+
         columns = ', '.join(f'"{k}"' for k in data_dict.keys())
         placeholders = ', '.join('?' for _ in data_dict)
         sql = f'INSERT OR REPLACE INTO "{table_name}" ({columns}) VALUES ({placeholders})'
@@ -256,16 +383,17 @@ class SQLiteManager:
         for attempt in range(3):
             try:
                 cursor = self.conn.cursor()
+                # print(f"DEBUG UPSERT: {sql} with values {list(data_dict.values())}") # Debug statement
                 cursor.execute(sql, tuple(data_dict.values()))
                 self.conn.commit()
-                return True, "OK." # Success! Exit the loop and method.
+                return True, "OK."
             except sqlite3.OperationalError as e:
+                # ... (error handling remains the same)
                 if "database is locked" in str(e):
                     print(f"Database locked on attempt {attempt + 1}. Retrying...")
-                    time.sleep(0.2) # Wait 200ms before trying again
-                    continue # Go to the next iteration of the loop
+                    time.sleep(0.2) 
+                    continue
                 else:
-                    # It's a different operational error
                     print(f"SQLite operational error: {e}")
                     self.conn.rollback()
                     return False, f"Error: {e}"
@@ -274,10 +402,9 @@ class SQLiteManager:
                 self.conn.rollback()
                 return False, f"Error: {e}"
         
-        # If the loop completes without returning, it means all attempts failed due to locking
         print("Failed to upsert row after multiple attempts. Database remained locked.")
         return False, "DB Locked."
-
+    
 # --- FolderMonitor Class ---
 class FolderMonitor(FileSystemEventHandler):
     '''
@@ -561,7 +688,8 @@ class DataLoggerGUI:
             {"field": "Local Time", "column_name": "Local Time", "skip": False, "source": "PC Time + Offset"},
             {"field": "Event", "column_name": "Event", "skip": False, "source": "Button"},
             {"field": "Code", "column_name": "Code", "skip": False, "source": "Button"},
-            {"field": "KP Ref.", "column_name": "KP Ref.", "skip": False, "source": "Source Alias"}
+            {"field": "KP Ref.", "column_name": "KP Ref.", "skip": False, "source": "Source Alias"},
+            {"field": "UUID", "column_name": "UUID", "skip": False, "source": "Generated"}
         ]
 
         # For data from static cells in Excel
@@ -955,24 +1083,43 @@ class DataLoggerGUI:
         print(f"Using xlwings to find header in: {excel_file}")
         app, book, sheet = None, None, None
         try:
-            # Use a hidden Excel instance managed by xlwings
             app = xw.App(visible=False)
             book = app.books.open(excel_file)
             sheet = book.sheets[0]
 
-            # Read the top part of the sheet in one go for efficiency
             data_block = sheet.range(f'A1:{chr(ord("A")+25)}{max_rows_to_scan}').value
 
             for idx, row in enumerate(data_block):
                 if row is None: continue
-                # Check if the required column names are in the current row's values
                 # Comparing as lowercase strings for robustness
-                row_values = {str(v).lower().strip() for v in row if v is not None}
-                if EXCEL_LOG_REQUIRED_COLS.issubset(row_values):
+                row_values_list = [str(v).lower().strip() for v in row if v is not None]
+                current_row_headers = set(row_values_list)
+                
+                # Check for missing columns
+                missing_cols = EXCEL_LOG_REQUIRED_COLS - current_row_headers
+                
+                if not missing_cols:
+                    # All required columns are present in this row
                     return idx  # Return the zero-based index of the header row
 
             # If the loop finishes, the header was not found
-            raise ValueError(f"Crucial columns not found in the first {max_rows_to_scan} rows.")
+            # Determine which columns are missing overall to provide the most helpful error.
+            # (We cannot know for certain which ones were missing, but we'll list all required ones)
+            
+            
+            # If a match isn't found, construct the most informative error message.
+            missing_text = ', '.join(sorted(EXCEL_LOG_REQUIRED_COLS))
+            
+            raise ValueError(
+                f"Crucial header columns not found in the first {max_rows_to_scan} rows of the log sheet. "
+                f"Ensure the following headers (case-insensitive) exist: {missing_text}"
+            )
+            
+            
+        except Exception as e:
+            # Re-raise the exception after printing the traceback for better debugging
+            traceback.print_exc() 
+            raise e
         finally:
             # Ensure the Excel process is always closed
             if book: book.close()
@@ -1251,6 +1398,13 @@ class DataLoggerGUI:
             """The function that runs on the background thread."""
             try:
                 row_data = {}
+
+                 # --- NEW: GENERATE UUID AT START OF LOGGING ---
+                uuid_col = self.txt_field_columns.get("UUID")
+                if uuid_col:
+                    row_data[uuid_col] = str(uuid.uuid4())
+
+
                 # --- DATA GATHERING ---
                 if override_txt_data is not None:
                     row_data.update(override_txt_data)
@@ -1744,6 +1898,9 @@ class DataLoggerGUI:
         """
         Saves a single row of data to the open Excel file via xlwings
         and mirrors the new row to the SQLite database if enabled.
+        
+        MODIFIED: Forces date/time column to be written as a datetime object
+                  to ensure correct Excel formatting.
         """
         if not self.log_file_path or not os.path.exists(self.log_file_path):
             return False, False, "Excel: Path Invalid."
@@ -1753,67 +1910,117 @@ class DataLoggerGUI:
         success_excel = False
         success_sqlite = False
         next_row = -1
-
-        # --- Part 1: Save to Excel (Largely Unchanged) ---
+        header_values = [] 
+        
+        # --- Part 1: Save to Excel (Modified for datetime write) ---
         try:
             wb = xw.Book(self.log_file_path)
             sheet = wb.sheets[0]
             header_row_index = -1
-            header_values = []
+            
+            # Search for the header row (omitted code for brevity)
             for i in range(1, MAX_HEADER_SEARCH_ROW + 1):
                 row_values_list = sheet.range(f'A{i}').expand('right').value
                 if not row_values_list: continue
                 current_row_headers = {str(h).lower().strip() for h in row_values_list if h is not None}
-                if EXCEL_LOG_REQUIRED_COLS.issubset(current_row_headers):
+                missing_cols = EXCEL_LOG_REQUIRED_COLS - current_row_headers
+                
+                if not missing_cols:
                     header_row_index = i
                     header_values = [h if h is not None else '' for h in row_values_list]
                     break
             
             if header_row_index == -1:
-                raise ValueError("Could not find header row in Excel.")
+                # ... (ValueError raising logic remains unchanged)
+                missing_text = ', '.join(sorted(EXCEL_LOG_REQUIRED_COLS))
+                raise ValueError(
+                    f"Required header row not found. Missing columns: {missing_text}."
+                )
 
             header_map = {str(h).lower(): i for i, h in enumerate(header_values) if h}
             
+            # Determine the next empty row for data insertion
             last_row = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
             next_row = max(last_row, header_row_index) + 1
 
             output_data = [None] * len(header_values)
+            
+            # Identify the column name for the "Date-Time" field from settings
+            dt_col_name = self.txt_field_columns.get("Date-Time")
+            dt_col_name_lower = str(dt_col_name).lower()
+            dt_col_index = -1
+
+            # --- Map Data to Output Row & Force Date Conversion for Excel ---
             for col_name, value in row_data.items():
                 col_name_lower = str(col_name).lower()
                 if col_name_lower in header_map:
                     col_idx = header_map[col_name_lower]
+                    
+                    if col_name_lower == dt_col_name_lower and value:
+                        # CRITICAL: Convert the standardized date string back to a Python datetime object
+                        # This ensures xlwings writes the correct numeric date value to Excel.
+                        try:
+                            value = datetime.datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+                            dt_col_index = col_idx + 1 # Store 1-based column index for formatting later
+                        except (ValueError, TypeError):
+                            # If conversion fails, keep the original value (will likely be a string or None)
+                            pass 
+                    
                     output_data[col_idx] = value
             
             target_range = sheet.range(f"A{next_row}").resize(1, len(output_data))
             target_range.value = output_data
 
+            # --- Apply Date/Time Format to the relevant column ---
+            if dt_col_index > 0:
+                dt_cell_range = sheet.cells(next_row, dt_col_index)
+                
+                # Apply the standard Excel date/time format
+                # Using this format ensures both date and time are visible
+                dt_cell_range.number_format = 'yyyy-mm-dd hh:mm:ss' 
+            
+            
             if row_color or font_color:
                 format_range = sheet.range((next_row, 1), (next_row, len(header_map)))
                 if row_color: format_range.color = row_color
                 if font_color: format_range.font.color = font_color
-            
+                
             wb.save()
             excel_message = "Excel: OK."
             success_excel = True
-        
+            
+        except ValueError as ve:
+            print(f"Header Error during Excel Save: {ve}")
+            traceback.print_exc()
+            excel_message = f"Excel: Fail (Missing Header: {ve})."
+            return False, False, f"{excel_message} {sqlite_message}"
+            
         except Exception as e:
             traceback.print_exc()
             excel_message = f"Excel: Fail ({type(e).__name__})."
-            # Return immediately on Excel failure
             return False, False, f"{excel_message} {sqlite_message}"
 
-        # --- Part 2: Mirror to SQLite (NEW LOGIC) ---
+        # --- Part 2: Mirror to SQLite (Remains unchanged) ---
         if success_excel and self.sqlite_mirror_enabled_var.get() and self.sqlite_manager:
             try:
                 table_name = Path(self.log_file_path).stem
-                # Create a dictionary from the headers and the row data
+                # Ensure date field is still a string for SQLite storage
+                sqlite_output_data = []
+                for header, value in zip(header_values, output_data):
+                    if header.lower() == dt_col_name_lower and isinstance(value, datetime.datetime):
+                        # Convert back to a standardized string for TEXT storage in SQLite
+                        sqlite_output_data.append(value.strftime("%Y-%m-%d %H:%M:%S"))
+                    else:
+                        sqlite_output_data.append(value)
+
                 data_dict = {
                     self.sqlite_manager._sanitize_column_name(header): value
-                    for header, value in zip(header_values, output_data)
+                    for header, value in zip(header_values, sqlite_output_data)
                 }
                 success_sqlite, sqlite_status = self.sqlite_manager.upsert_row(table_name, data_dict, next_row)
                 if success_sqlite:
                     sqlite_message = "SQLite: OK."
+                # ... (rest of SQLite status logic remains unchanged)
                 elif sqlite_status == "DB Locked.":
                     sqlite_message = "SQLite: Busy."
                     print("Could not update SQLite mirror; database was busy.")
@@ -3616,14 +3823,22 @@ class SettingsWindow:
         db_frame.pack(fill="x", pady=(0, 15))
         db_frame.columnconfigure(1, weight=1)
         
+        # --- NEW: Red Warning Text ---
+        ttk.Label(
+            db_frame, 
+            text="⚠️ To be used when Reach Horizon Spreadsheet is not in use", 
+            foreground="red",
+            font=("Arial", 9, "bold")
+        ).grid(row=0, column=0, columnspan=3, padx=5, pady=(0, 10), sticky='w')
+        
         self.db_file_label = ttk.Label(db_frame, text="Path:", anchor='e')
-        self.db_file_label.grid(row=0, column=0, padx=(0, 5), pady=5, sticky='w')
+        self.db_file_label.grid(row=1, column=0, padx=(0, 5), pady=5, sticky='w')
         
         self.db_file_entry = ttk.Entry(db_frame, width=80)
-        self.db_file_entry.grid(row=0, column=1, padx=5, pady=5, sticky='ew')
+        self.db_file_entry.grid(row=1, column=1, padx=5, pady=5, sticky='ew')
         
         db_browse_btn = ttk.Button(db_frame, text="Browse...", command=self.select_sqlite_file)
-        db_browse_btn.grid(row=0, column=2, padx=(5, 0), pady=5)
+        db_browse_btn.grid(row=1, column=2, padx=(5, 0), pady=5)
         
         ToolTip(db_browse_btn, "Select the location to save the SQLite database file.")
         ToolTip(self.db_file_entry, "Full path to the .db file where the Excel data will be mirrored. If left blank, it will be created next to the Excel file.")
@@ -3634,7 +3849,7 @@ class SettingsWindow:
         txt_sources_container.columnconfigure(0, weight=1)
 
 
-        # --- Helper function to create each TXT source entry ---
+        # --- Helper function to create each TXT source entry (omitted for brevity) ---
         def create_txt_source_frame(parent, title, name_entry_var, path_entry_var):
             frame = ttk.LabelFrame(parent, text=title, padding=15)
             frame.grid(sticky='ew', pady=(0, 15))
@@ -3654,7 +3869,7 @@ class SettingsWindow:
             ToolTip(browse_btn, "Select the folder containing the navigation TXT files for this source.")
             return name_entry, path_entry
 
-        # Create StringVars to hold the UI data
+        # Create StringVars to hold the UI data (omitted for brevity)
         self.txt_name_main_var = tk.StringVar()
         self.txt_path_main_var = tk.StringVar()
         self.txt_name_set2_var = tk.StringVar()
@@ -3666,13 +3881,13 @@ class SettingsWindow:
         self.txt_name_set5_var = tk.StringVar()
         self.txt_path_set5_var = tk.StringVar()
 
-        # Create the three source blocks using the helper
+        # Create the five source blocks using the helper (omitted for brevity)
         create_txt_source_frame(txt_sources_container, "Main Vehicle Navigation (Main TXT Data)", self.txt_name_main_var, self.txt_path_main_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 2)", self.txt_name_set2_var, self.txt_path_set2_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 3)", self.txt_name_set3_var, self.txt_path_set3_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 4)", self.txt_name_set4_var, self.txt_path_set4_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 5)", self.txt_name_set5_var, self.txt_path_set5_var)
-   
+    
         # Frame for restoring default settings ---
         restore_frame = ttk.LabelFrame(tab, text="Restore Default Settings", padding=15)
         restore_frame.pack(fill="x", pady=(20, 0), side="bottom") # Place it at the bottom

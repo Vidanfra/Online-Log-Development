@@ -1,9 +1,10 @@
 {
-    "log_file_path": "J:/600063_Cnooc_Log/Online_Log/DailyLog-Horizon_v14.xlsb",
+    "log_file_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01_Online_Log/Python Testing/DailyLog-Horizon_v14.xlsb",
+    "sqlite_db_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01_Online_Log/600061_Cnooc_Log/SQ DB/CNOOC_SQL_DB.db",
     "time_offset_hours": 1.0,
-    "txt_folder_path": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
-    "txt_folder_path_set2": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Vessel Navigation",
-    "txt_folder_path_set3": "",
+    "txt_folder_path": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
+    "txt_folder_path_set2": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
+    "txt_folder_path_set3": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_OBSROV_NEW",
     "txt_folder_path_set4": "",
     "txt_folder_path_set5": "",
     "txt_mapping_config": [
@@ -83,78 +84,262 @@
             "column_name": "KP Ref.",
             "skip": false,
             "source": "Source Alias"
+        },
+        {
+            "field": "UUID",
+            "column_name": "UUID",
+            "skip": false,
+            "source": "Generated"
         }
     ],
     "static_field_configs": [],
     "folder_paths": {
-        "Main TXT File": "S:/QPS PROJECTS/600056_ODE_Pipeline_Inspection_ED50_UTM31/LogFiles/Online_Log_VIRE_NEW",
-        "TXT Source 2": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Vessel Navigation",
-        "Naviscan": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "Main TXT File": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
+        "TXT Source 2": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
+        "TXT Source 3": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_OBSROV_NEW",
+        "Qinsy DB": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/Database",
+        "Naviscan": "N:/600061_CNOOC/GEAD/PLU3035_6_Inch_Umbilical",
         "SSS": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
-        "SVP": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/SQL Database"
+        "SVP": "J:/600061_CNOOC_Inspection_2025/03_RAW_DATA/02_VIRE_WROV/03_SVP/HiPAP_USR",
+        "Sprint log": "J:/CNO_600061/03_RAW_DATA/02_VIRE_WROV/05_INS"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File",
         "TXT Source 2": "TXT_Source_2",
+        "TXT Source 3": "TXT_Set3_File",
+        "Qinsy DB": "Qinsy DB",
         "Naviscan": "SBD Files",
         "SSS": "ROV SSS",
-        "SVP": "SVP"
+        "SVP": "SVP",
+        "Sprint log": "Sprint"
     },
     "file_extensions": {
         "Main TXT File": "txt",
         "TXT Source 2": "txt",
-        "Naviscan": "",
+        "TXT Source 3": "txt",
+        "Qinsy DB": "db",
+        "Naviscan": "SBD",
         "SSS": "",
-        "SVP": ""
+        "SVP": "",
+        "Sprint log": "bin"
     },
     "folder_skips": {
         "Main TXT File": false,
         "TXT Source 2": false,
+        "TXT Source 3": false,
+        "Qinsy DB": false,
         "Naviscan": false,
-        "SSS": false,
-        "SVP": false
+        "SSS": true,
+        "SVP": false,
+        "Sprint log": false
     },
     "folder_log_x_instead": {
         "Main TXT File": false,
         "TXT Source 2": false,
+        "TXT Source 3": false,
+        "Qinsy DB": false,
         "Naviscan": false,
         "SSS": false,
-        "SVP": false
+        "SVP": false,
+        "Sprint log": false
     },
-    "num_custom_buttons": 3,
+    "num_custom_buttons": 26,
     "custom_button_configs": [
         {
-            "text": "Custom Event 1",
-            "event_text": "Custom Event 1 Triggered",
+            "text": "Vessel move",
+            "event_text": "Vessel move",
             "txt_source_key": "Main TXT",
             "tab_group": "Main",
-            "event_code": "AF-E"
+            "event_code": "VM"
         },
         {
-            "text": "Custom Event 2",
-            "event_text": "Custom Event 2 Triggered",
-            "txt_source_key": "None",
+            "text": "Vessel HDT",
+            "event_text": "Vessel Altering Heading",
+            "txt_source_key": "Main TXT",
             "tab_group": "Main",
-            "event_code": ""
+            "event_code": "V-OTH"
         },
         {
-            "text": "Custom Event 3",
-            "event_text": "Custom Event 3 Triggered",
-            "txt_source_key": "None",
+            "text": "Vessel move completed",
+            "event_text": "Vessel move completed",
+            "txt_source_key": "Main TXT",
             "tab_group": "Main",
-            "event_code": ""
+            "event_code": "VM"
+        },
+        {
+            "text": "Weather",
+            "event_text": "Weather - WdSP: knts, WdDir: , SigWH: m, CurSP: knts, CurDir:",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main",
+            "event_code": "V-OTH"
+        },
+        {
+            "text": "WROV OTH",
+            "event_text": "WROV",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "WROV on deck",
+            "event_text": "WROV on deck",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-ON"
+        },
+        {
+            "text": "WROV off deck",
+            "event_text": "WROV off deck",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OFF"
+        },
+        {
+            "text": "WROV in TMS",
+            "event_text": "WROV in TMS",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "WROV out TMS",
+            "event_text": "WROV out TMS",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "Midnight",
+            "event_text": "Midnight Position",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "TBT",
+            "event_text": "TBT",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main",
+            "event_code": "V-OTH"
+        },
+        {
+            "text": "TSS BBC",
+            "event_text": "TSS Background  Compensation",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "TSS BGC 10m",
+            "event_text": "TSS Background Compensation - 10m test",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "TSS Warm up",
+            "event_text": "TSS Warm up",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "Vessel OTH",
+            "event_text": "Vessel",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main",
+            "event_code": "V-OTH"
+        },
+        {
+            "text": "Log OFF",
+            "event_text": "Log Off",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "LogOff"
+        },
+        {
+            "text": "CP",
+            "event_text": "CP stab -XX mV",
+            "txt_source_key": "TXT Source 2",
+            "tab_group": "WROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "OBSROV on deck",
+            "event_text": "OBSROV on deck",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "R-OFF"
+        },
+        {
+            "text": "OBSROV off deck",
+            "event_text": "OBSROV off deck",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "R-OFF"
+        },
+        {
+            "text": "OBSROV out TMS",
+            "event_text": "OBSROV out TMS",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "V-OTH"
+        },
+        {
+            "text": "OBSROV in TMS",
+            "event_text": "OBSROV in TMS",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "OBROV CP",
+            "event_text": "OBSROV CP -XX mV",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "OBSROV OTH",
+            "event_text": "OBSROV",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "R-OTH"
+        },
+        {
+            "text": "Log On",
+            "event_text": "Log on",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "LogON"
+        },
+        {
+            "text": "Log off",
+            "event_text": "Log off",
+            "txt_source_key": "TXT Source 3",
+            "tab_group": "OBSROV",
+            "event_code": "LogOff"
+        },
+        {
+            "text": "Vessel speed",
+            "event_text": "Vessel speed",
+            "txt_source_key": "Main TXT",
+            "tab_group": "Main",
+            "event_code": "VM"
         }
     ],
     "custom_button_tab_groups": [
-        "Main"
+        "Main",
+        "OBSROV",
+        "WROV"
     ],
     "button_colors": {
         "Log on": [
-            "#90EE90",
+            "#00ff00",
             null
         ],
         "Log off": [
-            "#FFB6C1",
+            "#ff8080",
             null
         ],
         "Event": [
@@ -173,12 +358,92 @@
             "#FFFF99",
             null
         ],
-        "Custom Event 1": [
+        "Vessel move": [
+            "#ffffff",
+            "#000000"
+        ],
+        "Weather": [
             "#BAE1FF",
             "#000000"
+        ],
+        "WROV on deck": [
+            "#808000",
+            "#000000"
+        ],
+        "WROV off deck": [
+            "#808000",
+            "#000000"
+        ],
+        "WROV OTH": [
+            "#ffffff",
+            "#000000"
+        ],
+        "WROV in TMS": [
+            "#FFFFBA",
+            "#000000"
+        ],
+        "WROV out TMS": [
+            "#FFFFBA",
+            "#000000"
+        ],
+        "Midnight": [
+            "#ffff00",
+            null
+        ],
+        "TBT": [
+            "#BAFFC9",
+            null
+        ],
+        "TSS BBC": [
+            "#ff9933",
+            null
+        ],
+        "TSS BGC 10m": [
+            "#ffa54a",
+            null
+        ],
+        "TSS Warm up": [
+            "#8080ff",
+            null
+        ],
+        "Log OFF": [
+            "#FFB3BA",
+            null
+        ],
+        "CP": [
+            "#80ff80",
+            null
+        ],
+        "OBSROV out TMS": [
+            "#804040",
+            null
+        ],
+        "OBSROV in TMS": [
+            "#804040",
+            null
+        ],
+        "OBROV CP": [
+            "#BAFFC9",
+            null
+        ],
+        "OBSROV OTH": [
+            "#ffffff",
+            null
+        ],
+        "OBSROV on deck": [
+            "#ff8040",
+            null
+        ],
+        "OBSROV off deck": [
+            "#FFFFBA",
+            null
+        ],
+        "Log On": [
+            "#00ff40",
+            null
         ]
     },
-    "always_on_top": false,
+    "always_on_top": true,
     "active_logging_threshold_seconds": 15,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
@@ -186,28 +451,31 @@
         "Log on": {
             "event_text": "Log on ",
             "event_code": "IDC-S",
-            "txt_source_key": "Main TXT"
+            "txt_source_key": "TXT Source 2"
         },
         "Log off": {
             "event_text": "Log off",
             "event_code": "IDC-S",
-            "txt_source_key": "Main TXT"
+            "txt_source_key": "TXT Source 2"
         },
         "Event": {
             "event_text": "Event",
             "event_code": ""
         },
         "SVP": {
-            "event_text": "SVP applied",
-            "event_code": "SVP"
+            "event_text": "Logging SVP",
+            "event_code": "SVP",
+            "txt_source_key": "TXT Source 2"
         }
     },
     "txt_source_aliases": {
         "Main TXT": "VIRE",
-        "TXT Source 2": "TXT Source 2",
-        "TXT Source 3": "TXT Source 3",
+        "TXT Source 2": "WROV",
+        "TXT Source 3": "OBSROV",
         "TXT Source 4": "TXT Source 4",
         "TXT Source 5": "TXT Source 5"
     },
-    "calculate_logoff_values": true
+    "calculate_logoff_values": true,
+    "auto_sync_enabled": true,
+    "auto_sync_interval_min": 2
 }

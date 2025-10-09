@@ -1,0 +1,65 @@
+{
+    "db_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01_Online_Log/600061_Cnooc_Log/db.sqlite",
+    "excel_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/05_Field_Log/Field Log Viewer CNOOC.xlsx",
+    "keywords": [
+        "Log Off",
+        "Log Off",
+        "SVP",
+        "On Deck",
+        "Off Deck",
+        "",
+        "Midnight"
+    ],
+    "colors_rgb": [
+        [
+            255,
+            204,
+            204
+        ],
+        [
+            255,
+            255,
+            153
+        ],
+        [
+            204,
+            255,
+            204
+        ],
+        [
+            204,
+            229,
+            255
+        ],
+        [
+            255,
+            229,
+            204
+        ],
+        [
+            229,
+            204,
+            255
+        ],
+        [
+            255,
+            255,
+            0
+        ]
+    ],
+    "selected_columns": [
+        "datetime",
+        "runline",
+        "kp",
+        "kp_ref",
+        "event",
+        "latitude",
+        "longitude",
+        "easting_m",
+        "northing_m",
+        "dcc",
+        "sbd_files",
+        "qinsy_db",
+        "sprint"
+    ]
+}
