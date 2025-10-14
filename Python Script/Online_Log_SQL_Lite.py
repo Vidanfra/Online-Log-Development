@@ -641,7 +641,7 @@ class DataLoggerGUI:
             "Log off": {"event_text": "Log off event occurred", "event_code": ""},
             "Event": {"event_text": "", "event_code": ""}, # Intentionally blank for the "Event" button
             "SVP": {"event_text": "SVP applied", "event_code": ""},
-            "Manual Hourly Log": {"event_text": "Auto generated", "event_code": ""}, 
+            "Manual KP Log": {"event_text": "Auto generated", "event_code": ""}, 
         }
         
         # Original TXT path for the 'Event' button
@@ -787,7 +787,7 @@ class DataLoggerGUI:
         self.custom_buttons = []
 
         # --- Section 1: Custom Events (Left Side) ---
-        # (This entire section for creating the custom button notebook is unchanged)
+        # ... (unchanged setup for custom buttons) ...
         custom_lf = ttk.LabelFrame(self.custom_buttons_frame, text="Custom Events")
         custom_lf.pack(fill="both", expand=True)
         self.custom_buttons_notebook = ttk.Notebook(custom_lf)
@@ -838,6 +838,7 @@ class DataLoggerGUI:
                     ToolTip(button, f"Log '{event_desc}' (Source: {txt_source})")
                     self.custom_buttons.append(button)
 
+
         # --- Section 2: General Event Buttons (Middle) ---
         general_lf = ttk.LabelFrame(self.general_buttons_frame, text="General Events")
         general_lf.pack(fill="both", expand=True)
@@ -845,10 +846,15 @@ class DataLoggerGUI:
         # Configure for 4 rows: 0, 1, 2 (Manual Log), 3 (Historic Event)
         general_lf.rowconfigure((0, 1, 2, 3), weight=1)
 
-        # Helper function to create styled main buttons (unchanged)
+        # Helper function to create styled main buttons (MODIFIED COLOR LOOKUP)
         def create_main_button(parent, text, command_func, tooltip_text, grid_row, grid_col):
-            bg_color_hex, font_color_hex = self.button_colors.get(text, (None, None))
-            cleaned_text = ''.join(e for e in text if e.isalnum()) 
+            
+            # --- CORRECTION APPLIED HERE (Ensures Manual KP Log uses Hourly KP Log's style) ---
+            key_to_use = "Hourly KP Log" if text == "Manual KP Log" else text
+            bg_color_hex, font_color_hex = self.button_colors.get(key_to_use, (None, None))
+            # ---------------------------------------------------------------------------------
+            
+            cleaned_text = ''.join(e for e in text if e.isalnum())  
             style_name = f"MainBtn_{cleaned_text}.TButton"
             style_config = {}
             if bg_color_hex:
@@ -869,20 +875,19 @@ class DataLoggerGUI:
         create_main_button(general_lf, "SVP", lambda b=None: self.log_svp("SVP", b, "Main TXT"), "Record data and insert latest SVP filename.", 1, 1)
 
         # Add the new Manual Hourly KP Log button (Row 2)
-        # Use a new button name for tracking colors/config
         manual_hourly_btn = create_main_button(
             general_lf, 
-            "Manual Hourly Log", 
+            "Manual KP Log", 
             lambda b=None: self.trigger_manual_hourly_log_action(manual_hourly_btn), 
             "Manually trigger the hourly KP log and progress calculation.", 
             2, 
-            0  # Starts in column 0
+            0 
         )
-        # *** CHANGE HERE: Add columnspan=2 to Manual Hourly Log ***
         manual_hourly_btn.grid(columnspan=2, sticky="nsew")
-        # >>> CHANGE 2: Add the new "Add Historic Event" button to the grid
+        
+        # Add the new "Add Historic Event" button to the grid
         historic_btn = ttk.Button(general_lf, text="Add Historic Event", command=self.add_historic_event)
-        historic_btn.grid(row=3, column=0, columnspan=2, padx=4, pady=4, sticky="nsew") # <<< CHANGE 3: UPDATED ROW
+        historic_btn.grid(row=3, column=0, columnspan=2, padx=4, pady=4, sticky="nsew") 
         ToolTip(historic_btn, "Add an event from a past date/time by searching the Main data source file.")
         
         # --- Section 3: Configuration Buttons (Right Side) ---
@@ -1295,7 +1300,7 @@ class DataLoggerGUI:
         # Disable button and update status immediately on the main thread
         original_text = button_widget['text']
         button_widget.config(state=tk.DISABLED, text="Working...")
-        self.update_status("Processing 'Manual Hourly Log'...")
+        self.update_status("Processing 'Manual KP Log'...")
         
         # Reroute to the trigger function on a new thread (similar to other logs)
         def _manual_log_worker():
@@ -1305,11 +1310,11 @@ class DataLoggerGUI:
                 
                 # 2. Re-enable button and update status on the main thread
                 self.master.after(0, lambda: self._re_enable_button_and_update_status(
-                    button_widget, original_text, "Manual Hourly Log completed successfully."
+                    button_widget, original_text, "Manual KP Log completed successfully."
                 ))
             except Exception as e:
                 self.master.after(0, lambda: self._re_enable_button_and_update_status(
-                    button_widget, original_text, f"Manual Hourly Log failed: {e}"
+                    button_widget, original_text, f"Manual KP Log failed: {e}"
                 ))
                 traceback.print_exc()
 
@@ -2799,12 +2804,18 @@ class DataLoggerGUI:
         current_event_code = button_config.get("event_code", "")
         
         # FIX 1: Determine the source key based on the button name
-        if button_name == "Manual Hourly Log":
+        if button_name == "Manual KP Log":
             current_source_key = self.hourly_log_txt_source_key.get()
         else:
             current_source_key = button_config.get("txt_source_key", "Main TXT")
         
-        current_bg_color, current_font_color = self.button_colors.get(button_name, (None, None))
+        # NOTE: Colors for Manual/Hourly KP Log are now retrieved from the Programmed Events setting's storage
+        if button_name in ["Manual KP Log", "Hourly KP Log"]:
+            # Retrieve colors using the fixed 'Hourly KP Log' key
+            current_bg_color, current_font_color = self.button_colors.get("Hourly KP Log", (None, None))
+        else:
+            # For all other buttons, use their own key
+            current_bg_color, current_font_color = self.button_colors.get(button_name, (None, None))
         
         # --- Create StringVars ---
         event_text_var = tk.StringVar(value=current_event_text)
@@ -2822,6 +2833,8 @@ class DataLoggerGUI:
         # Find the display name from the alias map
         current_display_name = self.txt_source_aliases.get(current_source_key, current_source_key)
         source_display_var = tk.StringVar(value=current_display_name)
+        
+        # Use separate vars for the dialog's color widgets to track changes before saving
         button_bg_color_var = tk.StringVar(value=current_bg_color if current_bg_color else "")
         button_font_color_var = tk.StringVar(value=current_font_color if current_font_color else "")
         
@@ -2833,13 +2846,13 @@ class DataLoggerGUI:
         event_text_entry = ttk.Entry(frame, textvariable=event_text_var, width=40)
         
         # FIX: Make text read-only for auto-generated events
-        if button_name in ["Manual Hourly Log", "Hourly KP Log"]:
+        if button_name in ["Manual KP Log", "Hourly KP Log"]:
             event_text_var.set("Auto generated")
             event_text_entry.config(state="readonly")
             ToolTip(event_text_entry, "This event text is automatically generated and cannot be manually edited.")
 
         event_text_entry.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
-        if button_name not in ["Manual Hourly Log", "Hourly KP Log"]:
+        if button_name not in ["Manual KP Log", "Hourly KP Log"]:
             ToolTip(event_text_entry, "Text written to the 'Event' column in the log.")
 
         row_idx += 1
@@ -2853,7 +2866,7 @@ class DataLoggerGUI:
             event_code_display_list.append(f"{code} - {desc}")
         
         event_code_combobox = ttk.Combobox(frame, textvariable=event_code_display_var, # Use the new display variable
-                                             values=event_code_display_list,          # Use the new display list
+                                             values=event_code_display_list,           # Use the new display list
                                              state="readonly", width=37)
         
 
@@ -2874,54 +2887,58 @@ class DataLoggerGUI:
         source_combobox.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
         
         # FIX: Set the state and tooltip for the manual log button source
-        if button_name == "Manual Hourly Log":
+        if button_name in ["Manual KP Log", "Hourly KP Log"]:
              source_combobox.config(state="readonly") 
              ToolTip(source_combobox, "Source is linked to the 'KP Data Source' setting in the Programmed Events tab.")
         else:
              ToolTip(source_combobox, "Select which data source this button should use. Names are configured in Settings -> File Paths.")
 
         
-        row_idx += 1
-        # Button Background Color Picker
-        ttk.Label(frame, text="Button Background:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
-        
-        bg_color_widget_frame = ttk.Frame(frame)
-        bg_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
+        # --- CONDITIONAL COLOR PICKERS (NEW BLOCK) ---
+        # The color is derived from the "Programmed Events" tab for these, so editing here is redundant.
+        if button_name not in ["Manual KP Log", "Hourly KP Log"]:
+            row_idx += 1
+            # Button Background Color Picker
+            ttk.Label(frame, text="Button Background:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
+            
+            bg_color_widget_frame = ttk.Frame(frame)
+            bg_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
 
-        bg_color_display_label = tk.Label(bg_color_widget_frame, width=4, relief="solid", borderwidth=1,
-                                             background=button_bg_color_var.get() if button_bg_color_var.get() else 'SystemButtonFace')
-        bg_color_display_label.pack(side="left", padx=(0, 5))
+            bg_color_display_label = tk.Label(bg_color_widget_frame, width=4, relief="solid", borderwidth=1,
+                                                 background=button_bg_color_var.get() if button_bg_color_var.get() else 'SystemButtonFace')
+            bg_color_display_label.pack(side="left", padx=(0, 5))
 
-        clear_bg_btn = ttk.Button(bg_color_widget_frame, text="X", width=2,
-                                  command=lambda: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, None, editor_window))
-        clear_bg_btn.pack(side="left", padx=1)
-        ToolTip(clear_bg_btn, "Clear button background color.")
+            clear_bg_btn = ttk.Button(bg_color_widget_frame, text="X", width=2,
+                                         command=lambda: self._set_color_on_widget(button_bg_color_var, bg_color_display_label, None, editor_window))
+            clear_bg_btn.pack(side="left", padx=1)
+            ToolTip(clear_bg_btn, "Clear button background color.")
 
-        choose_bg_btn = ttk.Button(bg_color_widget_frame, text="...", width=3,
-                                   command=lambda v=button_bg_color_var, l=bg_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Background"))
-        choose_bg_btn.pack(side="left", padx=1)
-        ToolTip(choose_bg_btn, "Choose a custom background color.")
+            choose_bg_btn = ttk.Button(bg_color_widget_frame, text="...", width=3,
+                                        command=lambda v=button_bg_color_var, l=bg_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Background"))
+            choose_bg_btn.pack(side="left", padx=1)
+            ToolTip(choose_bg_btn, "Choose a custom background color.")
 
-        row_idx += 1
-        # Button Font Color Picker
-        ttk.Label(frame, text="Button Font Color:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
-        
-        font_color_widget_frame = ttk.Frame(frame)
-        font_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
+            row_idx += 1
+            # Button Font Color Picker
+            ttk.Label(frame, text="Button Font Color:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
+            
+            font_color_widget_frame = ttk.Frame(frame)
+            font_color_widget_frame.grid(row=row_idx, column=1, sticky="w", pady=5, padx=5)
 
-        font_color_display_label = tk.Label(font_color_widget_frame, width=4, relief="solid", borderwidth=1,
+            font_color_display_label = tk.Label(font_color_widget_frame, width=4, relief="solid", borderwidth=1,
                                                  background=button_font_color_var.get() if button_font_color_var.get() else 'SystemButtonFace')
-        font_color_display_label.pack(side="left", padx=(0, 5))
+            font_color_display_label.pack(side="left", padx=(0, 5))
 
-        clear_font_btn = ttk.Button(font_color_widget_frame, text="X", width=2,
-                                     command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
-        clear_font_btn.pack(side="left", padx=1)
-        ToolTip(clear_font_btn, "Clear button font color.")
+            clear_font_btn = ttk.Button(font_color_widget_frame, text="X", width=2,
+                                           command=lambda: self._set_color_on_widget(button_font_color_var, font_color_display_label, None, editor_window))
+            clear_font_btn.pack(side="left", padx=1)
+            ToolTip(clear_font_btn, "Clear button font color.")
 
-        choose_font_btn = ttk.Button(font_color_widget_frame, text="...", width=3,
-                                       command=lambda v=button_font_color_var, l=font_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Font"))
-        choose_font_btn.pack(side="left", padx=1)
-        ToolTip(choose_font_btn, "Choose a custom font color.")
+            choose_font_btn = ttk.Button(font_color_widget_frame, text="...", width=3,
+                                           command=lambda v=button_font_color_var, l=font_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Font"))
+            choose_font_btn.pack(side="left", padx=1)
+            ToolTip(choose_font_btn, "Choose a custom font color.")
+        # --- END CONDITIONAL COLOR PICKERS ---
 
 
         # --- Save and Cancel buttons ---
@@ -2950,19 +2967,22 @@ class DataLoggerGUI:
             internal_to_display_map = {internal: display for display, internal in zip(display_names_for_map, internal_keys_for_map)}
             
             selected_display_name = source_combobox.get() 
-            selected_source_key = next((key for key, value in internal_to_display_map.items() if value == selected_display_name), "None")
+            # Reverse lookup (Display Name -> Internal Key)
+            selected_source_key = next((key for key, display in internal_to_display_map.items() if display == selected_display_name), "None")
             
             # FIX 2: Check button name and save to the correct location
-            if button_name == "Manual Hourly Log":
+            if button_name == "Manual KP Log":
+                # Manual KP Log source is linked to the hourly event source setting
                 self.hourly_log_txt_source_key.set(selected_source_key)
             else:
                 self.main_button_configs[button_name]['txt_source_key'] = selected_source_key
             
-
-            # Save the new colors as a tuple
-            new_bg_color_hex = button_bg_color_var.get() if button_bg_color_var.get() else None
-            new_font_color_hex = button_font_color_var.get() if button_font_color_var.get() else None
-            self.button_colors[button_name] = (new_bg_color_hex, new_font_color_hex)
+            
+            # Save the new colors as a tuple (Only if the pickers were shown)
+            if button_name not in ["Manual KP Log", "Hourly KP Log"]:
+                new_bg_color_hex = button_bg_color_var.get() if button_bg_color_var.get() else None
+                new_font_color_hex = button_font_color_var.get() if button_font_color_var.get() else None
+                self.button_colors[button_name] = (new_bg_color_hex, new_font_color_hex)
             
             # Persist all settings and redraw the UI
             self.save_settings()
@@ -4875,8 +4895,8 @@ class SettingsWindow:
         self.hourly_source_map = {v: k for k, v in key_to_display_map.items()}
 
         # Rows 2-3: Color Pickers
-        ttk.Label(self.hourly_frame, text="Excel Row Colors:").grid(row=2, column=0, sticky='w', padx=5, pady=(2, 0))
-        self._create_color_picker_widgets(self.hourly_frame, 2, "Hourly KP Log")
+        #ttk.Label(self.hourly_frame, text="Excel Row Colors:").grid(row=2, column=0, sticky='w', padx=5, pady=(2, 0))
+        #self._create_color_picker_widgets(self.hourly_frame, 2, "Hourly KP Log")
 
 
         # 3. Log off Distance/Speed Calculation
@@ -4964,8 +4984,8 @@ class SettingsWindow:
             new_day_bg_label = new_day_bg_frame.winfo_children()[0]
             
             # Hourly Log Background Color Label: Grid row 2, column 1, is the frame holding the label. Label is the first child [0].
-            hourly_bg_frame = self.hourly_frame.grid_slaves(row=2, column=1)[0]
-            hourly_bg_label = hourly_bg_frame.winfo_children()[0]
+            #hourly_bg_frame = self.hourly_frame.grid_slaves(row=2, column=1)[0]
+            #hourly_bg_label = hourly_bg_frame.winfo_children()[0]
 
             # Trigger color update using the stored StringVar value
             self.parent_gui._set_color_on_widget(
@@ -4974,12 +4994,12 @@ class SettingsWindow:
                 self.new_day_bg_color_var.get(), 
                 self.master
             )
-            self.parent_gui._set_color_on_widget(
-                self.hourly_bg_color_var, 
-                hourly_bg_label, 
-                self.hourly_bg_color_var.get(), 
-                self.master
-            )
+            #self.parent_gui._set_color_on_widget(
+                #self.hourly_bg_color_var, 
+                #hourly_bg_label, 
+                #self.hourly_bg_color_var.get(), 
+                #self.master
+            #)
             # You may need similar logic for font colors if they are configured to show a background color
             # font_frame = self.new_day_frame.grid_slaves(row=2, column=1)[0]
             # font_label = font_frame.winfo_children()[0]
@@ -5069,10 +5089,10 @@ class SettingsWindow:
                 self.new_day_bg_color_var.get() if self.new_day_bg_color_var.get() else None, 
                 self.new_day_font_color_var.get() if self.new_day_font_color_var.get() else None
             )
-            self.parent_gui.button_colors["Hourly KP Log"] = (
-                self.hourly_bg_color_var.get() if self.hourly_bg_color_var.get() else None, 
-                self.hourly_font_color_var.get() if self.hourly_font_color_var.get() else None
-            )
+            #self.parent_gui.button_colors["Hourly KP Log"] = (
+                #self.hourly_bg_color_var.get() if self.hourly_bg_color_var.get() else None, 
+                #self.hourly_font_color_var.get() if self.hourly_font_color_var.get() else None
+            #)
 
         # --- Final Actions: Trigger the overall save to JSON ---
         self.parent_gui.save_settings()

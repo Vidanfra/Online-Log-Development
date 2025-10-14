@@ -335,7 +335,7 @@
     ],
     "button_colors": {
         "Log on": [
-            "#00ff00",
+            "#0222fd",
             null
         ],
         "Log off": [
@@ -445,13 +445,17 @@
         "Manual Hourly Log": [
             "#58fb46",
             "#4666fb"
+        ],
+        "Manual KP Log": [
+            "#6646fb",
+            "#5fff42"
         ]
     },
     "always_on_top": true,
     "active_logging_threshold_seconds": 15,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
-    "hourly_log_txt_source_key": "TXT Source 2",
+    "hourly_log_txt_source_key": "Main TXT",
     "main_button_configs": {
         "Log on": {
             "event_text": "Log on ",
@@ -472,10 +476,9 @@
             "event_code": "SVP",
             "txt_source_key": "TXT Source 2"
         },
-        "Manual Hourly Log": {
+        "Manual KP Log": {
             "event_text": "Auto generated",
-            "event_code": "",
-            "txt_source_key": "TXT Source 2"
+            "event_code": ""
         }
     },
     "txt_source_aliases": {
