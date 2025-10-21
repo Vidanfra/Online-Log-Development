@@ -1175,7 +1175,7 @@ class DataLoggerGUI:
                 # Parse filename to get datetime
                 basename, _ = os.path.splitext(filename)
                 try:
-                    # >>> THIS LINE IS CHANGED <<<
+                    
                     # The format string now includes the literal "_S" at the end.
                     file_dt = datetime.datetime.strptime(basename, "%Y%m%d_%H%M%S_S")
                     
