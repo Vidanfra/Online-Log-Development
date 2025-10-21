@@ -200,7 +200,7 @@ class SQLiteManager:
         if date_time_df_col is not None:
             print(f"Applying date conversion fix to DataFrame column '{date_time_df_col}' (matched '{expected_header}')...")
             try:
-                # CRITICAL FIX: Clean the column. Replace ALL whitespace (including non-breaking spaces) 
+                # Clean the column. Replace ALL whitespace (including non-breaking spaces) 
                 # with an empty string, then force convert to float.
                 df[date_time_df_col] = df[date_time_df_col].astype(str).str.replace(r'\s+', '', regex=True)
                 df[date_time_df_col] = pd.to_numeric(df[date_time_df_col], errors='coerce')
@@ -293,7 +293,7 @@ class SQLiteManager:
             traceback.print_exc()
             return
         
-        # --- FIXES: Data Conversion & Generation ---
+        #  Data Conversion & Generation ---
         utc_headers = ["UTC Date-Time", "Date-Time", "Date-Time (UTC)"]
         df = self._apply_date_conversion(df, utc_headers)
         local_headers = ["Local Time", "Local Date-Time", "Local Date"]
@@ -352,26 +352,31 @@ class SQLiteManager:
         except sqlite3.OperationalError as e:
             if "database is locked" in str(e):
                 print("Database is locked, full sync aborted. Will try again on the next cycle.")
+                return
             else:
                 print(f"An operational error occurred during full sync: {e}")
                 traceback.print_exc()
+                return
         except Exception as e:
             print(f"An unexpected error occurred during full sync: {e}")
             traceback.print_exc()
+            return
             
     def upsert_row(self, table_name, data_dict, excel_row_pk):
         """
         Inserts a new row or updates an existing one based on the primary key (UUID if available, else Excel row number).
+        Uses a fresh, temporary connection within the retry loop to prevent connection pooling deadlocks.
         """
-        if not self.conn:
-            return False, "No Connection."
+        # Close the existing connection if it's open, to ensure we start fresh (optional, but safer)
+        if self.conn:
+             self.conn.close()
+             self.conn = None
         
         # Use UUID if available, otherwise fall back to excel_row_number
         uuid_col = self._sanitize_column_name('UUID')
         pk_col_name = uuid_col if uuid_col in data_dict else 'excel_row_number'
         
         # Ensure the PK field is always present in the data dict for the WHERE clause (if updating) 
-        # or for the INSERT OR REPLACE.
         if pk_col_name == 'excel_row_number':
             data_dict[pk_col_name] = excel_row_pk
 
@@ -379,36 +384,48 @@ class SQLiteManager:
         placeholders = ', '.join('?' for _ in data_dict)
         sql = f'INSERT OR REPLACE INTO "{table_name}" ({columns}) VALUES ({placeholders})'
         
-        # --- MODIFIED: Add a retry loop for locked database ---
+        # Add a retry loop for locked database ---
         for attempt in range(3):
+            temp_conn = None
             try:
-                cursor = self.conn.cursor()
-                # print(f"DEBUG UPSERT: {sql} with values {list(data_dict.values())}") # Debug statement
+                
+                # This ensures the lock is released immediately after the commit.
+                temp_conn = sqlite3.connect(self.db_path, check_same_thread=False) 
+                
+                cursor = temp_conn.cursor()
                 cursor.execute(sql, tuple(data_dict.values()))
-                self.conn.commit()
+                temp_conn.commit()
                 return True, "OK."
             except sqlite3.OperationalError as e:
-                # ... (error handling remains the same)
                 if "database is locked" in str(e):
                     print(f"Database locked on attempt {attempt + 1}. Retrying...")
-                    time.sleep(0.2) 
+                    time.sleep(0.2)
                     continue
                 else:
                     print(f"SQLite operational error: {e}")
-                    self.conn.rollback()
+                    if temp_conn: temp_conn.rollback()
                     return False, f"Error: {e}"
             except sqlite3.Error as e:
                 print(f"SQLite upsert error: {e}")
-                self.conn.rollback()
+                if temp_conn: temp_conn.rollback()
                 return False, f"Error: {e}"
+            finally:
+                if temp_conn:
+                    temp_conn.close() # Ensure the transient connection is closed
         
+        # Re-establish the persistent connection (self.conn) after the attempts
+        try:
+             self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        except sqlite3.Error as e:
+             print(f"Error re-establishing persistent connection: {e}")
+
         print("Failed to upsert row after multiple attempts. Database remained locked.")
         return False, "DB Locked."
     
 # --- FolderMonitor Class ---
 class FolderMonitor(FileSystemEventHandler):
     '''
-    A custom event handler for watchdog that monitors a specified folder for new or modified files
+    A custom event handler for watchdog that monitors a specified folder for new or  files
     matching a given extension. It updates a global cache with the latest matching file.
     '''
     def __init__(self, path, folder_name, gui_instance, extension=""):
@@ -419,7 +436,7 @@ class FolderMonitor(FileSystemEventHandler):
         self.latest_file = None
         #self.update_latest_file() # Initial scan
 
-    def on_modified(self, event):
+    def on_(self, event):
         if not event.is_directory:
         # Change self.file_extension to self.extension in these two places
             if not self.extension or event.src_path.lower().endswith(self.extension.lower()):
@@ -444,12 +461,16 @@ class FolderMonitor(FileSystemEventHandler):
         try:
             # Use os.walk for a recursive search through all directories and subdirectories
             for root, _, files in os.walk(self.path):
+                if not files and os.path.normcase(root) == os.path.normcase(self.path):
+                    print(f"DEBUG {self.folder_name}: Found folder root, 0 files matched extension '{self.extension}' in root.")
                 for f_name in files:
                     # Check if the file matches the extension (if one is specified)
                     if not self.extension or f_name.lower().endswith(self.extension):
                         f_path = os.path.join(root, f_name)
                         try:
                             mtime = os.path.getmtime(f_path)
+                            if self.folder_name == "Naviscan": # Only print for the problem folder
+                                print(f"DEBUG Naviscan: Candidate found: {os.path.basename(f_path)}, in dir: {os.path.basename(root)}, mtime: {datetime.datetime.fromtimestamp(mtime)}")
                             if mtime > latest_mtime:
                                 latest_mtime = mtime
                                 latest = f_path
@@ -460,6 +481,8 @@ class FolderMonitor(FileSystemEventHandler):
             self.gui_instance.update_status(f"Monitoring error: Folder '{self.path}' not found for '{self.folder_name}'.")
         except Exception as e:
             self.gui_instance.update_status(f"Monitoring error in '{self.folder_name}': {e}")
+
+        latest = self.gui_instance.find_latest_file_in_folder(self.path, self.extension)
 
         if latest:
             # If a new latest file is found, update the cache
@@ -670,19 +693,24 @@ class DataLoggerGUI:
             "None": None          # No color for buttons with no source
         }
 
-        self.txt_file_path = None # This will now be dynamic based on source
-
-        # NEW: For data parsed directly from the TXT file's columns
-        self.txt_mapping_config = [
-            {"field": "KP", "column_name": "KP", "skip": False},
-            {"field": "DCC", "column_name": "DCC", "skip": False},
-            {"field": "Line name", "column_name": "Runline", "skip": False},
-            {"field": "Latitude", "column_name": "Latitude", "skip": False},
-            {"field": "Longitude", "column_name": "Longitude", "skip": False},
-            {"field": "Easting", "column_name": "Easting", "skip": False},
-            {"field": "Northing", "column_name": "Northing", "skip": False},
-        ]
-
+        self.all_txt_mappings = {
+            "Main TXT": [
+                {"field": "KP", "column_name": "KP", "skip": False},
+                {"field": "DCC", "column_name": "DCC", "skip": False},
+                {"field": "Line name", "column_name": "Runline", "skip": False},
+                {"field": "Latitude", "column_name": "Latitude", "skip": False},
+                {"field": "Longitude", "column_name": "Longitude", "skip": False},
+                {"field": "Easting", "column_name": "Easting", "skip": False},
+                {"field": "Northing", "column_name": "Northing", "skip": False},
+            ],
+            "TXT Source 2": [], # Start empty, user will configure
+            "TXT Source 3": [],
+            "TXT Source 4": [],
+            "TXT Source 5": [],
+            # No entry for "None" as it means no mapping is needed
+        }
+        
+    
         # NEW: For data generated by the application itself
         self.generated_fields_config = [
             {"field": "Date-Time", "column_name": "UTC Date-Time", "skip": False, "source": "PC Time (UTC)"},
@@ -695,10 +723,6 @@ class DataLoggerGUI:
 
         # For data from static cells in Excel
         self.static_field_configs = []
-        
-        # These dictionaries will be derived from the three config lists above for easier lookup
-        self.txt_field_columns = {}
-        self.txt_field_skips = {}
 
 
         self.folder_paths = {}
@@ -706,6 +730,7 @@ class DataLoggerGUI:
         self.file_extensions = {}
         self.folder_skips = {}
         self.folder_log_x_instead = {}
+        self.folder_log_ext_vars = {}
         self.monitors = {}
         self.num_custom_buttons = 3
         self.MAX_CUSTOM_BUTTONS = 50 # Define the maximum number of custom buttons
@@ -846,7 +871,7 @@ class DataLoggerGUI:
         # Configure for 4 rows: 0, 1, 2 (Manual Log), 3 (Historic Event)
         general_lf.rowconfigure((0, 1, 2, 3), weight=1)
 
-        # Helper function to create styled main buttons (MODIFIED COLOR LOOKUP)
+        # Helper function to create styled main buttons ( COLOR LOOKUP)
         def create_main_button(parent, text, command_func, tooltip_text, grid_row, grid_col):
             
             # --- CORRECTION APPLIED HERE (Ensures Manual KP Log uses Hourly KP Log's style) ---
@@ -904,7 +929,7 @@ class DataLoggerGUI:
         btn_settings.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=4, pady=(2, 4))
         ToolTip(btn_settings, "Open the configuration window.")
 
-    # In class DataLoggerGUI, REPLACE the entire method:
+    
     def toggle_sqlite_mirroring(self):
         """Handles enabling or disabling the SQLite mirror feature."""
         if self.sqlite_mirror_enabled_var.get():
@@ -930,7 +955,7 @@ class DataLoggerGUI:
                     header_finder = lambda path: self._find_header_row(path)
                     self.sqlite_manager.sync_excel_to_db(self.log_file_path, header_finder)
                     self.update_status("Initial SQLite sync complete.")
-                    # vvvvvv ADD THIS LINE vvvvvv
+                    
                     # Start the auto-sync timer only after the initial sync is successful
                     self.master.after(0, self.start_auto_sync)
 
@@ -946,74 +971,13 @@ class DataLoggerGUI:
         
         else:
             # --- DISABLE ---
-            # vvvvvv ADD THIS LINE vvvvvv
             self.stop_auto_sync() # Stop the timer when mirroring is disabled
             if self.sqlite_manager:
                 self.sqlite_manager.close()
                 self.sqlite_manager = None
             self.update_status("SQLite mirroring disabled.")
     
-    def preview_data_file(self):
-        """Finds the latest TXT or NPD file and displays the data in the settings window preview."""
-        if not self.settings_gui_instance:
-            self.update_status("Settings window is not open.")
-            return
-
-        # Assuming self.txt_folder_path stores the path to the folder containing the data files.
-        # It might be beneficial to rename this attribute to something like self.data_folder_path.
-        data_folder = self.txt_folder_path
-        if not data_folder or not os.path.isdir(data_folder):
-            messagebox.showerror("Path Error", "The 'Main Navigation Data Folder' is not set.", parent=self.settings_window_instance)
-            return
-
-        # Find the latest file of each type
-        latest_txt = self.find_latest_file_in_folder(data_folder, ".txt")
-        latest_npd = self.find_latest_file_in_folder(data_folder, ".npd")
-
-        latest_file = None
-        # Determine which file is the most recent
-        if latest_txt and latest_npd:
-            latest_file = latest_txt if os.path.getmtime(latest_txt) > os.path.getmtime(latest_npd) else latest_npd
-        else:
-            # This will select whichever file exists, or remain None if neither exists
-            latest_file = latest_txt or latest_npd
-
-        if not latest_file:
-            messagebox.showinfo("File Not Found", f"No .txt or .npd files were found in:\n{data_folder}", parent=self.settings_window_instance)
-            return
-
-        try:
-            with open(latest_file, "r", encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-            
-            if not lines:
-                messagebox.showinfo("File Empty", "The latest file is empty.", parent=self.settings_window_instance)
-                return
-
-            data_parts = lines[-1].strip().split(',')
-            
-            # Use the correct reference to the SettingsWindow instance's widgets
-            for i, row_widgets in enumerate(self.settings_gui_instance.txt_field_row_widgets):
-                preview_label = row_widgets.get("preview_label")
-                if preview_label:
-                    preview_label.config(text=data_parts[i].strip() if i < len(data_parts) else "<no data>")
-            
-            self.update_status(f"Preview loaded from {os.path.basename(latest_file)}")
-
-        except Exception as e:
-            messagebox.showerror("Read Error", f"An error occurred while reading the file:\n{e}", parent=self.settings_window_instance)
-
-    def clear_data_preview(self):
-        """Clears the text from all preview labels in the settings window."""
-        if self.settings_gui_instance:
-            # Use the correct reference to the SettingsWindow instance's widgets
-            for row_widgets in self.settings_gui_instance.txt_field_row_widgets:
-                preview_label = row_widgets.get("preview_label")
-                if preview_label:
-                    preview_label.config(text="")
-        self.update_status("Preview cleared.")
-
-
+    
     def create_status_indicators(self):
         '''
         Creates the status indicators for monitoring and SQLite connection status.
@@ -1071,7 +1035,7 @@ class DataLoggerGUI:
         self.progress_bar = ttk.Progressbar(self.progress_frame, mode='indeterminate')
         self.progress_bar.grid(row=0, column=1, sticky='ew')
 
-        # vvvvvv ADD THIS vvvvvv
+        
         # Place the frame in the layout grid and then immediately remove it.
         # This ensures the GUI manager knows where to put it when we un-hide it later.
         self.progress_frame.grid(row=1, column=0, columnspan=3, sticky='ew', pady=(5, 2), padx=5)
@@ -1251,9 +1215,9 @@ class DataLoggerGUI:
         # Get the event text from the configuration, with a fallback
         event_text_for_excel = config.get("event_text", f"Default {event_type}")
 
-        # START NEW CODE: Get the source key from the configuration
+        # Get the source key from the configuration
         source_key_for_log = config.get("txt_source_key", "Main TXT")
-        # END NEW CODE
+        
         
         skip_files = (event_type == "Event") # Still skip files only for the main "Event" button
             
@@ -1325,7 +1289,7 @@ class DataLoggerGUI:
         """
         Adds a historic event by letting the user choose a file and enter a time
         in a single dialog. The log date is derived from the chosen file's 
-        'last modified' date.
+        'last ' date.
         """
         # 1. Open the combined dialog to get all details from the user
         details = self._ask_for_historic_event_details_dialog()
@@ -1336,10 +1300,10 @@ class DataLoggerGUI:
 
         file_to_search = details['file_path']
         user_time = details['time_obj']
-        # >>> CHANGE START <<<
+        
         # Use the original time string from the dialog for the file search
         time_str_to_find = details['time_str'] 
-        # >>> CHANGE END <<<
+        
         insert_sfile = details['insert_sfile']
 
         # 2. Construct the final datetime (unchanged)
@@ -1374,9 +1338,6 @@ class DataLoggerGUI:
                     self.update_status("No matching S-File found.")
 
         # 3. Search for the time within the chosen file
-        # >>> CHANGE START <<<
-        # The line that formatted time_str_to_find is no longer needed, as we get it directly from the dialog.
-        # >>> CHANGE END <<<
         
         search_pattern = r"(?:^|[^A-Za-z0-9:])" + re.escape(time_str_to_find)
         
@@ -1391,7 +1352,7 @@ class DataLoggerGUI:
             return
             
         # 4. Parse and log the data
-        parsed_data = self._parse_txt_line(found_line)
+        parsed_data = self._parse_txt_line(found_line, source_key="Main TXT")
         if not parsed_data:
             messagebox.showerror("Parse Error", "Could not parse the found line. The line might be empty or malformed.", parent=self.master)
             self.update_status("Error parsing the found line.")
@@ -1406,10 +1367,9 @@ class DataLoggerGUI:
             override_txt_data=parsed_data,
             override_utc_datetime=final_datetime,
             skip_monitored_folders=True,
-            # >>> CHANGE START <<<
             # Pass the S-File data (if any) to the logging function
             additional_data=additional_data_to_log
-            # >>> CHANGE END <<<
+           
         )
     
     
@@ -1457,13 +1417,30 @@ class DataLoggerGUI:
         def _log_worker():
             """The function that runs on the background thread."""
             try:
-                row_data = {}
+                # -----------------------------------------------------------
+                # Dynamically derive mapping configs based on source key
+                # -----------------------------------------------------------
+                # 1. Get the mapping configuration list for the button's source
+                mapping_config = self.all_txt_mappings.get(txt_source_key, [])
+                
+                # 2. Build the lookup dictionaries needed by the rest of the logic
+                # Only include entries that aren't marked to skip for TXT data processing
+                txt_mapping_for_lookup = {cfg["field"]: cfg["column_name"] for cfg in mapping_config}
 
-                 # --- NEW: GENERATE UUID AT START OF LOGGING ---
-                uuid_col = self.txt_field_columns.get("UUID")
+                # Combine all lookup dictionaries for a single source of truth for column names
+                # This needs to include generated fields and static fields which are common.
+                combined_configs = mapping_config + self.generated_fields_config + self.static_field_configs
+                txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in combined_configs}
+                
+                # Use this dynamically generated map for everything below
+                # The old self.txt_field_columns and self.txt_field_skips are no longer globals.
+
+                row_data = {}
+                
+                # --- GENERATE UUID AT START OF LOGGING ---
+                uuid_col = txt_field_columns.get("UUID")
                 if uuid_col:
                     row_data[uuid_col] = str(uuid.uuid4())
-
 
                 # --- DATA GATHERING ---
                 if override_txt_data is not None:
@@ -1471,7 +1448,8 @@ class DataLoggerGUI:
                 elif txt_source_key != "None":
                     source_folder_path = self._get_path_from_source_key(txt_source_key)
                     if source_folder_path and os.path.isdir(source_folder_path):
-                        txt_data = self._get_txt_data_from_source(source_folder_path)
+                        #  CALL: Pass the source key to the helper
+                        txt_data = self._get_txt_data_from_source(source_folder_path, txt_source_key)
                         if txt_data:
                             row_data.update(txt_data)
                 
@@ -1479,23 +1457,24 @@ class DataLoggerGUI:
                 if static_data_from_cells:
                     row_data.update(static_data_from_cells)
 
+                
                 if not skip_monitored_folders:
                     latest_files_data = self.get_latest_files_data_fast()
                     if latest_files_data:
                         row_data.update(latest_files_data)
 
-                # >>> CHANGE START <<<
+               
                 # Add the extra data (like the S-File name) to the row
                 if additional_data:
                     row_data.update(additional_data)
-                # >>> CHANGE END <<<
+               
 
                 # --- PROCESSING AND GENERATED FIELDS ---
                 final_event_text = event_text_for_excel
 
-                # >>> CHANGE: Reworked Log On/Log Off logic for robustness and feedback <<<
+                # >>> Reworked Log On/Log Off logic for robustness and feedback <<<
                 if event_type == "Log on":
-                    kp_col_name = self.txt_field_columns.get("KP")
+                    kp_col_name = txt_field_columns.get("KP")
                     if kp_col_name and kp_col_name in row_data and row_data[kp_col_name] is not None:
                         try:
                             # Attempt to parse KP and store it
@@ -1515,7 +1494,7 @@ class DataLoggerGUI:
                         self.update_status("Log On Warning: 'KP' data not found in source file. Calculation disabled.")
 
                 elif event_type == "Log off" and self.calculate_logoff_values.get():
-                    kp_col_name = self.txt_field_columns.get("KP")
+                    kp_col_name = txt_field_columns.get("KP")
                     # Check if we have the necessary data from a previous "Log on"
                     if self.last_log_on_kp is not None and self.log_on_time is not None:
                         if kp_col_name and kp_col_name in row_data and row_data[kp_col_name] is not None:
@@ -1553,7 +1532,7 @@ class DataLoggerGUI:
                 local_time = utc_now + offset_delta
 
                 def get_gen_col_name(field_name):
-                    return self.txt_field_columns.get(field_name)
+                    return txt_field_columns.get(field_name)
 
                 dt_col = get_gen_col_name("Date-Time")
                 if dt_col: row_data[dt_col] = utc_now.strftime("%Y-%m-%d %H:%M:%S")
@@ -1584,7 +1563,7 @@ class DataLoggerGUI:
                 color_tuple = self.button_colors.get(event_type, (None, None))
                 row_color = color_tuple[0] if isinstance(color_tuple, tuple) and len(color_tuple) > 0 else None
                 font_color = color_tuple[1] if isinstance(color_tuple, tuple) and len(color_tuple) > 1 else None
-                excel_success, _, excel_message = self.save_to_excel_and_sqlite(row_data, row_color, font_color)
+                excel_success, _, excel_message = self.save_to_excel_and_sqlite(row_data, row_color, font_color, txt_field_columns)
                 message = f"'{event_type}' logged successfully. {excel_message}" if excel_success else f"Error logging '{event_type}'. {excel_message}"
                 if triggering_button:
                     self.master.after(0, lambda: self._re_enable_button_and_update_status(triggering_button, original_text, message))
@@ -1644,10 +1623,9 @@ class DataLoggerGUI:
         browse_btn.grid(row=0, column=2, sticky='ew', pady=5, padx=5)
 
         # Row 1: Time Entry
-        # >>> CHANGE START <<<
+        
         # Update the label to show both accepted formats
         ttk.Label(frame, text="Time to Find (HH:MM:SS or HH:MM):").grid(row=1, column=0, sticky='w', pady=5, padx=5)
-        # >>> CHANGE END <<<
         time_entry = ttk.Entry(frame, textvariable=time_var, width=15)
         time_entry.grid(row=1, column=1, sticky='w', pady=5, padx=5)
 
@@ -1664,8 +1642,7 @@ class DataLoggerGUI:
             if not os.path.isfile(file_path):
                 messagebox.showwarning("Input Error", "Please select a valid log file first.", parent=dialog)
                 return
-
-            # >>> CHANGE START <<<
+            
             # New logic to handle both HH:MM:SS and HH:MM
             t_obj = None
             try:
@@ -1687,7 +1664,7 @@ class DataLoggerGUI:
             result['time_str'] = time_str # Also pass the original string for the file search
             result['insert_sfile'] = insert_sfile_var.get()
             dialog.destroy()
-            # >>> CHANGE END <<<
+            
         
         button_frame = ttk.Frame(frame)
         button_frame.grid(row=3, column=0, columnspan=3, pady=(10,0), sticky='e')
@@ -1745,7 +1722,7 @@ class DataLoggerGUI:
             self.update_status(f"Error reading file for search: {e}")
             return None
 
-    def _parse_txt_line(self, line_str):
+    def _parse_txt_line(self, line_str, source_key="Main TXT"):
         """
         Parses a single comma-separated line string into a data dictionary
         based on the current txt_mapping_config.
@@ -1756,7 +1733,12 @@ class DataLoggerGUI:
         
         latest_line_parts = line_str.split(",")
 
-        for i, field_config in enumerate(self.txt_mapping_config):
+        mapping_config = self.all_txt_mappings.get(source_key, [])
+        if not mapping_config:
+            print(f"Warning: No field mapping found for source key '{source_key}'.")
+            return parsed_data
+
+        for i, field_config in enumerate(mapping_config):
             excel_col = field_config["column_name"]
             if not field_config.get("skip", False):
                 if i < len(latest_line_parts):
@@ -1766,17 +1748,21 @@ class DataLoggerGUI:
         return parsed_data
 
     # --- TXT Reading and Writting ---
-    def _get_txt_data_from_source(self, folder_path):
+    def _get_txt_data_from_source(self, folder_path, source_key="Main TXT"):
         """
         Reads and parses data from the latest TXT file based on txt_mapping_config.
         Returns a dictionary of the parsed data only.
         """
+        mapping_config = self.all_txt_mappings.get(source_key, [])
+
         parsed_data = {}
+        if not mapping_config:
+            return parsed_data
         latest_txt_file_path = None
         if folder_path and os.path.exists(folder_path):
             latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".txt")
             if not latest_txt_file_path:
-                latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".npd") # Add this line
+                latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".npd")
             if not latest_txt_file_path:
                 latest_txt_file_path = self.find_latest_file_in_folder(folder_path, ".csv")
 
@@ -1802,7 +1788,7 @@ class DataLoggerGUI:
                 latest_line_parts = last_line_str.split(",")
 
                 # Use the new, dedicated config for mapping
-                for i, field_config in enumerate(self.txt_mapping_config):
+                for i, field_config in enumerate(mapping_config):
                     excel_col = field_config["column_name"]
                     if not field_config.get("skip", False):
                         if i < len(latest_line_parts):
@@ -1818,33 +1804,55 @@ class DataLoggerGUI:
         """
         FAST version that collects latest file data by reading directly from the
         watchdog's global cache, avoiding slow disk scans.
-        It now checks if the file is 'active' based on its modification time.
+        Ensures the correct filename format is logged based on the user's 'Log Ext.' setting.
         """
         data = {}
-        # Get the threshold value once, outside the loop
         threshold = self.active_logging_threshold_seconds.get()
         current_time = time.time()
 
         for folder_name, column_name in self.folder_columns.items():
-            if not self.folder_skips.get(folder_name, False) and column_name:
-                latest_file_path = folder_cache.get(folder_name)
+            
+            if self.folder_skips.get(folder_name, False) or not column_name:
+                continue
 
-                if latest_file_path and os.path.exists(latest_file_path):
-                    # A file exists. Check if it's recent enough to be "active".
-                    file_mtime = os.path.getmtime(latest_file_path)
-                    if (current_time - file_mtime) <= threshold:
-                        # ACTIVE: The file is recent. Log "X" or the filename.
-                        if self.folder_log_x_instead.get(folder_name, False):
-                            data[column_name] = "X"
-                        else:
-                            filename_without_ext, _ = os.path.splitext(os.path.basename(latest_file_path))
-                            data[column_name] = filename_without_ext
+            latest_file_path = folder_cache.get(folder_name)
+
+            if latest_file_path and os.path.exists(latest_file_path):
+                
+                is_excluded_from_threshold = (folder_name == "SVP")
+                file_mtime = os.path.getmtime(latest_file_path)
+                is_active = is_excluded_from_threshold or ((current_time - file_mtime) <= threshold)
+                
+                # Retrieve the state of the "Log Ext.?" BooleanVar
+                log_full_filename_var = self.folder_log_ext_vars.get(folder_name, None)
+                log_full_filename = False
+                if hasattr(log_full_filename_var, 'get'):
+                    log_full_filename = log_full_filename_var.get()
+                
+                # --- LOGGING VALUE DETERMINATION ---
+                logged_value = "" # Default to blank if inactive
+                
+                if is_active:
+                    # Case 1: Log 'X' if option is ticked
+                    if self.folder_log_x_instead.get(folder_name, False):
+                        logged_value = "X"
                     else:
-                        # INACTIVE: The file is old, so log an empty string.
-                        data[column_name] = ""
-                else:
-                    # NOT FOUND: No file has been found yet for this folder.
-                    data[column_name] = "N/A"
+                        # Case 2: Log Filename (with or without extension)
+                        filename = os.path.basename(latest_file_path)
+                        if log_full_filename:
+                            logged_value = filename  # Full name with extension
+                        else:
+                            # Split and join to get filename without extension
+                            filename_without_ext, _ = os.path.splitext(filename)
+                            logged_value = filename_without_ext
+                
+                # Assign the determined value to the output dictionary
+                data[column_name] = logged_value
+            
+            else:
+                # If no file is found in the cache or on disk
+                data[column_name] = "N/A"
+                
         return data
 
     def find_latest_file_in_folder(self, folder_path, extension=""):
@@ -1883,6 +1891,47 @@ class DataLoggerGUI:
         except Exception:
             return None # Other potential errors
 
+    def _get_txt_file_data_for_preview(self, source_key):
+        """
+        Reads the latest line from the source folder associated with the key.
+        Returns (latest_file_path, latest_line_parts) or (None, None).
+        """
+        folder_path = self._get_path_from_source_key(source_key)
+        if not folder_path or not os.path.isdir(folder_path):
+             return None, None
+             
+        latest_file = self.find_latest_file_in_folder(folder_path, ".txt")
+        if not latest_file:
+            latest_file = self.find_latest_file_in_folder(folder_path, ".npd")
+        if not latest_file:
+            latest_file = self.find_latest_file_in_folder(folder_path, ".csv")
+
+        if not latest_file:
+            return None, None
+
+        try:
+            # Use 'r' mode to open the file
+            with open(latest_file, "r", encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+            if lines:
+                # Use ',' as the separator for TXT/NPD/CSV data
+                data_parts = lines[-1].strip().split(',') 
+                return latest_file, data_parts
+            return latest_file, []
+        except Exception as e:
+            print(f"Error reading preview file for {source_key}: {e}")
+            return latest_file, None # Return None for malformed data
+
+    def preview_data_file(self):
+        """
+        REMOVED: The original preview_data_file used to exist here. 
+        It is being deleted as per the project plan, as the function is now handled
+        by the new dialog's method. This placeholder must be deleted.
+        """
+        # This function is now OBSOLETE and should be removed from DataLoggerGUI.
+        # If it is still present in your code, remove it entirely.
+        pass
+    
     def _get_static_excel_data(self):
         """
         Reads data from specific cells in the Excel log file based on the
@@ -1954,12 +2003,12 @@ class DataLoggerGUI:
                 except Exception: 
                     pass
 
-    def save_to_excel_and_sqlite(self, row_data, row_color=None, font_color=None):
+    def save_to_excel_and_sqlite(self, row_data, row_color=None, font_color=None, txt_field_columns=None):
         """
         Saves a single row of data to the open Excel file via xlwings
         and mirrors the new row to the SQLite database if enabled.
         
-        MODIFIED: Forces date/time column to be written as a datetime object
+        : Forces date/time column to be written as a datetime object
                   to ensure correct Excel formatting.
         """
         if not self.log_file_path or not os.path.exists(self.log_file_path):
@@ -1972,7 +2021,7 @@ class DataLoggerGUI:
         next_row = -1
         header_values = [] 
         
-        # --- Part 1: Save to Excel (Modified for datetime write) ---
+        # --- Part 1: Save to Excel ( for datetime write) ---
         try:
             wb = xw.Book(self.log_file_path)
             sheet = wb.sheets[0]
@@ -2006,7 +2055,7 @@ class DataLoggerGUI:
             output_data = [None] * len(header_values)
             
             # Identify the column name for the "Date-Time" field from settings
-            dt_col_name = self.txt_field_columns.get("Date-Time")
+            dt_col_name = txt_field_columns.get("Date-Time") # <--- 
             dt_col_name_lower = str(dt_col_name).lower()
             dt_col_index = -1
 
@@ -2060,7 +2109,7 @@ class DataLoggerGUI:
             excel_message = f"Excel: Fail ({type(e).__name__})."
             return False, False, f"{excel_message} {sqlite_message}"
 
-        # --- Part 2: Mirror to SQLite (Remains unchanged) ---
+        # --- Part 2: Mirror to SQLite ---
         if success_excel and self.sqlite_mirror_enabled_var.get() and self.sqlite_manager:
             try:
                 table_name = Path(self.log_file_path).stem
@@ -2080,7 +2129,6 @@ class DataLoggerGUI:
                 success_sqlite, sqlite_status = self.sqlite_manager.upsert_row(table_name, data_dict, next_row)
                 if success_sqlite:
                     sqlite_message = "SQLite: OK."
-                # ... (rest of SQLite status logic remains unchanged)
                 elif sqlite_status == "DB Locked.":
                     sqlite_message = "SQLite: Busy."
                     print("Could not update SQLite mirror; database was busy.")
@@ -2093,7 +2141,6 @@ class DataLoggerGUI:
                 traceback.print_exc()
 
         return success_excel, success_sqlite, f"{excel_message} {sqlite_message}"
-
 
     # --- Settings Saving and Loading ---
     def save_settings(self):
@@ -2112,8 +2159,7 @@ class DataLoggerGUI:
             "txt_folder_path_set3": self.txt_folder_path_set3,
             "txt_folder_path_set4": self.txt_folder_path_set4,
             "txt_folder_path_set5": self.txt_folder_path_set5,
-            # NEW: Save the three separate config lists
-            "txt_mapping_config": self.txt_mapping_config,
+            "all_txt_mappings": self.all_txt_mappings,
             "generated_fields_config": self.generated_fields_config,
             "static_field_configs": self.static_field_configs,
             "folder_paths": self.folder_paths,
@@ -2121,6 +2167,7 @@ class DataLoggerGUI:
             "file_extensions": self.file_extensions,
             "folder_skips": self.folder_skips,
             "folder_log_x_instead": self.folder_log_x_instead,
+            "folder_log_ext_vars": {k: v.get() for k, v in self.folder_log_ext_vars.items()},
             "num_custom_buttons": self.num_custom_buttons,
             "custom_button_configs": self.custom_button_configs,
             "custom_button_tab_groups": self.custom_button_tab_groups,
@@ -2191,6 +2238,7 @@ class DataLoggerGUI:
                     settings = json.load(f)
                 
                 # --- Load Main Settings ---
+                self.all_txt_mappings = settings.get("all_txt_mappings", self.all_txt_mappings)
                 self.log_file_path = settings.get("log_file_path")
                 self.sqlite_db_path = settings.get("sqlite_db_path")
                 self.time_offset_hours.set(settings.get("time_offset_hours", 0.0))
@@ -2200,8 +2248,21 @@ class DataLoggerGUI:
                 self.txt_folder_path_set4 = settings.get("txt_folder_path_set4")
                 self.txt_folder_path_set5 = settings.get("txt_folder_path_set5")
 
+                # Check for old format (single config list) and migrate if necessary
+                if "txt_mapping_config" in settings and not settings.get("all_txt_mappings"):
+                    print("Old single mapping format detected. Migrating to 'Main TXT'...")
+                    # Retrieve the old config list and save it to the correct new structure key
+                    old_config_list = settings.get("txt_mapping_config") 
+                    self.all_txt_mappings["Main TXT"] = old_config_list
+                    if old_config_list is not None:
+                        self.all_txt_mappings["Main TXT"] = old_config_list
+                    
+                # Ensure all required keys are present, even if empty
+                for key in TXT_FILES_KEYS[1:]:
+                    if key not in self.all_txt_mappings:
+                        self.all_txt_mappings[key] = []
+
                 # --- Load the three separate config lists ---
-                self.txt_mapping_config = settings.get("txt_mapping_config", self.txt_mapping_config)
                 self.generated_fields_config = settings.get("generated_fields_config", self.generated_fields_config)
                 self.static_field_configs = settings.get("static_field_configs", [])
 
@@ -2211,7 +2272,9 @@ class DataLoggerGUI:
                     print("Old settings format detected. Migrating to new format...")
                     generated_fields_set = {"Date-Time", "Local Time", "Event", "Code", "KP Ref."}
                     self.generated_fields_config = [c for c in all_configs if c.get("field") in generated_fields_set]
-                    self.txt_mapping_config = [c for c in all_configs if c.get("field") not in generated_fields_set and not str(c.get("column_name", "")).startswith('=')]
+                    main_txt_config = [c for c in all_configs if c.get("field") not in generated_fields_set and not str(c.get("column_name", "")).startswith('=')]
+                    self.all_txt_mappings["Main TXT"] = main_txt_config # <--- 
+                    
                     self.static_field_configs = [c for c in all_configs if str(c.get("column_name", "")).startswith('=')]
                 
                 # --- Add missing 'source' keys for robustness ---
@@ -2224,7 +2287,8 @@ class DataLoggerGUI:
                         item['source'] = default_sources.get(item['field'], 'Unknown')
 
                 # --- Re-derive the lookup dictionaries from ALL THREE lists ---
-                combined_configs = self.txt_mapping_config + self.generated_fields_config + self.static_field_configs
+                main_txt_config = self.all_txt_mappings.get("Main TXT", [])
+                combined_configs = main_txt_config + self.generated_fields_config + self.static_field_configs
                 self.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in combined_configs}
                 self.txt_field_skips = {cfg["field"]: cfg.get("skip", False) for cfg in combined_configs}
 
@@ -2243,6 +2307,8 @@ class DataLoggerGUI:
                 self.folder_skips.clear()
                 self.folder_skips.update(settings.get("folder_skips", {}))
                 self.folder_log_x_instead = settings.get("folder_log_x_instead", {})
+                loaded_log_exts = settings.get("folder_log_ext_vars", {})
+                self.folder_log_ext_vars = {k: tk.BooleanVar(value=v) for k, v in loaded_log_exts.items()}
                 self.num_custom_buttons = settings.get("num_custom_buttons", 3)
                 loaded_configs = settings.get("custom_button_configs", [])
                 
@@ -2358,7 +2424,7 @@ class DataLoggerGUI:
             # Call create_main_buttons without arguments, as it now handles all frames.
             self.create_main_buttons()
             self.create_status_indicators()
-            # FIX: Add this line to update the text of the newly created monitor status label
+            # update the text of the newly created monitor status label
             self.update_monitor_indicator_text() 
             self.master.update_idletasks()
 
@@ -2424,11 +2490,11 @@ class DataLoggerGUI:
         try: 
             if not os.path.isdir(folder_path):
                 print(f"Error: Path '{folder_path}' is not a valid directory for monitoring '{folder_name}'.")
-                return None # <<< CHANGE THIS
+                return None # 
             os.listdir(folder_path) # Check permissions
         except Exception as e: 
             print(f"Error accessing directory '{folder_path}' for monitoring '{folder_name}': {e}")
-            return None # <<< CHANGE THIS
+            return None 
         
         try:
             event_handler = FolderMonitor(folder_path, folder_name, self, file_extension)
@@ -2437,15 +2503,15 @@ class DataLoggerGUI:
             observer.start()
             self.monitors[folder_name] = observer
             print(f"Successfully started recursive monitoring for {folder_name} at {folder_path} (ext: {file_extension}).")
-            return event_handler # <<< CHANGE THIS to return the handler object
+            return event_handler 
         except Exception as e: 
             print(f"Failed to start watchdog monitor for {folder_name} at {folder_path}: {e}")
-            return None # <<< CHANGE THIS
+            return None # 
 
     def stop_monitoring(self):
         """Public method to stop all monitoring."""
         if hasattr(self, 'progress_bar') and self.progress_bar.winfo_ismapped():
-             self.hide_progress_bar() # <<< ADD THIS
+             self.hide_progress_bar() 
         self._clear_monitors()
         self.is_monitoring = False
         self.update_status("Monitoring stopped.")
@@ -2518,7 +2584,6 @@ class DataLoggerGUI:
             
         self.update_monitor_indicator_text()
         
-
     # --- Programmed Events Scheduling ---
     def start_auto_sync(self):
         """Schedules the first periodic sync and stores the timer ID."""
@@ -2612,10 +2677,12 @@ class DataLoggerGUI:
         # Reschedule for the following hour
         self.schedule_hourly_log()
 
-
-    # --- CORE LOGIC (Contains your existing logic plus the fix) ---
+    # --- CORE LOGIC
     def trigger_hourly_log_core(self):
-        """Calculates and performs the hourly log without modifying the timer schedule."""
+        """
+        Calculates and performs the hourly log without modifying the timer schedule.
+        Includes user feedback if the required KP or column configuration is missing.
+        """
 
         if not self.hourly_event_enabled_var.get():
             print("'Hourly KP Log' event is disabled, skipping log.")
@@ -2624,27 +2691,45 @@ class DataLoggerGUI:
         # Get column names from settings
         kp_col_name = self.txt_field_columns.get("KP")
         event_col_name = self.txt_field_columns.get("Event")
-        line_field_name = "Line name" # Use the fixed field name consistently
+        line_field_name = "Line name"
         line_col_name = self.txt_field_columns.get(line_field_name)
 
         if not kp_col_name or not event_col_name or not line_col_name:
-            print(f"Error: 'KP', 'Event', or '{line_field_name}' column not configured in TXT Data Columns settings.")
+            error_msg = f"Error: 'KP', 'Event', or '{line_field_name}' column not configured in TXT Data Columns settings. Skipping log."
+            print(error_msg)
+            self.update_status(error_msg)
             return
-        
+            
         # 1. Get current KP and Line Name value
         current_kp = None
         current_line = None
         try:
-            txt_data = self._get_txt_data_from_source(self.txt_folder_path)
+            txt_source_key = self.hourly_log_txt_source_key.get()
+            source_folder_path = self._get_path_from_source_key(txt_source_key)
+            
+            txt_data = self._get_txt_data_from_source(source_folder_path, txt_source_key)
+            
             current_kp_str = txt_data.get(kp_col_name)
-            current_line = txt_data.get(line_col_name) # Uses the Excel column name 'Runline'
-            if current_kp_str is not None:
+            current_line = txt_data.get(line_col_name)
+
+            if current_kp_str and str(current_kp_str).strip():
                 current_kp = float(current_kp_str)
-        except (ValueError, TypeError, AttributeError) as e:
-            print(f"Could not parse current KP/Line value: {e}")
+            else:
+                # Raise an error if KP data is missing/invalid
+                raise ValueError(f"KP data is empty or non-numeric in source file ({current_kp_str})")
+                
+        except (ValueError, TypeError, AttributeError, Exception) as e:
+            # Catch file read errors, parse errors, or the ValueError raised above
+            error_msg = f"Automatic KP Log skipped: Could not retrieve valid KP/Line from source. ({e})"
+            print(error_msg)
+            self.update_status(error_msg)
+            return # Skip the log entry and return
 
         if current_kp is None or current_line is None:
-            print("Could not retrieve a valid current KP or Line Name. Skipping hourly log.")
+            # This check is mostly redundant due to the try/except block above but remains as a safeguard
+            error_msg = "Automatic KP Log skipped: Could not retrieve a valid current KP or Line Name."
+            print(error_msg)
+            self.update_status(error_msg)
             return
 
         # 2. Find the last hourly KP log from the Excel file
@@ -2666,11 +2751,11 @@ class DataLoggerGUI:
                 print(f"Error: Line Name column '{line_col_name}' not found in log file.")
             
             if not hourly_logs_df.empty:
-                # --- FIX from previous turn: Get the last logged KP and Line Name ---
+                # --- Get the last logged KP and Line Name ---
                 last_log = hourly_logs_df.iloc[-1]
                 last_kp = last_log[kp_col_name]
                 # Safely get the line, use a placeholder if the column is somehow missing from the log data
-                last_line = last_log.get(line_col_name, "N/A_LINE_ERROR") 
+                last_line = last_log.get(line_col_name, "N/A_LINE_ERROR")
                                 
         except Exception as e:
             print(f"Could not read or find last KP/Line from Excel file: {e}")
@@ -2704,9 +2789,9 @@ class DataLoggerGUI:
 
         # 4. Call the logging function with the generated text
         self._perform_log_action(event_type="Hourly KP Log",
-                                event_text_for_excel=event_text,
-                                triggering_button=None, # No button is associated with the core logic
-                                txt_source_key=self.hourly_log_txt_source_key.get())
+                                 event_text_for_excel=event_text,
+                                 triggering_button=None, # No button is associated with the core logic
+                                 txt_source_key=self.hourly_log_txt_source_key.get())
 
 
     # --- Custom Button Management ---
@@ -2803,7 +2888,7 @@ class DataLoggerGUI:
         current_event_text = button_config.get("event_text", "")
         current_event_code = button_config.get("event_code", "")
         
-        # FIX 1: Determine the source key based on the button name
+        #  Determine the source key based on the button name
         if button_name == "Manual KP Log":
             current_source_key = self.hourly_log_txt_source_key.get()
         else:
@@ -2819,8 +2904,7 @@ class DataLoggerGUI:
         
         # --- Create StringVars ---
         event_text_var = tk.StringVar(value=current_event_text)
-
-        
+       
         # Find the full "Code - Description" string for the current code to display it initially
         initial_display_value = ""
         if current_event_code and current_event_code in self.event_codes:
@@ -2845,7 +2929,7 @@ class DataLoggerGUI:
         ttk.Label(frame, text="Event Text:").grid(row=row_idx, column=0, sticky="w", pady=5, padx=5)
         event_text_entry = ttk.Entry(frame, textvariable=event_text_var, width=40)
         
-        # FIX: Make text read-only for auto-generated events
+        # Make text read-only for auto-generated events
         if button_name in ["Manual KP Log", "Hourly KP Log"]:
             event_text_var.set("Auto generated")
             event_text_entry.config(state="readonly")
@@ -2886,13 +2970,12 @@ class DataLoggerGUI:
                                              values=display_names, state="readonly", width=37)
         source_combobox.grid(row=row_idx, column=1, sticky="ew", pady=5, padx=5)
         
-        # FIX: Set the state and tooltip for the manual log button source
+        # Set the state and tooltip for the manual log button source
         if button_name in ["Manual KP Log", "Hourly KP Log"]:
              source_combobox.config(state="readonly") 
              ToolTip(source_combobox, "Source is linked to the 'KP Data Source' setting in the Programmed Events tab.")
         else:
              ToolTip(source_combobox, "Select which data source this button should use. Names are configured in Settings -> File Paths.")
-
         
         # --- CONDITIONAL COLOR PICKERS (NEW BLOCK) ---
         # The color is derived from the "Programmed Events" tab for these, so editing here is redundant.
@@ -2938,9 +3021,7 @@ class DataLoggerGUI:
                                            command=lambda v=button_font_color_var, l=font_color_display_label: self._choose_color_dialog(v, l, editor_window, button_name + " Font"))
             choose_font_btn.pack(side="left", padx=1)
             ToolTip(choose_font_btn, "Choose a custom font color.")
-        # --- END CONDITIONAL COLOR PICKERS ---
-
-
+     
         # --- Save and Cancel buttons ---
         row_idx += 1
         button_controls_frame = ttk.Frame(frame)
@@ -2949,16 +3030,14 @@ class DataLoggerGUI:
         def save_main_button_changes():
             # Save the new event text
             self.main_button_configs[button_name]['event_text'] = event_text_var.get()
-            
-            
+                        
             # Get the full "Code - Description" string and parse it to save only the code
             selected_display_string = event_code_display_var.get()
             code_to_save = ""
             if " - " in selected_display_string:
                 code_to_save = selected_display_string.split(" - ", 1)[0]
             self.main_button_configs[button_name]['event_code'] = code_to_save
-            
-            
+                   
             #Save the selected source key
             # We need to map the display name back to the internal key
             # Recreate maps using the global constant
@@ -2970,13 +3049,12 @@ class DataLoggerGUI:
             # Reverse lookup (Display Name -> Internal Key)
             selected_source_key = next((key for key, display in internal_to_display_map.items() if display == selected_display_name), "None")
             
-            # FIX 2: Check button name and save to the correct location
+            # Check button name and save to the correct location
             if button_name == "Manual KP Log":
                 # Manual KP Log source is linked to the hourly event source setting
                 self.hourly_log_txt_source_key.set(selected_source_key)
             else:
                 self.main_button_configs[button_name]['txt_source_key'] = selected_source_key
-            
             
             # Save the new colors as a tuple (Only if the pickers were shown)
             if button_name not in ["Manual KP Log", "Hourly KP Log"]:
@@ -3008,7 +3086,7 @@ class DataLoggerGUI:
                 "text": f"Custom {new_button_idx}",
                 "event_text": f"Custom {new_button_idx} Event",
                 "txt_source_key": "None",
-                "tab_group": "Main" # **MODIFIED:** Default to "Main" tab
+                "tab_group": "Main" # **:** Default to "Main" tab
             }
             self.custom_button_configs.append(new_config)
             
@@ -3421,6 +3499,320 @@ class DataLoggerGUI:
         if color_code and color_code[1]:
             self._set_color_on_widget(color_str_var, display_label, color_code[1], parent_toplevel)
 
+class TxtMappingDialog:
+    """
+    A separate window for editing the column mappings for a single TXT data source.
+    """
+    def __init__(self, master, parent_gui, source_key):
+        self.master = master
+        self.parent_gui = parent_gui
+        self.source_key = source_key
+        self.initial_config = self.parent_gui.all_txt_mappings.get(self.source_key, [])[:] # Deep copy the list for rollback
+        
+        display_name = self.parent_gui.txt_source_aliases.get(self.source_key, self.source_key)
+        
+        self.master.title(f"Field Mapping for: {display_name}")
+        self.master.transient(self.parent_gui.settings_window_instance or self.parent_gui.master)
+        self.master.grab_set()
+        self.master.geometry("900x600")
+        self.master.minsize(600, 400)
+        
+        # Main frame for padding and structure
+        main_frame = ttk.Frame(self.master, padding="10")
+        main_frame.pack(fill="both", expand=True)
+        
+        # Description
+        ttk.Label(main_frame, text=f"Configure the comma-separated order of fields for '{display_name}' ({source_key}). The order must match the data in the TXT/NPD/CSV file.", wraplength=750, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
+
+        # Controls Frame
+        controls_frame = ttk.Frame(main_frame)
+        controls_frame.pack(fill='x', pady=(0, 10))
+        
+        ttk.Button(controls_frame, text="Preview Latest Data", command=self.preview_latest_data).pack(side=tk.LEFT, padx=(0, 10))
+        ttk.Button(controls_frame, text="Clear Preview", command=self.clear_preview).pack(side=tk.LEFT, padx=(0, 20))
+
+        use_default_btn = ttk.Button(controls_frame, text="Use Main Mapping", command=self.use_main_mapping)
+        use_default_btn.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(use_default_btn, "Copies the field mapping settings from 'Main TXT' to this source.")
+        
+        # Only enable the button if the current source is NOT 'Main TXT'
+        if source_key == "Main TXT":
+            use_default_btn.config(state=tk.DISABLED)
+
+        spacer = ttk.Frame(controls_frame)
+        spacer.pack(side=tk.LEFT, expand=True, fill='x')
+
+        self.txt_move_up_btn = ttk.Button(controls_frame, text="Move Up", command=lambda: self.move_selected_field("up"), state=tk.DISABLED)
+        self.txt_move_up_btn.pack(side=tk.RIGHT, padx=5)
+
+        self.txt_move_down_btn = ttk.Button(controls_frame, text="Move Down", command=lambda: self.move_selected_field("down"), state=tk.DISABLED)
+        self.txt_move_down_btn.pack(side=tk.RIGHT, padx=5)
+
+        ttk.Button(controls_frame, text="Add New Field", command=self.add_field_row).pack(side=tk.RIGHT, padx=5)
+        
+        # Scrollable Area for Fields
+        self.txt_fields_canvas = tk.Canvas(main_frame, borderwidth=0, background="#ffffff")
+        txt_scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=self.txt_fields_canvas.yview)
+        self.txt_fields_scrollable_frame = ttk.Frame(self.txt_fields_canvas)
+        
+        self.txt_fields_scrollable_frame.bind("<Configure>", lambda e: self.txt_fields_canvas.configure(scrollregion=self.txt_fields_canvas.bbox("all")))
+        self.txt_fields_canvas.create_window((0, 0), window=self.txt_fields_scrollable_frame, anchor="nw")
+        self.txt_fields_canvas.configure(yscrollcommand=txt_scrollbar.set)
+        
+        self.txt_fields_canvas.pack(side="left", fill="both", expand=True)
+        txt_scrollbar.pack(side="right", fill="y")
+        
+        # Button Frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill='x', pady=(10, 0))
+        ttk.Button(button_frame, text="Save Mappings", command=self.save_mappings, style="Accent.TButton").pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Cancel", command=self.master.destroy).pack(side=tk.RIGHT)
+
+        self.txt_field_row_widgets = []
+        self.selected_row_index = -1
+        
+        self.add_field_header(self.txt_fields_scrollable_frame)
+        self.recreate_field_rows()
+        self.master.protocol("WM_DELETE_WINDOW", self.master.destroy)
+
+    def use_main_mapping(self):
+        """
+        Copies the mapping configuration from 'Main TXT' to the current source,
+        saves it, and reloads the display rows.
+        """
+        # 1. Get the configuration of the main source
+        main_mapping = self.parent_gui.all_txt_mappings.get("Main TXT")
+        
+        if not main_mapping:
+            messagebox.showerror("Error", "The 'Main TXT' mapping is empty or not configured. Cannot copy.", parent=self.master)
+            return
+
+        if not messagebox.askyesno(
+            "Confirm Copy",
+            f"Are you sure you want to overwrite all current mappings for '{self.source_key}' with the mappings from 'Main TXT'?",
+            parent=self.master):
+            return
+
+        # 2. Deep copy the configuration and overwrite the current source's mapping
+        new_config = [item.copy() for item in main_mapping]
+        self.parent_gui.all_txt_mappings[self.source_key] = new_config
+        
+        # 3. Save to JSON and refresh the dialog display
+        try:
+            # We don't call save_mappings, as that method also destroys the window.
+            # We must manually save the parent's data and refresh the display.
+            self.parent_gui.save_settings()
+            self.recreate_field_rows() 
+            self.parent_gui.update_status(f"Mapping for {self.source_key} updated by copying 'Main TXT' settings.")
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save copied mapping: {e}", parent=self.master)
+        
+    def add_field_header(self, parent):
+        parent.grid_columnconfigure(0, weight=0, minsize=50) 
+        parent.grid_columnconfigure(1, weight=2, minsize=150) 
+        parent.grid_columnconfigure(2, weight=2, minsize=150)
+        parent.grid_columnconfigure(3, weight=2, minsize=150) 
+        parent.grid_columnconfigure(4, weight=0, minsize=50) 
+        parent.grid_columnconfigure(5, weight=0, minsize=80) 
+
+        header_frame = ttk.Frame(parent, style="Header.TFrame", padding=(5,3))
+        header_frame.grid(row=0, column=0, columnspan=7, sticky="ew") 
+
+        ttk.Label(header_frame, text="Order", font=("Arial", 10, "bold")).grid(row=0, column=0, padx=6, sticky='w')
+        ttk.Label(header_frame, text="TXT Column", font=("Arial", 10, "bold")).grid(row=0, column=1, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Preview Data", font=("Arial", 10, "bold")).grid(row=0, column=2, padx=8, sticky='w')
+        ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold")).grid(row=0, column=3, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold")).grid(row=0, column=4, padx=6, sticky='w')
+        ttk.Label(header_frame, text="Actions", font=("Arial", 10, "bold")).grid(row=0, column=5, padx=6, sticky='w')
+
+        for i in range(6):
+             header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0), minsize=parent.grid_columnconfigure(i).get('minsize', 0))
+
+    def recreate_field_rows(self, reselect_index=None):
+        for widget in self.txt_fields_scrollable_frame.winfo_children():
+            if int(widget.grid_info()["row"]) > 0:
+                widget.destroy()
+        self.txt_field_row_widgets.clear()
+        
+        mapping_config = self.parent_gui.all_txt_mappings.get(self.source_key, [])
+        
+        for i, config in enumerate(mapping_config):
+            grid_row_index = i + 1
+            parent_frame = self.txt_fields_scrollable_frame
+            widgets_in_row = []
+
+            # Order Label (0)
+            order_label = ttk.Label(parent_frame, text=str(i + 1), anchor='center')
+            order_label.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
+            widgets_in_row.append(order_label)
+
+            # TXT Field Entry (1)
+            field_widget = ttk.Entry(parent_frame)
+            field_widget.insert(0, config["field"])
+            field_widget.grid(row=grid_row_index, column=1, padx=5, pady=2, sticky='ew')
+            widgets_in_row.append(field_widget)
+
+            # Preview Data Label (2)
+            preview_label = ttk.Label(parent_frame, text="", anchor='w', foreground="blue")
+            preview_label.grid(row=grid_row_index, column=2, padx=5, pady=2, sticky='ew')
+            widgets_in_row.append(preview_label)
+            
+            # Excel Column Entry (3)
+            column_entry = ttk.Entry(parent_frame)
+            column_entry.insert(0, config.get("column_name", config["field"]))
+            column_entry.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky="ew")
+            widgets_in_row.append(column_entry)
+            
+            # Skip Checkbox (4)
+            skip_var = tk.BooleanVar(value=config.get("skip", False))
+            skip_checkbox = ttk.Checkbutton(parent_frame, variable=skip_var)
+            skip_checkbox.grid(row=grid_row_index, column=4, padx=(15,5), pady=2, sticky='w')
+            widgets_in_row.append(skip_checkbox)
+
+            # Remove Button (5)
+            remove_btn = ttk.Button(parent_frame, text="Remove", width=8, style="Toolbutton",
+                                    command=lambda idx=i: self.remove_field_row(idx))
+            remove_btn.grid(row=grid_row_index, column=5, padx=5, pady=2, sticky='w')
+            widgets_in_row.append(remove_btn)
+
+            click_handler = lambda e, idx=i: self._select_row(idx)
+            for widget in widgets_in_row:
+                widget.bind("<Button-1>", click_handler)
+
+            self.txt_field_row_widgets.append({
+                "field_entry_widget": field_widget,
+                "column_entry": column_entry,
+                "skip_var": skip_var,
+                "preview_label": preview_label,
+                "all_widgets": widgets_in_row
+            })
+        
+        if reselect_index is not None:
+            self._select_row(reselect_index)
+        else:
+            self._select_row(-1)
+
+        self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
+
+    def _select_row(self, index):
+        if self.selected_row_index != -1 and self.selected_row_index < len(self.txt_field_row_widgets):
+            prev_row_info = self.txt_field_row_widgets[self.selected_row_index]
+            for widget in prev_row_info.get("all_widgets", []):
+                try: widget.configure(style=f"T{type(widget).__name__}")
+                except tk.TclError: pass
+                
+        self.selected_row_index = index
+        
+        if index != -1 and index < len(self.txt_field_row_widgets):
+            current_row_info = self.txt_field_row_widgets[index]
+            for widget in current_row_info.get("all_widgets", []):
+                try: widget.configure(style=f"Selected.T{type(widget).__name__}")
+                except tk.TclError: pass
+
+        self._update_move_buttons_state()
+
+    def _update_move_buttons_state(self):
+        config_list = self.parent_gui.all_txt_mappings.get(self.source_key, [])
+        can_move_up = self.selected_row_index > 0
+        can_move_down = self.selected_row_index != -1 and self.selected_row_index < len(config_list) - 1
+
+        self.txt_move_up_btn.config(state=tk.NORMAL if can_move_up else tk.DISABLED)
+        self.txt_move_down_btn.config(state=tk.NORMAL if can_move_down else tk.DISABLED)
+        
+    def move_selected_field(self, direction):
+        current_index = self.selected_row_index
+        if current_index == -1: return
+        
+        config_list = self.parent_gui.all_txt_mappings.get(self.source_key, [])
+        total_items = len(config_list)
+
+        if direction == "up" and current_index > 0:
+            config_list[current_index], config_list[current_index - 1] = config_list[current_index - 1], config_list[current_index]
+            self.recreate_field_rows(reselect_index=current_index - 1)
+        elif direction == "down" and current_index < total_items - 1:
+            config_list[current_index], config_list[current_index + 1] = config_list[current_index + 1], config_list[current_index]
+            self.recreate_field_rows(reselect_index=current_index + 1)
+
+    def add_field_row(self):
+        config_list = self.parent_gui.all_txt_mappings.get(self.source_key, [])
+        new_field_index = len(config_list) + 1
+        
+        config_list.append({
+            "field": f"Custom_Field_{new_field_index}",
+            "column_name": f"Custom_Col_{new_field_index}",
+            "skip": False
+        })
+        self.recreate_field_rows(reselect_index=len(config_list) - 1)
+
+    def remove_field_row(self, index_to_remove):
+        config_list = self.parent_gui.all_txt_mappings.get(self.source_key, [])
+        if not (0 <= index_to_remove < len(config_list)): return
+        
+        if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove this field?", parent=self.master):
+            del config_list[index_to_remove]
+            
+            new_selection = -1
+            if self.selected_row_index == index_to_remove: new_selection = -1
+            elif self.selected_row_index > index_to_remove: new_selection = self.selected_row_index - 1
+            else: new_selection = self.selected_row_index
+
+            self.recreate_field_rows(reselect_index=new_selection)
+    
+    def preview_latest_data(self):
+        """Finds the latest file for the source and displays the data in the preview labels."""
+        latest_file, data_parts = self.parent_gui._get_txt_file_data_for_preview(self.source_key)
+
+        if not latest_file:
+            messagebox.showinfo("File Not Found", f"No .txt/.npd/.csv files found for '{self.source_key}'.", parent=self.master)
+            self.clear_preview()
+            return
+            
+        if data_parts is None:
+            messagebox.showerror("Read Error", f"An error occurred while reading or parsing the latest file:\n{os.path.basename(latest_file)}", parent=self.master)
+            return
+
+        for i, row_widgets in enumerate(self.txt_field_row_widgets):
+            preview_label = row_widgets.get("preview_label")
+            if preview_label:
+                preview_label.config(text=data_parts[i].strip() if i < len(data_parts) else "<no data>")
+        
+        self.parent_gui.update_status(f"Preview loaded from {os.path.basename(latest_file)} for {self.source_key}")
+
+    def clear_preview(self):
+        for row_widgets in self.txt_field_row_widgets:
+            preview_label = row_widgets.get("preview_label")
+            if preview_label:
+                preview_label.config(text="")
+        self.parent_gui.update_status("Preview cleared.")
+
+    def save_mappings(self):
+        """
+        Gathers data from entry widgets and updates the parent GUI's self.all_txt_mappings.
+        """
+        new_config = []
+        
+        # We save the data directly back to the active list in the parent GUI to retain order changes
+        # However, we build a fresh list here and update the master list at the end for consistency
+        for i, row_info in enumerate(self.txt_field_row_widgets):
+            field_name = row_info["field_entry_widget"].get().strip()
+            column_name = row_info["column_entry"].get().strip()
+            skip_value = row_info["skip_var"].get()
+
+            if not field_name:
+                messagebox.showerror("Input Error", f"Field name at row {i+1} cannot be empty.", parent=self.master)
+                return # Stop save if any field name is missing
+
+            new_config.append({
+                "field": field_name,
+                "column_name": column_name if column_name else field_name, # Use field name as default column name
+                "skip": skip_value
+            })
+            
+        self.parent_gui.all_txt_mappings[self.source_key] = new_config
+        self.parent_gui.save_settings() # Trigger the main save function
+        self.parent_gui.update_status(f"Mappings for {self.source_key} saved.")
+        self.master.destroy()
+
 # --- Settings Window Class ---
 class SettingsWindow:
 
@@ -3479,7 +3871,6 @@ class SettingsWindow:
 
         # --- Create tabs (no changes here) ---
         self.create_file_paths_tab()
-        self.create_txt_mapping_tab()
         self.create_generated_fields_tab()
         self.create_static_fields_tab()
         self.create_button_configuration_tab()
@@ -3494,11 +3885,12 @@ class SettingsWindow:
         button_frame = ttk.Frame(self.main_frame)
         # Span both columns (canvas and scrollbar)
         button_frame.grid(row=1, column=0, columnspan=2, pady=(10, 0), sticky="e")
+        ttk.Button(button_frame, text="Save", command=self.save_settings).pack(side=tk.RIGHT, padx=5)
         ttk.Button(button_frame, text="Save and Close", command=self.save_and_close, style="Accent.TButton").pack(side=tk.RIGHT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=self.master.destroy).pack(side=tk.RIGHT)
 
+    # helper function that reads the file for a given source key
     
-
     def on_frame_configure(self, event=None):
         """Updates the canvas scroll region when the inner frame's size changes."""
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -3740,7 +4132,7 @@ class SettingsWindow:
             "field": f"Static_Col_{new_field_index}",
             "description": "", 
             "column_name": f"='SheetName'!A{new_field_index}",
-            "skip": False  # <-- ADD THIS LINE
+            "skip": False  
         })
         
         newly_added_index = len(self.parent_gui.static_field_configs) - 1
@@ -3953,7 +4345,7 @@ class SettingsWindow:
         tab = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(tab, text="File Paths")
         
-        # --- Excel Log File (Existing Code) ---
+        # --- Excel Log File ---
         log_frame = ttk.LabelFrame(tab, text="Excel Log File (.xlsx or .xlsb)", padding=15)
         log_frame.pack(fill="x", pady=(0, 15))
         log_frame.columnconfigure(1, weight=1)
@@ -3971,7 +4363,7 @@ class SettingsWindow:
         db_frame.pack(fill="x", pady=(0, 15))
         db_frame.columnconfigure(1, weight=1)
         
-        # --- NEW: Red Warning Text ---
+        # --- Red Warning Text ---
         ttk.Label(
             db_frame, 
             text="⚠️ To be used when Reach Horizon Spreadsheet is not in use", 
@@ -3991,14 +4383,13 @@ class SettingsWindow:
         ToolTip(db_browse_btn, "Select the location to save the SQLite database file.")
         ToolTip(self.db_file_entry, "Full path to the .db file where the Excel data will be mirrored. If left blank, it will be created next to the Excel file.")
 
-        # --- Main Navigation TXT Data Folder (Existing Code) ---
+        # --- Main Navigation TXT Data Folder ---
         txt_sources_container = ttk.Frame(tab)
         txt_sources_container.pack(fill='x', expand=True, anchor='n')
         txt_sources_container.columnconfigure(0, weight=1)
 
-
-        # --- Helper function to create each TXT source entry (omitted for brevity) ---
-        def create_txt_source_frame(parent, title, name_entry_var, path_entry_var):
+        # --- Helper function to create each TXT source entry ( ---
+        def create_txt_source_frame(parent, title, source_key, name_entry_var, path_entry_var):
             frame = ttk.LabelFrame(parent, text=title, padding=15)
             frame.grid(sticky='ew', pady=(0, 15))
             parent.columnconfigure(0, weight=1)
@@ -4015,9 +4406,15 @@ class SettingsWindow:
             browse_btn = ttk.Button(frame, text="Browse...", command=lambda: self.select_txt_folder(path_entry))
             browse_btn.grid(row=1, column=2, padx=(5, 0), pady=5)
             ToolTip(browse_btn, "Select the folder containing the navigation TXT files for this source.")
+            
+            # --- MAPPING BUTTON ---
+            map_btn = ttk.Button(frame, text="Map Fields", command=lambda key=source_key: self.open_mapping_dialog(key))
+            map_btn.grid(row=0, column=2, padx=(5, 0), pady=5) # Place on the same row as Source Name
+            ToolTip(map_btn, f"Open the field mapping configuration for {source_key}. (Per-file mapping).")
+            
             return name_entry, path_entry
 
-        # Create StringVars to hold the UI data (omitted for brevity)
+        # Create StringVars (unchanged)
         self.txt_name_main_var = tk.StringVar()
         self.txt_path_main_var = tk.StringVar()
         self.txt_name_set2_var = tk.StringVar()
@@ -4029,12 +4426,12 @@ class SettingsWindow:
         self.txt_name_set5_var = tk.StringVar()
         self.txt_path_set5_var = tk.StringVar()
 
-        # Create the five source blocks using the helper (omitted for brevity)
-        create_txt_source_frame(txt_sources_container, "Main Vehicle Navigation (Main TXT Data)", self.txt_name_main_var, self.txt_path_main_var)
-        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 2)", self.txt_name_set2_var, self.txt_path_set2_var)
-        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 3)", self.txt_name_set3_var, self.txt_path_set3_var)
-        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 4)", self.txt_name_set4_var, self.txt_path_set4_var)
-        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 5)", self.txt_name_set5_var, self.txt_path_set5_var)
+        # Create the five source blocks using the helper ( to pass source_key)
+        create_txt_source_frame(txt_sources_container, "Main Vehicle Navigation (Main TXT Data)", "Main TXT", self.txt_name_main_var, self.txt_path_main_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 2)", "TXT Source 2", self.txt_name_set2_var, self.txt_path_set2_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 3)", "TXT Source 3", self.txt_name_set3_var, self.txt_path_set3_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 4)", "TXT Source 4", self.txt_name_set4_var, self.txt_path_set4_var)
+        create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 5)", "TXT Source 5", self.txt_name_set5_var, self.txt_path_set5_var)
     
         # Frame for restoring default settings ---
         restore_frame = ttk.LabelFrame(tab, text="Restore Default Settings", padding=15)
@@ -4052,6 +4449,18 @@ class SettingsWindow:
         restore_button.grid(row=1, column=0, sticky='w')
         ToolTip(restore_button, "WARNING: Deletes 'custom_settings.json' and loads defaults from 'default_settings.json'.")
 
+    def open_mapping_dialog(self, source_key):
+        """Opens a dialog to configure the mapping for a single source key."""
+        # This check is crucial to ensure the parent_gui object is available and the window is the current one
+        if not self.parent_gui or not self.master.winfo_exists():
+            messagebox.showerror("Error", "Application state invalid.", parent=self.master)
+            return
+
+        dialog_window = tk.Toplevel(self.master)
+        
+        # Pass the parent_gui instance, not the settings window instance
+        TxtMappingDialog(dialog_window, self.parent_gui, source_key) 
+    
     def select_excel_file(self):
         initial_dir = os.path.dirname(self.log_file_entry.get()) if self.log_file_entry.get() else os.getcwd()
         file_path = filedialog.askopenfilename(initialdir=initial_dir, filetypes=[("Excel files", ["*.xlsx",".xlsb"])], parent=self.master, title="Select Excel Log File")
@@ -4111,43 +4520,7 @@ class SettingsWindow:
                 )
             except Exception as e:
                 messagebox.showerror("Error", f"An error occurred while restoring defaults:\n{e}", parent=self.master)
-
-    def create_txt_mapping_tab(self):
-        tab = ttk.Frame(self.notebook, padding=20)
-        self.notebook.add(tab, text="TXT File Mapping")
-        
-        ttk.Label(tab, text="Define the structure of your navigation text file. The order must match the order of columns in the file. Use the preview button to verify.", wraplength=900, justify=tk.LEFT).pack(pady=(0, 10), anchor='w')
-
-        controls_frame = ttk.Frame(tab)
-        controls_frame.pack(fill='x', pady=(0, 10))
-        
-        ttk.Button(controls_frame, text="Preview Latest Data", command=self.parent_gui.preview_data_file).pack(side=tk.LEFT, padx=(0, 10))
-        ttk.Button(controls_frame, text="Clear Preview", command=self.parent_gui.clear_data_preview).pack(side=tk.LEFT, padx=(0, 20))
-
-        spacer = ttk.Frame(controls_frame)
-        spacer.pack(side=tk.LEFT, expand=True, fill='x')
-
-        self.txt_move_up_btn = ttk.Button(controls_frame, text="Move Up", command=lambda: self.move_selected_txt_field("up"))
-        self.txt_move_up_btn.pack(side=tk.RIGHT, padx=5)
-
-        self.txt_move_down_btn = ttk.Button(controls_frame, text="Move Down", command=lambda: self.move_selected_txt_field("down"))
-        self.txt_move_down_btn.pack(side=tk.RIGHT, padx=5)
-
-        ttk.Button(controls_frame, text="Add New Field", command=self.add_txt_field_row).pack(side=tk.RIGHT, padx=5)
-        
-        self.txt_fields_canvas = tk.Canvas(tab, borderwidth=0, background="#ffffff")
-        txt_scrollbar = ttk.Scrollbar(tab, orient="vertical", command=self.txt_fields_canvas.yview)
-        self.txt_fields_scrollable_frame = ttk.Frame(self.txt_fields_canvas)
-        self.txt_fields_scrollable_frame.bind("<Configure>", lambda e: self.txt_fields_canvas.configure(scrollregion=self.txt_fields_canvas.bbox("all")))
-        self.txt_fields_canvas.create_window((0, 0), window=self.txt_fields_scrollable_frame, anchor="nw")
-        self.txt_fields_canvas.configure(yscrollcommand=txt_scrollbar.set)
-        self.txt_fields_canvas.pack(side="left", fill="both", expand=True)
-        txt_scrollbar.pack(side="right", fill="y")
-        
-        self.txt_field_row_widgets = []
-        self.add_txt_field_header(self.txt_fields_scrollable_frame)
-        # The load_settings method will call recreate_txt_mapping_rows
-        
+            
     def create_generated_fields_tab(self):
         tab = ttk.Frame(self.notebook, padding=20)
         self.notebook.add(tab, text="Generated Fields")
@@ -4187,7 +4560,6 @@ class SettingsWindow:
             # You could add a skip checkbox here if desired, similar to other tabs
 
             self.generated_field_widgets.append({'entry': entry, 'skip_var': skip_var})
-
     
     def add_txt_field_header(self, parent):
         """Adds a header row to the TXT field mapping section."""
@@ -4214,9 +4586,6 @@ class SettingsWindow:
         # Also apply the same column configure to the header_frame itself so its internal labels space out correctly
         for i in range(6):
             header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0), minsize=parent.grid_columnconfigure(i).get('minsize', 0))
-
-
-
 
     def create_button_configuration_tab(self):
         tab = ttk.Frame(self.notebook, padding=20)
@@ -4262,7 +4631,6 @@ class SettingsWindow:
                 scrollregion=canvas.bbox("all")
             )
         )
-
         window = canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
 
@@ -4272,73 +4640,7 @@ class SettingsWindow:
         # Replace direct frame with scrollable one
         self.custom_button_entries_frame = self.scrollable_frame
         self.custom_button_widgets = []
-
-    def recreate_txt_field_rows(self, reselect_index=None):
-        # Clear existing widgets except the header
-        for widget in self.txt_fields_scrollable_frame.winfo_children():
-            if int(widget.grid_info()["row"]) > 0:
-                widget.destroy()
-        self.txt_field_row_widgets.clear()
-
-        # CORRECTED: Use the new txt_mapping_config attribute
-        for i, config in enumerate(self.parent_gui.txt_mapping_config):
-            grid_row_index = i + 1
-            parent_frame = self.txt_fields_scrollable_frame
-            widgets_in_row = []
-
-            # Order Label
-            order_label = ttk.Label(parent_frame, text=str(i + 1), anchor='center')
-            order_label.grid(row=grid_row_index, column=0, padx=5, pady=2, sticky='ew')
-            widgets_in_row.append(order_label)
-
-            # TXT Field Entry
-            field_widget = ttk.Entry(parent_frame)
-            field_widget.insert(0, config["field"])
-            field_widget.grid(row=grid_row_index, column=1, padx=5, pady=2, sticky='ew')
-            widgets_in_row.append(field_widget)
-
-            # Preview Data Label
-            preview_label = ttk.Label(parent_frame, text="", anchor='w', foreground="blue")
-            preview_label.grid(row=grid_row_index, column=2, padx=5, pady=2, sticky='ew')
-            widgets_in_row.append(preview_label)
-            
-            # Excel Column Entry
-            column_entry = ttk.Entry(parent_frame)
-            column_entry.insert(0, config.get("column_name", config["field"]))
-            column_entry.grid(row=grid_row_index, column=3, padx=5, pady=2, sticky="ew")
-            widgets_in_row.append(column_entry)
-            
-            # Skip Checkbox
-            skip_var = tk.BooleanVar(value=config.get("skip", False))
-            skip_checkbox = ttk.Checkbutton(parent_frame, variable=skip_var)
-            skip_checkbox.grid(row=grid_row_index, column=5, padx=(15,5), pady=2, sticky='w')
-            widgets_in_row.append(skip_checkbox)
-
-            # Remove Button
-            remove_btn = ttk.Button(parent_frame, text="Remove", width=8, style="Toolbutton",
-                                      command=lambda idx=i: self.remove_txt_field_row(idx))
-            remove_btn.grid(row=grid_row_index, column=6, padx=5, pady=2, sticky='w')
-            widgets_in_row.append(remove_btn)
-
-            click_handler = lambda e, idx=i: self._select_txt_row(idx)
-            for widget in widgets_in_row:
-                widget.bind("<Button-1>", click_handler)
-
-            self.txt_field_row_widgets.append({
-                "field_entry_widget": field_widget,
-                "column_entry": column_entry,
-                "skip_var": skip_var,
-                "preview_label": preview_label,
-                "all_widgets": widgets_in_row
-            })
-        
-        if reselect_index is not None:
-            self._select_txt_row(reselect_index)
-        else:
-            self._select_txt_row(-1)
-
-        self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
-
+    
     def _select_txt_row(self, index):
         # This helper function should already be correct, but is included for completeness
         if hasattr(self, 'selected_txt_row_index') and self.selected_txt_row_index != -1 and self.selected_txt_row_index < len(self.txt_field_row_widgets):
@@ -4432,13 +4734,12 @@ class SettingsWindow:
                 # Use the parent GUI's master list of tab groups as the single source of truth.
         all_tab_groups = sorted(self.parent_gui.custom_button_tab_groups[:])
 
-
         for i in range(num_buttons):
             config = configs[i] if i < len(configs) else {}
             initial_text = config.get("text", f"Custom {i+1}")
             initial_event = config.get("event_text", f"{initial_text} Event")
             initial_txt_source = config.get("txt_source_key", "None")
-            initial_tab_group = config.get("tab_group", "Main") # **MODIFIED:** Default to "Main"
+            initial_tab_group = config.get("tab_group", "Main") # **:** Default to "Main"
 
             style_name = f"Row{i % 2}.TFrame"
             row_frame = ttk.Frame(self.custom_button_entries_frame, style=style_name, padding=(0, 2))
@@ -4506,7 +4807,7 @@ class SettingsWindow:
             width=8
         )
         threshold_spinbox.pack(side=tk.LEFT)
-        ToolTip(threshold_spinbox, "A file is considered 'active' if it was modified within this many seconds.\nIf inactive, the cell will be left blank.")
+        ToolTip(threshold_spinbox, "A file is considered 'active' if it was  within this many seconds.\nIf inactive, the cell will be left blank.")
 
         controls_frame = ttk.Frame(tab)
         controls_frame.pack(fill='x', pady=(0, 10), padx=10)
@@ -4543,6 +4844,7 @@ class SettingsWindow:
         self.file_extension_entries = {}
         self.folder_skip_vars = {}
         self.folder_log_x_vars = {}
+        self.folder_log_ext_vars = {}
         self.folder_row_widgets = {}
         self.add_folder_header(self.scrollable_frame)
 
@@ -4552,9 +4854,10 @@ class SettingsWindow:
         parent.columnconfigure(1, weight=4, minsize=250)  # Monitor Path
         parent.columnconfigure(2, weight=0)               # ... button
         parent.columnconfigure(3, weight=2, minsize=150)  # Excel Column
-        parent.columnconfigure(5, weight=1, minsize=80)   # File Ext.
-        parent.columnconfigure(6, weight=0, minsize=50)   # Skip?
-        parent.columnconfigure(7, weight=0, minsize=70)   # Log 'X'?
+        parent.columnconfigure(4, weight=1, minsize=80)   # File Ext.
+        parent.columnconfigure(5, weight=0, minsize=50)   # Skip?
+        parent.columnconfigure(6, weight=0, minsize=70)   # Log 'X'?
+        parent.columnconfigure(7, weight=0, minsize=70)   # Log Ext
 
         # 1. Create a header frame to contain the labels
         header_frame = ttk.Frame(parent, style="Header.TFrame")
@@ -4563,14 +4866,17 @@ class SettingsWindow:
         # 2. Add header labels to the new frame
         ttk.Label(header_frame, text="Folder Type", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=0, sticky='w', padx=(15, 5))
         ttk.Label(header_frame, text="Monitor Path", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=1, sticky='w', padx=5)
-        # Empty label for browse button column to maintain spacing
-        ttk.Label(header_frame, text="", style="Header.TLabel").grid(row=0, column=2)
+        ttk.Label(header_frame, text="", style="Header.TLabel").grid(row=0, column=2) # Space for browse button
         ttk.Label(header_frame, text="Excel Column", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=3, sticky='w', padx=5)
-        ttk.Label(header_frame, text="", style="Header.TLabel", padding=5).grid(row=0, column=4, sticky='w')
-        ttk.Label(header_frame, text="File Ext.", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=5, sticky='w', padx=5)
-        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=6, sticky='w', padx=5)
-        ttk.Label(header_frame, text="Log 'X'?", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=7, sticky='w', padx=5)
-
+        ttk.Label(header_frame, text="File Ext.", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=4, sticky='w', padx=5)
+        ttk.Label(header_frame, text="Skip?", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=5, sticky='w', padx=5)
+        
+        # --- FIX: Log 'X'? is now in column 6 ---
+        ttk.Label(header_frame, text="Log 'X'?", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=6, sticky='w', padx=5) 
+        # ----------------------------------------
+        
+        # --- Log Ext.? is in column 7 ---
+        ttk.Label(header_frame, text="Log Ext.?", font=("Arial", 10, "bold"), style="Header.TLabel").grid(row=0, column=7, sticky='w', padx=5)
         # Apply the same column configure to the header_frame itself so its internal labels space out correctly
         for i in range(8):
              header_frame.grid_columnconfigure(i, weight=parent.grid_columnconfigure(i).get('weight', 0), minsize=parent.grid_columnconfigure(i).get('minsize', 0))
@@ -4584,8 +4890,7 @@ class SettingsWindow:
             ("TXT Source 3", self.parent_gui.txt_folder_path_set3),
             ("TXT Source 4", self.parent_gui.txt_folder_path_set4),
             ("TXT Source 5", self.parent_gui.txt_folder_path_set5)
-        ]
-        
+        ] 
         all_folder_names = []
         processed_set = set()
 
@@ -4609,7 +4914,6 @@ class SettingsWindow:
                 if name == "TXT Source 5" and not self.parent_gui.folder_columns.get(name):
                     self.parent_gui.folder_columns[name] = "TXT_Set5_File"
                     self.parent_gui.file_extensions[name] = "txt"
-
 
         for name in default_folders:
             if name not in processed_set:
@@ -4696,7 +5000,7 @@ class SettingsWindow:
             # Pop the list of widgets from the dictionary
             widgets_to_destroy = self.folder_row_widgets.pop(folder_to_remove, None)
             
-            # **FIX:** If the list exists, iterate through it and destroy each widget
+            # If the list exists, iterate through it and destroy each widget
             if widgets_to_destroy:
                 for widget in widgets_to_destroy:
                     if widget and widget.winfo_exists():
@@ -4742,14 +5046,21 @@ class SettingsWindow:
         log_x_var = tk.BooleanVar(value=self.parent_gui.folder_log_x_instead.get(folder_name, False))
         log_x_checkbox = ttk.Checkbutton(parent, variable=log_x_var)
 
+        if folder_name not in self.parent_gui.folder_log_ext_vars:
+            self.parent_gui.folder_log_ext_vars[folder_name] = tk.BooleanVar(value=False)
+            
+        log_ext_var = self.parent_gui.folder_log_ext_vars[folder_name] # Retrieve the shared BooleanVar
+        log_ext_checkbox = ttk.Checkbutton(parent, variable=log_ext_var)
+
         # --- Place Widgets on the Shared Grid ---
         label.grid(row=row_index, column=0, padx=5, pady=2, sticky="ew")
         entry.grid(row=row_index, column=1, padx=5, pady=2, sticky="ew")
         button.grid(row=row_index, column=2, padx=(0,5), pady=2, sticky='w')
         column_entry.grid(row=row_index, column=3, padx=5, pady=2, sticky="ew")
-        extension_entry.grid(row=row_index, column=5, padx=5, pady=2, sticky="ew")
-        skip_checkbox.grid(row=row_index, column=6, padx=(15, 5), pady=2, sticky='w')
-        log_x_checkbox.grid(row=row_index, column=7, padx=(15, 5), pady=2, sticky='w')
+        extension_entry.grid(row=row_index, column=4, padx=5, pady=2, sticky="ew") 
+        skip_checkbox.grid(row=row_index, column=5, padx=(15, 5), pady=2, sticky='w')
+        log_x_checkbox.grid(row=row_index, column=6, padx=(15, 5), pady=2, sticky='w') 
+        log_ext_checkbox.grid(row=row_index, column=7, padx=(15, 5), pady=2, sticky='w')
 
         # --- Selection and Tooltip Logic ---
         widgets_in_row = [label, entry, button, column_entry, extension_entry, skip_checkbox]
@@ -4762,8 +5073,8 @@ class SettingsWindow:
         ToolTip(extension_entry, "Optional: Monitor only files with this extension (e.g., 'svp').")
         ToolTip(skip_checkbox, f"Check to disable monitoring for the '{folder_name}' folder.")
         ToolTip(log_x_checkbox, "If a file is logging, insert 'X' into the Excel column.\nThe database will still receive the actual filename.")
+        ToolTip(log_ext_checkbox, "If checked, the full filename, including the extension, will be logged to Excel (to prevent scientific notation formatting).")
     
-
         # Store references for selection, saving, and removal
         self.folder_entries[folder_name] = entry
         self.folder_column_entries[folder_name] = column_entry
@@ -4772,13 +5083,14 @@ class SettingsWindow:
         self.folder_log_x_vars[folder_name] = log_x_var
         # Store all widgets in the row for highlighting
         self.folder_row_widgets[folder_name] = widgets_in_row
+        self.folder_log_ext_vars[folder_name] = log_ext_var
 
+        widgets_in_row = [label, entry, button, column_entry, extension_entry, skip_checkbox, log_x_checkbox, log_ext_checkbox]
+        self.folder_row_widgets[folder_name] = widgets_in_row
 
     def update_scroll_region(self):
         self.scrollable_frame.update_idletasks()
         self.folder_canvas.configure(scrollregion=self.folder_canvas.bbox("all"))
-
-
 
     def save_settings_to_parent_vars(self):
         """
@@ -5008,96 +5320,151 @@ class SettingsWindow:
 
     # --- Settings Save/Load Logic ---
     def save_settings(self):
-        # --- File Paths Tab ---
-        self.parent_gui.log_file_path = self.log_file_entry.get().strip()
-        self.parent_gui.sqlite_db_path = self.db_file_entry.get().strip()
-        self.parent_gui.txt_source_aliases["Main TXT"] = self.txt_name_main_var.get().strip()
-        self.parent_gui.txt_folder_path = self.txt_path_main_var.get().strip()
-        self.parent_gui.txt_source_aliases["TXT Source 2"] = self.txt_name_set2_var.get().strip()
-        self.parent_gui.txt_folder_path_set2 = self.txt_path_set2_var.get().strip()
-        self.parent_gui.txt_source_aliases["TXT Source 3"] = self.txt_name_set3_var.get().strip()
-        self.parent_gui.txt_folder_path_set3 = self.txt_path_set3_var.get().strip()
-        self.parent_gui.txt_source_aliases["TXT Source 4"] = self.txt_name_set4_var.get().strip()
-        self.parent_gui.txt_folder_path_set4 = self.txt_path_set4_var.get().strip()
-        self.parent_gui.txt_source_aliases["TXT Source 5"] = self.txt_name_set5_var.get().strip()
-        self.parent_gui.txt_folder_path_set5 = self.txt_path_set5_var.get().strip()
-        
-        # --- TXT File Mapping, Generated, Static Fields, and Monitored Folders saving logic (Assumed correct) ---
-        # NOTE: For brevity, keeping the content saving streamlined here:
-        
-        # TXT Mapping
-        new_txt_mapping_configs = []
-        for i, row_info in enumerate(self.txt_field_row_widgets):
-            field_name = row_info["field_entry_widget"].get().strip() or f"Custom_Field_{i+1}"
-            column_name = row_info["column_entry"].get().strip() or field_name
-            skip_value = row_info["skip_var"].get()
-            new_txt_mapping_configs.append({"field": field_name, "column_name": column_name, "skip": skip_value})
-        self.parent_gui.txt_mapping_config = new_txt_mapping_configs
+        """
+        Gathers all current settings from the UI fields and updates the parent
+        GUI's in-memory variables, then forces a save to the JSON file.
+        The window remains open.
+        """
+        try:
+            # --- File Paths Tab ---
+            self.parent_gui.log_file_path = self.log_file_entry.get().strip()
+            self.parent_gui.sqlite_db_path = self.db_file_entry.get().strip()
+            
+            # --- TXT Aliases and Paths ---
+            self.parent_gui.txt_source_aliases["Main TXT"] = self.txt_name_main_var.get().strip()
+            self.parent_gui.txt_folder_path = self.txt_path_main_var.get().strip()
+            self.parent_gui.txt_source_aliases["TXT Source 2"] = self.txt_name_set2_var.get().strip()
+            self.parent_gui.txt_folder_path_set2 = self.txt_path_set2_var.get().strip()
+            self.parent_gui.txt_source_aliases["TXT Source 3"] = self.txt_name_set3_var.get().strip()
+            self.parent_gui.txt_folder_path_set3 = self.txt_path_set3_var.get().strip()
+            self.parent_gui.txt_source_aliases["TXT Source 4"] = self.txt_name_set4_var.get().strip()
+            self.parent_gui.txt_folder_path_set4 = self.txt_path_set4_var.get().strip()
+            self.parent_gui.txt_source_aliases["TXT Source 5"] = self.txt_name_set5_var.get().strip()
+            self.parent_gui.txt_folder_path_set5 = self.txt_path_set5_var.get().strip()
+            
+            # --- Generated Fields Saving ---
+            for i, widget_info in enumerate(self.generated_field_widgets):
+                self.parent_gui.generated_fields_config[i]["column_name"] = widget_info["entry"].get().strip()
 
-        # Generated Fields (Requires reading entry widgets)
-        for i, widget_info in enumerate(self.generated_field_widgets):
-            self.parent_gui.generated_fields_config[i]["column_name"] = widget_info["entry"].get().strip()
+            # --- Static Fields Saving ---
+            new_static_configs = []
+            for i, row_info in enumerate(self.static_field_row_widgets):
+                new_static_configs.append({
+                    "field": row_info["column_entry"].get().strip(), 
+                    "description": row_info["description_entry"].get().strip(), 
+                    "column_name": row_info["cell_entry"].get().strip(), 
+                    "skip": row_info["skip_var"].get()
+                })
+            self.parent_gui.static_field_configs = new_static_configs
 
-        # Static Fields (Requires reading entry widgets)
-        new_static_configs = []
-        for i, row_info in enumerate(self.static_field_row_widgets):
-            new_static_configs.append({
-                "field": row_info["column_entry"].get().strip(), 
-                "description": row_info["description_entry"].get().strip(), 
-                "column_name": row_info["cell_entry"].get().strip(), 
-                "skip": row_info["skip_var"].get()
-            })
-        self.parent_gui.static_field_configs = new_static_configs
+            # --- Monitored Folders Saving ---
+            # Local Dictionaries to collect data from UI inputs
+            parent_folder_paths, parent_folder_cols, parent_folder_exts, parent_folder_skips, parent_folder_log_x_instead, parent_folder_log_exts = {}, {}, {}, {}, {}, {}
+            
+            # Loop over ALL configured folder names (including newly added ones)
+            for folder_name in self.folder_entries.keys():
+                folder_path = self.folder_entries[folder_name].get().strip()
+                
+                # Only save configuration for folders that have a path set
+                if folder_path:
+                    parent_folder_paths[folder_name] = folder_path
+                    parent_folder_cols[folder_name] = self.folder_column_entries[folder_name].get().strip()
+                    parent_folder_exts[folder_name] = self.file_extension_entries[folder_name].get().strip().lstrip('.')
+                    parent_folder_skips[folder_name] = self.folder_skip_vars[folder_name].get()
+                    parent_folder_log_x_instead[folder_name] = self.folder_log_x_vars[folder_name].get()
+                    
+                    # --- CRITICAL FIX: Get the value from the local BooleanVar ---
+                    # The BooleanVar exists in self.folder_log_ext_vars because it was added in add_folder_row
+                    parent_folder_log_exts[folder_name] = self.folder_log_ext_vars[folder_name].get()
 
-        # Monitored Folders (Requires reading entry widgets)
-        parent_folder_paths, parent_folder_cols, parent_folder_exts, parent_folder_skips, parent_folder_log_x_instead = {}, {}, {}, {}, {}
-        for folder_name in self.folder_entries.keys():
-            folder_path = self.folder_entries[folder_name].get().strip()
-            if folder_path:
-                parent_folder_paths[folder_name] = folder_path
-                parent_folder_cols[folder_name] = self.folder_column_entries[folder_name].get().strip()
-                parent_folder_exts[folder_name] = self.file_extension_entries[folder_name].get().strip().lstrip('.')
-                parent_folder_skips[folder_name] = self.folder_skip_vars[folder_name].get()
-                parent_folder_log_x_instead[folder_name] = self.folder_log_x_vars[folder_name].get()
-        self.parent_gui.folder_paths = parent_folder_paths
-        self.parent_gui.folder_columns = parent_folder_cols
-        self.parent_gui.file_extensions = parent_folder_exts
-        self.parent_gui.folder_skips = parent_folder_skips
-        self.parent_gui.folder_log_x_instead = parent_folder_log_x_instead
+            # --- Transfer collected data back to DataLoggerGUI instance ---
+            self.parent_gui.folder_paths = parent_folder_paths
+            self.parent_gui.folder_columns = parent_folder_cols
+            self.parent_gui.file_extensions = parent_folder_exts
+            self.parent_gui.folder_skips = parent_folder_skips
+            self.parent_gui.folder_log_x_instead = parent_folder_log_x_instead
+            
+            # --- CRITICAL: Update the parent's persistent BooleanVar references ---
+            # We must map the current configuration back to the parent's object, 
+            # ensuring only active folders exist in the parent's dictionary.
+            new_log_ext_vars_for_parent = {}
+            for k, v in parent_folder_paths.items():
+                # We reuse the existing BooleanVar if it exists in the UI, or create a temporary one if needed
+                if k in self.parent_gui.folder_log_ext_vars:
+                    # Update the existing BooleanVar's value using the collected boolean value
+                    self.parent_gui.folder_log_ext_vars[k].set(parent_folder_log_exts[k])
+                else:
+                    # For new entries, create and set the value
+                    self.parent_gui.folder_log_ext_vars[k] = tk.BooleanVar(value=parent_folder_log_exts[k])
+                
+                # Add the reference back to the new structure
+                new_log_ext_vars_for_parent[k] = self.parent_gui.folder_log_ext_vars[k]
+            
+            # Finally, replace the parent's dictionary with only the active folder references
+            self.parent_gui.folder_log_ext_vars = new_log_ext_vars_for_parent
+            # ------------------------------------------------------------------------
 
+            # --- Button Configuration Saving (Remains unchanged and correct) ---
+            self.parent_gui.num_custom_buttons = int(self.num_buttons_entry.get())
+            for i, (text_entry, event_entry, event_code_var, txt_source_var, tab_group_var) in enumerate(self.custom_button_widgets):
+                
+                # We need a robust way to map the ComboBox Display Name back to the Internal Key (e.g., 'Main TXT')
+                internal_keys_for_map = TXT_FILES_KEYS
+                aliases = self.parent_gui.txt_source_aliases
+                display_to_internal_map = {aliases.get(k, k): k for k in internal_keys_for_map}
+                
+                selected_display_name = txt_source_var.get()
+                selected_source_key = display_to_internal_map.get(selected_display_name, selected_display_name)
+                
+                # Handle Event Code (parse 'Code - Description')
+                selected_code_string = event_code_var.get()
+                code_to_save = selected_code_string.split(" - ", 1)[0] if " - " in selected_code_string else selected_code_string
+                
+                # Save changes back to the in-memory list (important for persisting the config)
+                config = self.parent_gui.custom_button_configs[i]
+                config["text"] = text_entry.get().strip()
+                config["event_text"] = event_entry.get().strip()
+                config["event_code"] = code_to_save
+                config["txt_source_key"] = selected_source_key
+                config["tab_group"] = tab_group_var.get().strip() or "Main"
 
-        # --- Programmed Events Tab (Crucial Synchronization Fix) ---
-        
-        # 1. Save Hourly Log Source Key
-        if hasattr(self, 'hourly_source_combobox'):
-            selected_display_name = self.hourly_source_combobox.get()
-            # Retrieve the internal key using the map created during tab setup
-            internal_key_to_save = self.hourly_source_map.get(selected_display_name, "Main TXT")
-            self.parent_gui.hourly_log_txt_source_key.set(internal_key_to_save)
-        
-        # 2. Synchronize Enable/Disable Checkboxes (Bound variables update automatically, this is for clarity)
-        # We ensure they are synchronized by referencing them before the save_settings call.
-        self.parent_gui.new_day_event_enabled_var.set(self.parent_gui.new_day_event_enabled_var.get())
-        self.parent_gui.hourly_event_enabled_var.set(self.parent_gui.hourly_event_enabled_var.get())
-        self.parent_gui.calculate_logoff_values.set(self.parent_gui.calculate_logoff_values.get())
-        self.parent_gui.time_offset_hours.set(self.parent_gui.time_offset_hours.get())
+                # Ensure new tab group is registered
+                new_group = config["tab_group"]
+                if new_group not in self.parent_gui.custom_button_tab_groups:
+                    self.parent_gui.custom_button_tab_groups.append(new_group)
+                    self.parent_gui.custom_button_tab_groups.sort()
 
-        # 3. Update and save colors for Programmed Events
-        if hasattr(self, 'new_day_bg_color_var'): 
-            # Use .get() to retrieve the latest value from the StringVar objects
-            self.parent_gui.button_colors["New Day"] = (
-                self.new_day_bg_color_var.get() if self.new_day_bg_color_var.get() else None, 
-                self.new_day_font_color_var.get() if self.new_day_font_color_var.get() else None
-            )
-            #self.parent_gui.button_colors["Hourly KP Log"] = (
-                #self.hourly_bg_color_var.get() if self.hourly_bg_color_var.get() else None, 
-                #self.hourly_font_color_var.get() if self.hourly_font_color_var.get() else None
-            #)
+            # --- Programmed Events / Timezone ---
+            new_day_bg = self.new_day_bg_color_var.get() if self.new_day_bg_color_var.get() else None
+            new_day_font = self.new_day_font_color_var.get() if self.new_day_font_color_var.get() else None
+            self.parent_gui.button_colors["New Day"] = (new_day_bg, new_day_font)
 
-        # --- Final Actions: Trigger the overall save to JSON ---
-        self.parent_gui.save_settings()
-        self.parent_gui.update_custom_buttons()
-        
+            if hasattr(self, 'hourly_source_combobox'):
+                selected_display_name = self.hourly_source_combobox.get()
+                
+                internal_keys_for_map = TXT_FILES_KEYS
+                aliases = self.parent_gui.txt_source_aliases
+                display_to_internal_map = {aliases.get(k, k): k for k in internal_keys_for_map if k != "None"}
+
+                current_internal_key = self.parent_gui.hourly_log_txt_source_key.get()
+                internal_key_to_save = display_to_internal_map.get(selected_display_name, current_internal_key)
+                
+                self.parent_gui.hourly_log_txt_source_key.set(internal_key_to_save)
+
+            # --- Final Save and UI Refresh ---
+            self.parent_gui.save_settings() # This saves all instance attributes to JSON
+            self.parent_gui.update_custom_buttons()
+            
+            self.parent_gui.update_status("Settings saved successfully (window remains open).")
+
+        except Exception as e:
+            error_message = f"Error saving settings: {e}"
+            messagebox.showerror("Save Error", error_message, parent=self.master)
+            self.parent_gui.update_status(error_message)
+    def save_and_close(self):
+        """Saves settings and closes the window."""
+        self.save_settings()
+        self.master.destroy()
         
 
     def load_settings(self):
@@ -5124,7 +5491,6 @@ class SettingsWindow:
 
         # --- Data Columns, Monitoring, and Button Configuration loading remains unchanged ---
         self.parent_gui.load_settings()
-        self.recreate_txt_field_rows()
         self.recreate_static_field_rows()
         
         # --- Monitored Folders loading
@@ -5140,7 +5506,7 @@ class SettingsWindow:
         self.num_buttons_entry.insert(0, str(self.parent_gui.num_custom_buttons))
         self.recreate_custom_button_settings()
         
-        self.master.after_idle(lambda: self.txt_fields_canvas.config(scrollregion=self.txt_fields_canvas.bbox("all")))
+        
         self.master.after_idle(lambda: self.static_fields_canvas.config(scrollregion=self.static_fields_canvas.bbox("all")))
         
         # --- Programmed Events Tab Loading ---
