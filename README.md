@@ -5,6 +5,11 @@ A Windows-focused Python application that monitors incoming navigation/survey fi
 > Full documentation is available in the PDF user guide:
 > - [Field Log User Guide (PDF)](Guide/Field%20Log%20User%20Guide.pdf)
 
+
+
+![Online Logger v2.0](_repositoryfiles/OnlineLoggerv2.0.png)
+
+
 ## Features
 
 - Watches multiple source folders (e.g., Qinsy, Naviscan, SVP) and parses new files automatically
@@ -61,6 +66,8 @@ When the UI opens, choose your Excel template, monitored folders, and event code
 
 ## Projects and Settings (overview)
 
+![Settings Menu v2.0](_repositoryfiles/settings_menu_OLv2.0.png)
+
 - Browse or New: Point the app to an existing project JSON or start a new one.
 - Load Project: Loads the selected project JSON and applies its settings to the UI and runtime.
 - Save / Save As: Saves the current configuration to a project JSON for reuse.
@@ -114,4 +121,6 @@ Issues and improvements are welcome. Please:
 
 - Use feature branches and open PRs against `main`.
 - Keep changes focused and include a brief description.
+
+![Online Logger Logo](_repositoryfiles/OnlineLoggerLogo.jpg)
 

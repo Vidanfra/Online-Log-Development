@@ -5,3 +5,6 @@ xlwings
 watchdog
 pandas
 openpyxl
+
+# Build tools (optional, only needed for creating .exe)
+pyinstaller
