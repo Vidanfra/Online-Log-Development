@@ -153,5 +153,6 @@
     "calculate_logoff_values": true,
     "event_codes": {},
     "auto_sync_enabled": false,
-    "auto_sync_interval_min": 15
+    "auto_sync_interval_min": 15,
+    "app_version": "2.0"
 }

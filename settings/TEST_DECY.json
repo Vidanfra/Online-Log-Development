@@ -624,5 +624,6 @@
         "P-FIX": "Position Fix"
     },
     "auto_sync_enabled": true,
-    "auto_sync_interval_min": 1
+    "auto_sync_interval_min": 1,
+    "app_version": "2.0"
 }

@@ -27,6 +27,9 @@ timings = {}
 start_time = time.perf_counter()
 
 # --- DEFINED CONSTANTS ---
+# APPLICATION VERSION
+APP_VERSION = "2.0"
+
 # PATHS
 # Stores the last-used project path across sessions
 PROJECT_STATE_FILE = "settings/config/last_project.json"
@@ -554,6 +557,9 @@ class DataLoggerGUI:
         self.init_variables()
         self.static_field_configs = []
         self.init_settings()
+        
+        # Update window title with version and project name
+        self.update_window_title()
 
         # --- Main Layout ---
         self.main_frame = ttk.Frame(self.master, padding="5")
@@ -1151,6 +1157,24 @@ class DataLoggerGUI:
             except tk.TclError:
                 pass # Window might be destroyed between check and after call
 
+    def update_window_title(self):
+        """
+        Updates the main window title to show version and current project name.
+        Format: 'Online Logger v{VERSION} - {PROJECT_NAME}'
+        """
+        title_parts = [f"Online Logger v{APP_VERSION}"]
+        
+        # Extract project name from settings file path if available
+        if self.settings_file and os.path.exists(self.settings_file):
+            project_name = os.path.splitext(os.path.basename(self.settings_file))[0]
+            title_parts.append(project_name)
+        
+        final_title = " - ".join(title_parts)
+        
+        try:
+            self.master.title(final_title)
+        except tk.TclError:
+            pass  # Window might be closing
     
     def update_monitor_indicator_text(self):
         """
@@ -2207,7 +2231,8 @@ class DataLoggerGUI:
             "calculate_logoff_values": self.calculate_logoff_values.get(),
             "event_codes": self.event_codes,
             "auto_sync_enabled": self.auto_sync_enabled_var.get(),
-            "auto_sync_interval_min": self.auto_sync_interval_min_var.get()
+            "auto_sync_interval_min": self.auto_sync_interval_min_var.get(),
+            "app_version": APP_VERSION  # Save current application version
         }
         try:
             with open(self.settings_file, 'w') as f:
@@ -2489,6 +2514,7 @@ class DataLoggerGUI:
         self.settings_file = path
         self.current_project_path = path
         self.persist_current_project_path(path)
+        self.update_window_title()  # Refresh title with new project name
 
     # --- Monitoring ---
 
