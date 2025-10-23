@@ -1,5 +1,5 @@
 {
-    "log_file_path": "C:/Users/Administrator/Desktop/Online-Log-Development/Excel TEmplate/DailyLog-Horizon_v14.xlsb",
+    "log_file_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Excel Template/DailyLog-Horizon_v14.xlsb",
     "sqlite_db_path": "C:/Users/Administrator/Desktop/Online-Log-Development/SQL Database/temp2_test.db",
     "time_offset_hours": 1.0,
     "txt_folder_path": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
@@ -256,18 +256,7 @@
         "Qinsy DB": false,
         "Naviscan": false,
         "SVP": false,
-        "SpintINS": false,
-        "TXT Source 4": false,
-        "TXT Source 5": false,
-        "SIS": false,
-        "SSS": false,
-        "SBP": false,
-        "Mag": false,
-        "Grad": false,
-        "Video": false,
-        "Cathx": false,
-        "Hypack RAW": false,
-        "Eiva NaviPac": false
+        "SpintINS": false
     },
     "num_custom_buttons": 26,
     "custom_button_configs": [
@@ -611,6 +600,29 @@
         "TXT Source 5": "TXT Source 5"
     },
     "calculate_logoff_values": true,
+    "event_codes": {
+        "R-ON": "ROV on Deck",
+        "R-OFF": "ROV off Deck",
+        "BGC": "TSS Background Compensation",
+        "STILL": "Still Picture",
+        "AF-S": "As-Found Start",
+        "AF-E": "As-Found End",
+        "AL-S": "As-Left Start",
+        "AL-E": "As-Left End",
+        "IDC-S": "ID&C Start",
+        "D-S": "Dredge Start",
+        "R-OTH": "ROV Other",
+        "VM": "Vessel Move",
+        "SVP": "SVP",
+        "R-TRM": "ROV Target Removal",
+        "MET": "Meteo Data",
+        "IDC-E": "ID&C End",
+        "V-OTH": "Vessel Other",
+        "LogON": "LogON",
+        "dfgdfgdfg": "sdfg",
+        "rferf": "wefwer",
+        "P-FIX": "Position Fix"
+    },
     "auto_sync_enabled": true,
     "auto_sync_interval_min": 1
 }

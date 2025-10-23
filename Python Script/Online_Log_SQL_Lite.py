@@ -28,8 +28,10 @@ start_time = time.perf_counter()
 
 # --- DEFINED CONSTANTS ---
 # PATHS
-DEFAULT_SETTINGS_FILE = "settings/default_settings.json"
-CUSTOM_SETTINGS_FILE = "settings/custom_settings.json"
+# Stores the last-used project path across sessions
+PROJECT_STATE_FILE = "settings/config/last_project.json"
+# Path to the blank project template used when creating a new project
+PROJECT_TEMPLATE_FILE = "settings/config/blank_project.json"
 EVENT_CODES_FILE = "settings/event_codes.json"
 
 # DICCTIONARY KEYS #NEEDS TO BE REVIEWED
@@ -651,9 +653,25 @@ class DataLoggerGUI:
         '''
         self.log_file_path = None
 
-        # Settings File Configuration
-        self.default_settings_file = DEFAULT_SETTINGS_FILE
-        self.settings_file = CUSTOM_SETTINGS_FILE       
+        # Settings File Configuration (Projects-based)
+        self.settings_file = None  # Active project path; None means not yet saved to a project file
+        # Track last used project path (for Settings window Projects tab)
+        try:
+            settings_dir = os.path.join(os.getcwd(), "settings")
+            self.current_project_path = os.path.join(settings_dir, "new_settings.json")
+        except Exception:
+            self.current_project_path = None
+
+        # Try to load the last-used project path from state and use it if valid
+        try:
+            last_path = self.load_last_project_path()
+            if last_path and os.path.exists(last_path):
+                self.current_project_path = last_path
+                self.settings_file = last_path
+                print(f"Using last project from state: {last_path}")
+        except Exception as _e:
+            # Non-fatal: fall back to defaults if state cannot be read
+            pass
 
         # Event Code Configuration
         self.event_codes_file = EVENT_CODES_FILE
@@ -788,16 +806,15 @@ class DataLoggerGUI:
 
 
     def init_settings(self):
-        ''' Check if the custom settings file exists and loads it. If not, it load the default settings file.'''
-        # Determine which settings file to load
-        if not os.path.exists(self.settings_file):
+        ''' Initialize settings from the active project file if present, otherwise load the blank project template. '''
+        if self.settings_file and os.path.exists(self.settings_file):
+            self.load_settings()
+        else:
             try:
-                print(f"Custom settings not found. Loading from default file: {self.default_settings_file}")
+                print("No active project found. Loading from blank project template...")
                 self.revert_to_defaults()
             except Exception as e:
-                messagebox.showwarning("Error in the settings memory", "Paths for custom or default settings files not found", parent=self.master)
-        else:
-            self.load_settings()
+                messagebox.showwarning("Initialization Error", "Blank project template not found. Please create settings/config/blank_project.json.", parent=self.master)
 
     # --- GUI Creation ---
     def create_main_buttons(self):
@@ -2146,6 +2163,14 @@ class DataLoggerGUI:
     def save_settings(self):
         '''Saves the current settings to the JSON file.'''
         print("\n--- Saving Settings ---")
+        if not self.settings_file or not isinstance(self.settings_file, str):
+            messagebox.showwarning(
+                "No Project Selected",
+                "There is no active project file to save to. Go to Settings → Projects and use 'Save As...' to create one.",
+                parent=self.master
+            )
+            self.update_status("No active project file. Use Projects → Save As...")
+            return
         colors_to_save = {}
         for key, (bg_color, font_color) in self.button_colors.items():
             if bg_color or font_color:
@@ -2180,6 +2205,7 @@ class DataLoggerGUI:
             "main_button_configs": self.main_button_configs,
             "txt_source_aliases": self.txt_source_aliases,
             "calculate_logoff_values": self.calculate_logoff_values.get(),
+            "event_codes": self.event_codes,
             "auto_sync_enabled": self.auto_sync_enabled_var.get(),
             "auto_sync_interval_min": self.auto_sync_interval_min_var.get()
         }
@@ -2195,37 +2221,26 @@ class DataLoggerGUI:
 
     def revert_to_defaults(self):
         """
-        Deletes the user settings file, then forces a reload from the default
-        settings file, updates the UI, and restarts services.
+        Loads the blank project template into memory and updates the UI.
+        Does not overwrite or create any project file. The active project path
+        remains unset until the user chooses Save As in the Projects tab.
         """
-        print("\n--- Reverting to Default Settings ---")
+        print("\n--- Restoring Blank Project Template ---")
+        template_path = os.path.join(os.getcwd(), PROJECT_TEMPLATE_FILE)
+        if not os.path.exists(template_path):
+            raise FileNotFoundError(
+                f"The blank project template '{PROJECT_TEMPLATE_FILE}' was not found."
+            )
 
-        # Check if the default settings file exists before proceeding
-        if not os.path.exists(self.default_settings_file):
-            raise FileNotFoundError(f"The default settings file '{self.default_settings_file}' was not found. Cannot restore.")
-
-        # Delete the current user settings file if it exists
-        if os.path.exists(self.settings_file):
-            try:
-                os.remove(self.settings_file)
-            except OSError as e:
-                print(f"Error deleting user settings file: {e}")
-                raise e # Re-raise the exception to be caught by the caller
-            
-        # Define default settings file
-        self.settings_file = self.default_settings_file
-
-        # Reload settings (this will now use the defaults) and re-save
-        self.load_settings() # This will now load from default_settings.json
-
-        # Refresh the main GUI and restart monitoring
+        # Temporarily point to template to reuse load_settings logic
+        prev_settings_path = self.settings_file
+        self.settings_file = template_path
+        self.load_settings()
+        # After loading, clear active project so subsequent saves require explicit path
+        self.settings_file = None
+        # Refresh the main GUI
         self.update_custom_buttons()
-
-        # Save a new custom_settings.json from the loaded defaults
-        self.settings_file = CUSTOM_SETTINGS_FILE
-        self.save_settings()
-
-        print("--- Default Settings Restored Successfully ---")
+        print("--- Blank Project Template Restored Successfully ---")
 
     def load_settings(self):
         '''Loads settings from the JSON file and updates the GUI variables accordingly.'''
@@ -2293,7 +2308,12 @@ class DataLoggerGUI:
                 self.txt_field_skips = {cfg["field"]: cfg.get("skip", False) for cfg in combined_configs}
 
                 # --- Load Remaining Settings (Folder, Button, etc.) ---
-                self.load_event_codes()
+                # Load event codes from the same project JSON; fallback to separate file if not present (backward compatible)
+                loaded_event_codes = settings.get("event_codes", None)
+                if isinstance(loaded_event_codes, dict):
+                    self.event_codes = loaded_event_codes
+                else:
+                    self.load_event_codes()
                 loaded_main_configs = settings.get("main_button_configs", {})
                 for btn_name, default_conf in self.main_button_configs.items():
                     default_conf.update(loaded_main_configs.get(btn_name, {}))
@@ -2349,7 +2369,8 @@ class DataLoggerGUI:
                 self.update_status("Settings file not found. Using defaults.")
                 print("Settings file not found, using defaults.")
                 # When no file is found, derive the lookup dictionaries from defaults
-                combined_configs = self.txt_mapping_config + self.generated_fields_config + self.static_field_configs
+                main_txt_config = self.all_txt_mappings.get("Main TXT", [])
+                combined_configs = main_txt_config + self.generated_fields_config + self.static_field_configs
                 self.txt_field_columns = {cfg["field"]: cfg["column_name"] for cfg in combined_configs}
                 self.txt_field_skips = {cfg["field"]: cfg.get("skip", False) for cfg in combined_configs}
 
@@ -2432,6 +2453,42 @@ class DataLoggerGUI:
         """Toggles the 'always on top' state of the main window based on the checkbox."""
         is_on_top = self.always_on_top_var.get()
         self.master.wm_attributes("-topmost", is_on_top)
+
+    # --- Profile state persistence ---
+    def load_last_project_path(self):
+        """Reads the last-used project path from a small state file. Returns a path or None."""
+        state_path = os.path.join(os.getcwd(), PROJECT_STATE_FILE)
+        if not os.path.exists(state_path):
+            return None
+        try:
+            with open(state_path, 'r', encoding='utf-8') as f:
+                obj = json.load(f)
+            path = obj.get('current_project_path')
+            return path if path else None
+        except Exception:
+            return None
+
+    def persist_current_project_path(self, path=None):
+        """Persists the provided (or current) project path to the state file."""
+        state_path = os.path.join(os.getcwd(), PROJECT_STATE_FILE)
+        try:
+            to_write = {
+                'current_project_path': (path or getattr(self, 'current_project_path', None))
+            }
+            os.makedirs(os.path.dirname(state_path), exist_ok=True)
+            with open(state_path, 'w', encoding='utf-8') as f:
+                json.dump(to_write, f, indent=4)
+        except Exception:
+            # Non-fatal if we cannot persist; ignore
+            pass
+
+    def set_active_project(self, path):
+        """Sets the active project for this session and persists it for next startup."""
+        if not path:
+            return
+        self.settings_file = path
+        self.current_project_path = path
+        self.persist_current_project_path(path)
 
     # --- Monitoring ---
 
@@ -3879,6 +3936,7 @@ class SettingsWindow:
         self.create_auto_events_tab()
         self.create_timezone_tab()
         self.create_database_sync_tab()
+        self.create_projects_tab()
         self._load_programmed_events_ui_state()
 
         # --- Bottom Buttons (remain in the main_frame) ---
@@ -4249,16 +4307,13 @@ class SettingsWindow:
             self.event_codes_tree.insert('', 'end', values=(code, description))
 
     def save_event_codes_to_file(self):
-        """Saves the current event codes from the parent GUI to the JSON file."""
+        """Persists the current event codes into the active project JSON via the main save."""
         try:
-            with open(self.parent_gui.event_codes_file, 'w') as f:
-                json.dump(self.parent_gui.event_codes, f, indent=4)
-
-            self.parent_gui.update_status("Event codes configuration saved.")
-            # Also reload them in the parent GUI to ensure consistency
-            self.parent_gui.load_event_codes()
+            # Save entire settings (including event codes) to the active project JSON
+            self.parent_gui.save_settings()
+            self.parent_gui.update_status("Event codes saved to project.")
         except Exception as e:
-            messagebox.showerror("Save Error", f"Could not save event codes file:\n{e}", parent=self.master)
+            messagebox.showerror("Save Error", f"Could not save event codes to project file:\n{e}", parent=self.master)
 
     def _show_event_code_dialog(self, title, initial_code="", initial_desc=""):
         """Helper dialog for adding/editing event codes."""
@@ -4432,22 +4487,7 @@ class SettingsWindow:
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 3)", "TXT Source 3", self.txt_name_set3_var, self.txt_path_set3_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 4)", "TXT Source 4", self.txt_name_set4_var, self.txt_path_set4_var)
         create_txt_source_frame(txt_sources_container, "Additional Vehicle Navigation Data (TXT Source 5)", "TXT Source 5", self.txt_name_set5_var, self.txt_path_set5_var)
-    
-        # Frame for restoring default settings ---
-        restore_frame = ttk.LabelFrame(tab, text="Restore Default Settings", padding=15)
-        restore_frame.pack(fill="x", pady=(20, 0), side="bottom") # Place it at the bottom
-        restore_frame.columnconfigure(0, weight=1)
-
-        restore_desc = ttk.Label(restore_frame, text="This will delete your current custom settings and restore the application's original defaults. This action cannot be undone.", wraplength=800)
-        restore_desc.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 10))
-
-        style = ttk.Style()
-        style.configure("Danger.TButton", foreground="white", background="red")
-        style.map("Danger.TButton", background=[("active", "#cc0000")], foreground=[("active", "white")])
-
-        restore_button = ttk.Button(restore_frame, text="Restore Default Settings", command=self.restore_default_settings, style="Danger.TButton")
-        restore_button.grid(row=1, column=0, sticky='w')
-        ToolTip(restore_button, "WARNING: Deletes 'custom_settings.json' and loads defaults from 'default_settings.json'.")
+        
 
     def open_mapping_dialog(self, source_key):
         """Opens a dialog to configure the mapping for a single source key."""
@@ -4492,34 +4532,7 @@ class SettingsWindow:
             self.db_file_entry.delete(0, tk.END)
             self.db_file_entry.insert(0, file_path)
 
-    def restore_default_settings(self):
-        """
-        Handles the user confirmation and initiates the process of restoring default settings.
-        """
-        # Ask for user confirmation as this is a destructive action
-        is_confirmed = messagebox.askyesno(
-            "Confirm Restore Defaults",
-            "Are you sure you want to restore all settings to their defaults?\n\n"
-            "Your current 'custom_settings.json' file will be permanently deleted.",
-            parent=self.master
-        )
-
-        if is_confirmed:
-            try:
-                # Call the main GUI's method to perform the core logic
-                self.parent_gui.revert_to_defaults()
-
-                # Refresh the settings window UI with the newly loaded default values
-                self.load_settings()
-
-                messagebox.showinfo(
-                    "Success",
-                    "Default settings have been restored.\n\n"
-                    "Your custom settings file has been deleted. New settings will be saved to 'custom_settings.json'.",
-                    parent=self.master
-                )
-            except Exception as e:
-                messagebox.showerror("Error", f"An error occurred while restoring defaults:\n{e}", parent=self.master)
+    
             
     def create_generated_fields_tab(self):
         tab = ttk.Frame(self.notebook, padding=20)
@@ -4652,9 +4665,10 @@ class SettingsWindow:
         self._update_txt_move_buttons_state()
 
     def _update_txt_move_buttons_state(self):
-        # CORRECTED: Use the new txt_mapping_config attribute
+        # CORRECTED: Use the new all_txt_mappings structure
+        main_txt_config = self.parent_gui.all_txt_mappings.get("Main TXT", [])
         can_move_up = hasattr(self, 'selected_txt_row_index') and self.selected_txt_row_index > 0
-        can_move_down = hasattr(self, 'selected_txt_row_index') and self.selected_txt_row_index != -1 and self.selected_txt_row_index < len(self.parent_gui.txt_mapping_config) - 1
+        can_move_down = hasattr(self, 'selected_txt_row_index') and self.selected_txt_row_index != -1 and self.selected_txt_row_index < len(main_txt_config) - 1
 
         if self.txt_move_up_btn:
             self.txt_move_up_btn.config(state=tk.NORMAL if can_move_up else tk.DISABLED)
@@ -4665,35 +4679,41 @@ class SettingsWindow:
         current_index = self.selected_txt_row_index
         if current_index == -1: return
 
-        # CORRECTED: Use the new txt_mapping_config attribute
-        config_list = self.parent_gui.txt_mapping_config
+        # CORRECTED: Use the new all_txt_mappings structure
+        config_list = self.parent_gui.all_txt_mappings.get("Main TXT", [])
         total_items = len(config_list)
 
         if direction == "up" and current_index > 0:
             config_list[current_index], config_list[current_index - 1] = config_list[current_index - 1], config_list[current_index]
+            self.parent_gui.all_txt_mappings["Main TXT"] = config_list
             self.recreate_txt_field_rows(reselect_index=current_index - 1)
         elif direction == "down" and current_index < total_items - 1:
             config_list[current_index], config_list[current_index + 1] = config_list[current_index + 1], config_list[current_index]
+            self.parent_gui.all_txt_mappings["Main TXT"] = config_list
             self.recreate_txt_field_rows(reselect_index=current_index + 1)
 
     def add_txt_field_row(self):
-        # CORRECTED: Add to the new txt_mapping_config attribute
-        new_field_index = len(self.parent_gui.txt_mapping_config) + 1
-        self.parent_gui.txt_mapping_config.append({
+        # CORRECTED: Add to the new all_txt_mappings structure
+        main_txt_config = self.parent_gui.all_txt_mappings.get("Main TXT", [])
+        new_field_index = len(main_txt_config) + 1
+        main_txt_config.append({
             "field": f"Custom_Field_{new_field_index}",
             "column_name": f"Custom_Col_{new_field_index}",
             "skip": False
         })
-        self.recreate_txt_field_rows(reselect_index=len(self.parent_gui.txt_mapping_config) - 1)
+        self.parent_gui.all_txt_mappings["Main TXT"] = main_txt_config
+        self.recreate_txt_field_rows(reselect_index=len(main_txt_config) - 1)
 
     def remove_txt_field_row(self, index_to_remove):
-        # CORRECTED: Remove from the new txt_mapping_config attribute
-        if not (0 <= index_to_remove < len(self.parent_gui.txt_mapping_config)):
+        # CORRECTED: Remove from the new all_txt_mappings structure
+        main_txt_config = self.parent_gui.all_txt_mappings.get("Main TXT", [])
+        if not (0 <= index_to_remove < len(main_txt_config)):
             return
         
-        config_to_remove = self.parent_gui.txt_mapping_config[index_to_remove]
+        config_to_remove = main_txt_config[index_to_remove]
         if messagebox.askyesno("Confirm Deletion", f"Are you sure you want to remove field '{config_to_remove['field']}'?", parent=self.master):
-            del self.parent_gui.txt_mapping_config[index_to_remove]
+            del main_txt_config[index_to_remove]
+            self.parent_gui.all_txt_mappings["Main TXT"] = main_txt_config
             
             new_selection = -1
             if self.selected_txt_row_index == index_to_remove:
@@ -5317,6 +5337,478 @@ class SettingsWindow:
             # font_label = font_frame.winfo_children()[0]
             # self.parent_gui._set_color_on_widget(self.new_day_font_color_var, font_label, self.new_day_font_color_var.get(), self.master)
 
+    def create_projects_tab(self):
+        """Creates the Settings Projects tab for managing project JSON files."""
+        projects_tab = ttk.Frame(self.notebook)
+        self.notebook.add(projects_tab, text="Projects")
+        
+        # Initialize variables for this tab
+        self.current_project_path = tk.StringVar()
+        self.projects_tree = None
+        
+        # Set default project path: use parent's last used project if available, otherwise blank
+        default_project = getattr(self.parent_gui, "current_project_path", None) or ""
+        self.current_project_path.set(default_project)
+        # Ensure parent keeps track of last used project path as well
+        self.parent_gui.current_project_path = self.current_project_path.get()
+        
+        # Main container with padding
+        main_container = ttk.Frame(projects_tab)
+        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # --- Project Path Section ---
+        path_frame = ttk.LabelFrame(main_container, text="Current Project", padding="10")
+        path_frame.pack(fill="x", pady=(0, 10))
+        path_frame.columnconfigure(1, weight=1)
+
+        # Current project path display
+        ttk.Label(path_frame, text="Project Path:").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.project_path_entry = ttk.Entry(path_frame, textvariable=self.current_project_path,
+                                          state="readonly", width=60)
+        self.project_path_entry.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+
+        # Browse button
+        browse_btn = ttk.Button(path_frame, text="Browse...", command=self.browse_project)
+        browse_btn.grid(row=0, column=2, sticky="e")
+
+        # --- Control Buttons Section ---
+        control_frame = ttk.Frame(main_container)
+        control_frame.pack(fill="x", pady=(0, 10))
+
+        # Load Project button
+        load_btn = ttk.Button(control_frame, text="Load Project", command=self.load_project)
+        load_btn.pack(side="left", padx=(0, 5))
+
+        # Save Project button  
+        save_btn = ttk.Button(control_frame, text="Save Project", command=self.save_project)
+        save_btn.pack(side="left", padx=(0, 5))
+
+        # Save As button
+        save_as_btn = ttk.Button(control_frame, text="Save As...", command=self.save_project_as)
+        save_as_btn.pack(side="left", padx=(0, 5))
+
+        # Restore Blank Project button (uses blank template)
+        style = ttk.Style()
+        style.configure("Danger.TButton", foreground="white", background="#C00000")
+        style.map("Danger.TButton", background=[("active", "#A00000")], foreground=[("active", "white")])
+
+        restore_btn = ttk.Button(control_frame, text="Restore Blank Project", command=self.load_blank_project, style="Danger.TButton")
+        restore_btn.pack(side="left")
+        ToolTip(restore_btn, "Restore the in-memory settings from the blank project template.")
+
+        # --- JSON Structure Viewer ---
+        viewer_frame = ttk.LabelFrame(main_container, text="Project Structure", padding="5")
+        viewer_frame.pack(fill="both", expand=True)
+        viewer_frame.columnconfigure(0, weight=1)
+        viewer_frame.rowconfigure(0, weight=1)
+        
+        # Create treeview with scrollbars
+        tree_container = ttk.Frame(viewer_frame)
+        tree_container.grid(row=0, column=0, sticky="nsew")
+        tree_container.columnconfigure(0, weight=1)
+        tree_container.rowconfigure(0, weight=1)
+        
+        # Treeview for JSON structure
+        self.projects_tree = ttk.Treeview(tree_container, columns=("value",), show="tree headings")
+        self.projects_tree.heading("#0", text="Setting")
+        self.projects_tree.heading("value", text="Value")
+        self.projects_tree.column("#0", width=300, minwidth=200)
+        self.projects_tree.column("value", width=400, minwidth=200)
+        
+        # Scrollbars for treeview
+        v_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.projects_tree.yview)
+        h_scrollbar = ttk.Scrollbar(tree_container, orient="horizontal", command=self.projects_tree.xview)
+        self.projects_tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        # Grid layout for treeview and scrollbars
+        self.projects_tree.grid(row=0, column=0, sticky="nsew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        # Bind treeview selection event
+        self.projects_tree.bind("<<TreeviewSelect>>", self.on_tree_select)
+        
+        # Load the current project structure
+        self.refresh_project_structure()
+
+    def load_blank_project(self):
+        """Loads the blank project template into the application without selecting a file."""
+        template_path = os.path.join(os.getcwd(), PROJECT_TEMPLATE_FILE)
+        if not os.path.exists(template_path):
+            messagebox.showerror(
+                "Template Missing",
+                f"Blank project template not found at:\n{template_path}\n\nPlease create it or reinstall.",
+                parent=self.master,
+            )
+            return
+
+        try:
+            with open(template_path, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+            # Apply to parent GUI
+            self._apply_project_to_gui(project_data)
+            # Clear active project path; this is a template-in-memory state
+            self.current_project_path.set("")
+            self.parent_gui.settings_file = None
+            # Reload UI tabs and structure tree
+            self._reload_all_tabs()
+            self.refresh_project_structure()
+            messagebox.showinfo("Blank Project Restored", "Blank project template restored in memory. Use 'Save As...' to create a new project file.", parent=self.master)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load blank project template:\n{e}", parent=self.master)
+    
+    def browse_project(self):
+        """Opens a file dialog to browse for project JSON files."""
+        # Start in settings directory
+        initial_dir = os.path.join(os.getcwd(), "settings")
+        if not os.path.exists(initial_dir):
+            initial_dir = os.getcwd()
+            
+        file_path = filedialog.askopenfilename(
+            parent=self.master,
+            title="Select Project",
+            initialdir=initial_dir,
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if file_path:
+            self.current_project_path.set(file_path)
+            # Persist selection in parent so it shows next time
+            self.parent_gui.current_project_path = file_path
+            self.refresh_project_structure()
+    
+    def load_project(self):
+        """Loads the selected project into the current settings."""
+        project_path = self.current_project_path.get()
+        
+        if not project_path or not os.path.exists(project_path):
+            messagebox.showerror("Error", "Project file not found!", parent=self.master)
+            return
+            
+        try:
+            # Read the project JSON
+            with open(project_path, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+            
+            # Apply the loaded settings to the parent GUI
+            self._apply_project_to_gui(project_data)
+            
+            # Reload all tabs to reflect the new settings
+            self._reload_all_tabs()
+            
+            # Refresh the structure viewer
+            self.refresh_project_structure()
+            # Remember last used project (in-memory and persisted) and make it active for saving
+            self.parent_gui.set_active_project(project_path)
+            
+            messagebox.showinfo("Success", f"Project loaded successfully from:\n{project_path}", parent=self.master)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load project:\n{str(e)}", parent=self.master)
+    
+    def save_project(self):
+        """Saves current settings to the current project path."""
+        project_path = self.current_project_path.get()
+        
+        if not project_path:
+            self.save_project_as()
+            return
+            
+        try:
+            # Collect current settings from the GUI
+            current_settings = self._collect_current_settings()
+            
+            # Save to file
+            with open(project_path, 'w', encoding='utf-8') as f:
+                json.dump(current_settings, f, indent=4, ensure_ascii=False)
+            
+            # Refresh the structure viewer
+            self.refresh_project_structure()
+            # Make this project the active one going forward
+            self.parent_gui.set_active_project(project_path)
+            
+            messagebox.showinfo("Success", f"Project saved to:\n{project_path}", parent=self.master)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save project:\n{str(e)}", parent=self.master)
+            print(f"Failed to save project:\n{str(e)}")
+    
+    def save_project_as(self):
+        """Saves current settings to a new project file."""
+        # Show rename dialog with proper parent window to ensure it appears on top
+        result = simpledialog.askstring(
+            "Save Project As", 
+            "Enter a name for the project:",
+            parent=self.master,
+            initialvalue="new_settings"
+        )
+        
+        if not result:
+            return
+            
+        # Ensure .json extension
+        if not result.endswith('.json'):
+            result += '.json'
+            
+        # Construct full path in settings directory
+        settings_dir = os.path.join(os.getcwd(), "settings")
+        if not os.path.exists(settings_dir):
+            os.makedirs(settings_dir)
+            
+        new_path = os.path.join(settings_dir, result)
+        
+        # Check if file already exists
+        if os.path.exists(new_path):
+            if not messagebox.askyesno("File Exists", 
+                                     f"File '{result}' already exists. Overwrite?",
+                                     parent=self.master):
+                return
+        
+        # Update current path and save
+        self.current_project_path.set(new_path)
+        # Persist selection in parent and make it the active project
+        self.parent_gui.set_active_project(new_path)
+        self.save_project()
+    
+    def refresh_project_structure(self):
+        """Refreshes the JSON structure tree view."""
+        if not self.projects_tree:
+            return
+            
+        # Clear existing items
+        for item in self.projects_tree.get_children():
+            self.projects_tree.delete(item)
+            
+        project_path = self.current_project_path.get()
+        
+        if not project_path or not os.path.exists(project_path):
+            # Show empty message
+            self.projects_tree.insert("", "end", text="No project loaded", values=("",))
+            return
+            
+        try:
+            # Load and display JSON structure
+            with open(project_path, 'r', encoding='utf-8') as f:
+                project_data = json.load(f)
+            
+            self._populate_tree("", project_data)
+            
+        except Exception as e:
+            self.projects_tree.insert("", "end", text=f"Error loading project: {str(e)}", values=("",))
+    
+    def _populate_tree(self, parent, data, key_prefix=""):
+        """Recursively populates the tree with JSON data."""
+        if isinstance(data, dict):
+            for key, value in data.items():
+                full_key = f"{key_prefix}.{key}" if key_prefix else key
+                
+                if isinstance(value, (dict, list)):
+                    # Create parent node for nested structures
+                    item_id = self.projects_tree.insert(parent, "end", text=key, 
+                                                       values=(f"{type(value).__name__} ({len(value)} items)",))
+                    self._populate_tree(item_id, value, full_key)
+                else:
+                    # Leaf node with value
+                    display_value = str(value)
+                    if len(display_value) > 100:
+                        display_value = display_value[:100] + "..."
+                    self.projects_tree.insert(parent, "end", text=key, values=(display_value,))
+                    
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                full_key = f"{key_prefix}[{i}]" if key_prefix else f"[{i}]"
+                
+                if isinstance(item, (dict, list)):
+                    item_id = self.projects_tree.insert(parent, "end", text=f"[{i}]", 
+                                                       values=(f"{type(item).__name__} ({len(item)} items)",))
+                    self._populate_tree(item_id, item, full_key)
+                else:
+                    display_value = str(item)
+                    if len(display_value) > 100:
+                        display_value = display_value[:100] + "..."
+                    self.projects_tree.insert(parent, "end", text=f"[{i}]", values=(display_value,))
+    
+    def on_tree_select(self, event):
+        """Handles tree selection events."""
+        selection = self.projects_tree.selection()
+        if selection:
+            item = selection[0]
+            # Could implement additional functionality here, like showing detailed value in a tooltip
+            pass
+    
+    def _apply_project_to_gui(self, project_data):
+        """Applies loaded project data to the parent GUI variables."""
+        # This mirrors the load_settings logic but from the project data instead of file
+        parent = self.parent_gui
+        
+        # File paths
+        if "log_file_path" in project_data:
+            parent.log_file_path = project_data["log_file_path"]
+        if "sqlite_db_path" in project_data:
+            parent.sqlite_db_path = project_data["sqlite_db_path"]
+        if "txt_folder_path" in project_data:
+            parent.txt_folder_path = project_data["txt_folder_path"]
+        if "txt_folder_path_set2" in project_data:
+            parent.txt_folder_path_set2 = project_data["txt_folder_path_set2"]
+        if "txt_folder_path_set3" in project_data:
+            parent.txt_folder_path_set3 = project_data["txt_folder_path_set3"]
+        if "txt_folder_path_set4" in project_data:
+            parent.txt_folder_path_set4 = project_data["txt_folder_path_set4"]
+        if "txt_folder_path_set5" in project_data:
+            parent.txt_folder_path_set5 = project_data["txt_folder_path_set5"]
+        
+        # TXT mappings
+        if "all_txt_mappings" in project_data:
+            parent.all_txt_mappings = project_data["all_txt_mappings"]
+        elif "txt_mapping_config" in project_data:
+            # Handle legacy format
+            parent.all_txt_mappings["Main TXT"] = project_data["txt_mapping_config"]
+        
+        # Generated fields
+        if "generated_fields_config" in project_data:
+            parent.generated_fields_config = project_data["generated_fields_config"]
+        
+        # Static fields
+        if "static_field_configs" in project_data:
+            parent.static_field_configs = project_data["static_field_configs"]
+        
+        # Monitored folders
+        if "folder_paths" in project_data:
+            parent.folder_paths = project_data["folder_paths"]
+        if "folder_columns" in project_data:
+            parent.folder_columns = project_data["folder_columns"]
+        if "file_extensions" in project_data:
+            parent.file_extensions = project_data["file_extensions"]
+        if "folder_skips" in project_data:
+            parent.folder_skips = project_data["folder_skips"]
+        if "folder_log_x_instead" in project_data:
+            parent.folder_log_x_instead = project_data["folder_log_x_instead"]
+        if "folder_log_ext_vars" in project_data:
+            loaded_log_exts = project_data["folder_log_ext_vars"]
+            parent.folder_log_ext_vars = {k: tk.BooleanVar(value=v) for k, v in loaded_log_exts.items()}
+        
+        # Custom buttons
+        if "num_custom_buttons" in project_data:
+            parent.num_custom_buttons = project_data["num_custom_buttons"]
+        if "custom_button_configs" in project_data:
+            parent.custom_button_configs = project_data["custom_button_configs"]
+        if "custom_button_tab_groups" in project_data:
+            parent.custom_button_tab_groups = project_data["custom_button_tab_groups"]
+        
+        # Colors and UI settings
+        if "button_colors" in project_data:
+            parent.button_colors = project_data["button_colors"]
+        if "always_on_top" in project_data:
+            parent.always_on_top_var.set(project_data["always_on_top"])
+        
+        # Timing and behavior settings
+        if "time_offset_hours" in project_data:
+            parent.time_offset_hours.set(project_data["time_offset_hours"])
+        if "active_logging_threshold_seconds" in project_data:
+            parent.active_logging_threshold_seconds.set(project_data["active_logging_threshold_seconds"])
+        
+        # Auto events
+        if "new_day_event_enabled" in project_data:
+            parent.new_day_event_enabled_var.set(project_data["new_day_event_enabled"])
+        if "hourly_event_enabled" in project_data:
+            parent.hourly_event_enabled_var.set(project_data["hourly_event_enabled"])
+        if "hourly_log_txt_source_key" in project_data:
+            parent.hourly_log_txt_source_key.set(project_data["hourly_log_txt_source_key"])
+        
+        # Main button configs
+        if "main_button_configs" in project_data:
+            parent.main_button_configs = project_data["main_button_configs"]
+        
+        # TXT source aliases
+        if "txt_source_aliases" in project_data:
+            parent.txt_source_aliases = project_data["txt_source_aliases"]
+        # Event codes (embedded in project)
+        if "event_codes" in project_data and isinstance(project_data["event_codes"], dict):
+            parent.event_codes = project_data["event_codes"]
+        
+        # Other settings
+        if "calculate_logoff_values" in project_data:
+            parent.calculate_logoff_values.set(project_data["calculate_logoff_values"])
+        if "auto_sync_enabled" in project_data:
+            parent.auto_sync_enabled_var.set(project_data["auto_sync_enabled"])
+        if "auto_sync_interval_min" in project_data:
+            parent.auto_sync_interval_min_var.set(project_data["auto_sync_interval_min"])
+    
+    def _collect_current_settings(self):
+        """Collects current settings from GUI to create a project."""
+        # This mirrors the save_settings logic to gather all current settings
+        parent = self.parent_gui
+        
+        settings = {
+            # File paths
+            "log_file_path": parent.log_file_path or "",
+            "sqlite_db_path": parent.sqlite_db_path or "",
+            "txt_folder_path": parent.txt_folder_path or "",
+            "txt_folder_path_set2": parent.txt_folder_path_set2 or "",
+            "txt_folder_path_set3": parent.txt_folder_path_set3 or "",
+            "txt_folder_path_set4": parent.txt_folder_path_set4 or "",
+            "txt_folder_path_set5": parent.txt_folder_path_set5 or "",
+            
+            # TXT mappings
+            "all_txt_mappings": parent.all_txt_mappings,
+            
+            # Generated fields
+            "generated_fields_config": parent.generated_fields_config,
+            
+            # Static fields
+            "static_field_configs": parent.static_field_configs,
+            
+            # Monitored folders
+            "folder_paths": parent.folder_paths,
+            "folder_columns": parent.folder_columns,
+            "file_extensions": parent.file_extensions,
+            "folder_skips": parent.folder_skips,
+            "folder_log_x_instead": parent.folder_log_x_instead,
+            "folder_log_ext_vars": {k: v.get() for k, v in parent.folder_log_ext_vars.items()},
+            
+            # Custom buttons
+            "num_custom_buttons": parent.num_custom_buttons,
+            "custom_button_configs": parent.custom_button_configs,
+            "custom_button_tab_groups": parent.custom_button_tab_groups,
+            
+            # Colors and UI
+            "button_colors": parent.button_colors,
+            "always_on_top": parent.always_on_top_var.get(),
+            
+            # Timing settings
+            "time_offset_hours": parent.time_offset_hours.get(),
+            "active_logging_threshold_seconds": parent.active_logging_threshold_seconds.get(),
+            
+            # Auto events
+            "new_day_event_enabled": parent.new_day_event_enabled_var.get(),
+            "hourly_event_enabled": parent.hourly_event_enabled_var.get(),
+            "hourly_log_txt_source_key": parent.hourly_log_txt_source_key.get(),
+            
+            # Main button configs
+            "main_button_configs": parent.main_button_configs,
+            
+            # TXT source aliases
+            "txt_source_aliases": parent.txt_source_aliases,
+            # Event codes
+            "event_codes": parent.event_codes,
+            
+            # Other settings
+            "calculate_logoff_values": parent.calculate_logoff_values.get(),
+            "auto_sync_enabled": parent.auto_sync_enabled_var.get(),
+            "auto_sync_interval_min": parent.auto_sync_interval_min_var.get(),
+        }
+        
+        return settings
+    
+    def _reload_all_tabs(self):
+        """Reloads all UI elements to reflect the newly loaded settings."""
+        # Repopulate all tabs from the parent GUI's in-memory values
+        # so the UI truly reflects the newly loaded project.
+        self.load_settings()
+
 
     # --- Settings Save/Load Logic ---
     def save_settings(self):
@@ -5461,6 +5953,7 @@ class SettingsWindow:
             error_message = f"Error saving settings: {e}"
             messagebox.showerror("Save Error", error_message, parent=self.master)
             self.parent_gui.update_status(error_message)
+            print(error_message)
     def save_and_close(self):
         """Saves settings and closes the window."""
         self.save_settings()
@@ -5489,8 +5982,11 @@ class SettingsWindow:
         self.txt_path_set4_var.set(self.parent_gui.txt_folder_path_set4 or "")
         self.txt_path_set5_var.set(self.parent_gui.txt_folder_path_set5 or "")
 
-        # --- Data Columns, Monitoring, and Button Configuration loading remains unchanged ---
-        self.parent_gui.load_settings()
+    # --- Data Columns, Monitoring, and Button Configuration loading ---
+    # IMPORTANT: Do not reload from disk here; just reflect current parent values.
+    # Previously this called parent_gui.load_settings(), which re-read JSON
+    # and could overwrite the just-loaded project values. We now only
+    # refresh the UI from the current in-memory state.
         self.recreate_static_field_rows()
         
         # --- Monitored Folders loading
