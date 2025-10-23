@@ -122,5 +122,5 @@ Issues and improvements are welcome. Please:
 - Use feature branches and open PRs against `main`.
 - Keep changes focused and include a brief description.
 
-![Online Logger Logo](_repositoryfiles/OnlineLoggerLogo.jpg)
+![Online Logger Logo](_repositoryfiles/OnlineLoggerLogo.png)
 
