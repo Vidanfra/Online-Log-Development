@@ -552,6 +552,9 @@ class DataLoggerGUI:
         master.title("Online Logger")
         master.geometry("1400x250")
         master.minsize(800, 200)
+        
+        # Set window icon
+        self.set_window_icon()
 
         self.init_styles()
         self.init_variables()
@@ -1157,6 +1160,32 @@ class DataLoggerGUI:
             except tk.TclError:
                 pass # Window might be destroyed between check and after call
 
+    def set_window_icon(self):
+        """
+        Sets the window icon to OnlineLoggerLogo.ico.
+        Handles both development (running from source) and production (PyInstaller executable).
+        """
+        try:
+            # Determine the base path (handles PyInstaller's temporary folder)
+            if getattr(sys, 'frozen', False):
+                # Running as compiled executable
+                base_path = sys._MEIPASS
+            else:
+                # Running from source - get script directory and go up one level
+                base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            # Construct path to icon file
+            icon_path = os.path.join(base_path, "_repositoryfiles", "OnlineLoggerLogo.ico")
+            
+            # Set the icon if file exists
+            if os.path.exists(icon_path):
+                self.master.iconbitmap(icon_path)
+                print(f"Window icon set: {icon_path}")
+            else:
+                print(f"Warning: Icon file not found at {icon_path}")
+        except Exception as e:
+            print(f"Could not set window icon: {e}")
+    
     def update_window_title(self):
         """
         Updates the main window title to show version and current project name.

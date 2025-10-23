@@ -71,6 +71,11 @@ pyinstaller ^
     --hidden-import=watchdog ^
     --hidden-import=pandas ^
     --hidden-import=openpyxl ^
+    --exclude-module=torch ^
+    --exclude-module=torchvision ^
+    --exclude-module=torchaudio ^
+    --exclude-module=tensorflow ^
+    --exclude-module=tensorboard ^
     "Python Script\Online_Log_SQL_Lite.py"
 
 if errorlevel 1 (
@@ -115,8 +120,32 @@ if exist "Start_Online_Logger.bat" (
 
 echo.
 
+REM Create ZIP archive for distribution
+echo [5/6] Creating ZIP archive for distribution...
+
+REM Delete old zip if it exists
+if exist "Online_Logger_v2.0.zip" (
+    del /q "Online_Logger_v2.0.zip"
+    echo Removed old ZIP file.
+)
+
+REM Create new zip using PowerShell
+powershell -Command "Compress-Archive -Path 'dist\Online_Logger_v2.0' -DestinationPath 'Online_Logger_v2.0.zip' -Force"
+
+if errorlevel 1 (
+    echo WARNING: Failed to create ZIP file!
+    echo The executable is still available in the dist folder.
+) else (
+    REM Get zip file size
+    for %%A in ("Online_Logger_v2.0.zip") do set zipsize=%%~zA
+    set /a zipsizeMB=!zipsize! / 1048576
+    echo Created: Online_Logger_v2.0.zip (~!zipsizeMB! MB)
+)
+
+echo.
+
 REM Show build results
-echo [5/5] Build complete!
+echo [6/6] Build complete!
 echo.
 echo ========================================
 echo   Build Summary
@@ -124,6 +153,9 @@ echo ========================================
 echo.
 echo Executable location:
 echo   dist\Online_Logger_v2.0\Online_Logger_v2.0.exe
+echo.
+echo Distribution ZIP:
+echo   Online_Logger_v2.0.zip
 echo.
 echo Console window: ENABLED (for debugging)
 echo.

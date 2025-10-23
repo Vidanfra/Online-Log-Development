@@ -27,6 +27,9 @@ wheels/
 *.manifest
 *.spec
 
+# Distribution archives
+*.zip
+
 # Virtual environments
 .env
 .venv
