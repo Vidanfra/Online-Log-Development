@@ -28,7 +28,7 @@ start_time = time.perf_counter()
 
 # --- DEFINED CONSTANTS ---
 # APPLICATION VERSION
-APP_VERSION = "2.0"
+APP_VERSION = "2.1"
 
 # PATHS
 # Stores the last-used project path across sessions
@@ -264,8 +264,13 @@ class SQLiteManager:
         Corrects column conflicts by ensuring all columns in the DataFrame are
         accounted for in the final table creation.
         """
+        # Re-establish connection if it was closed (e.g., by upsert_row operations)
         if not self.conn:
-            raise ConnectionError("Database connection is not available.")
+            try:
+                self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+                print(f"Re-established SQLite connection for sync: {self.db_path}")
+            except sqlite3.Error as e:
+                raise ConnectionError(f"Failed to establish database connection: {e}")
             
         print("Starting full sync from Excel to SQLite...")
         
@@ -372,11 +377,6 @@ class SQLiteManager:
         Inserts a new row or updates an existing one based on the primary key (UUID if available, else Excel row number).
         Uses a fresh, temporary connection within the retry loop to prevent connection pooling deadlocks.
         """
-        # Close the existing connection if it's open, to ensure we start fresh (optional, but safer)
-        if self.conn:
-             self.conn.close()
-             self.conn = None
-        
         # Use UUID if available, otherwise fall back to excel_row_number
         uuid_col = self._sanitize_column_name('UUID')
         pk_col_name = uuid_col if uuid_col in data_dict else 'excel_row_number'
@@ -393,7 +393,7 @@ class SQLiteManager:
         for attempt in range(3):
             temp_conn = None
             try:
-                
+                # Use a temporary connection for this operation to avoid locking issues
                 # This ensures the lock is released immediately after the commit.
                 temp_conn = sqlite3.connect(self.db_path, check_same_thread=False) 
                 
@@ -418,12 +418,8 @@ class SQLiteManager:
                 if temp_conn:
                     temp_conn.close() # Ensure the transient connection is closed
         
-        # Re-establish the persistent connection (self.conn) after the attempts
-        try:
-             self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        except sqlite3.Error as e:
-             print(f"Error re-establishing persistent connection: {e}")
-
+        # NOTE: We no longer close self.conn here - it stays persistent for sync operations
+        
         print("Failed to upsert row after multiple attempts. Database remained locked.")
         return False, "DB Locked."
     

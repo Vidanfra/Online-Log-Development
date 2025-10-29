@@ -1,10 +1,10 @@
 {
-    "log_file_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/Excel Template/DailyLog-Horizon_v14.xlsb",
-    "sqlite_db_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/Online-Log-Development/SQL Database/RHM_600053_UXO_IDC.sqlite.db",
-    "time_offset_hours": 1.0,
-    "txt_folder_path": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
-    "txt_folder_path_set2": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
-    "txt_folder_path_set3": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_OBSROV_NEW",
+    "log_file_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01_Online_Log/600061_Cnooc_Log/Online_Log/DailyLog-Horizon_v14.xlsb",
+    "sqlite_db_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01_Online_Log/600061_Cnooc_Log/Online_Log/DailyLog-Horizon_v14.db",
+    "time_offset_hours": 0.0,
+    "txt_folder_path": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
+    "txt_folder_path_set2": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
+    "txt_folder_path_set3": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_OBSROV_NEW",
     "txt_folder_path_set4": "",
     "txt_folder_path_set5": "",
     "all_txt_mappings": {
@@ -161,7 +161,7 @@
         },
         {
             "field": "Local Time",
-            "column_name": "Local Date-Time",
+            "column_name": "Local Time",
             "skip": false,
             "source": "PC Time + Offset"
         },
@@ -190,37 +190,26 @@
             "source": "Generated"
         }
     ],
-    "static_field_configs": [
-        {
-            "field": "Vessel",
-            "description": "VesselName",
-            "column_name": "='Resources'!J2",
-            "skip": false
-        },
-        {
-            "field": "Project",
-            "description": "Project Number",
-            "column_name": "='Resources'!K2",
-            "skip": false
-        }
-    ],
+    "static_field_configs": [],
     "folder_paths": {
-        "Main TXT File": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
-        "TXT Source 2": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
-        "TXT Source 3": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_OBSROV_NEW",
-        "Qinsy DB": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/Database",
-        "Naviscan": "Y:/600061_CNOOC/GEAD",
-        "SVP": "J:/CNO_600061/03_RAW_DATA/02_VIRE_WROV/03_SVP/CTD_Log",
-        "SpintINS": "W:/Users/Public/Documents/Sonardyne/Hub/Logfiles"
+        "Main TXT File": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
+        "TXT Source 2": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
+        "TXT Source 3": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_OBSROV_NEW",
+        "Qinsy DB": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/Database",
+        "Naviscan": "N:/600061_CNOOC/GEAD/PLU3035_6_Inch_Umbilical",
+        "SSS": "J:/RHM_600053_UXO_IDC/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/NPD_Converted",
+        "SVP": "J:/600061_CNOOC_Inspection_2025/03_RAW_DATA/02_VIRE_WROV/03_SVP/HiPAP_USR",
+        "Sprint log": "J:/CNO_600061/03_RAW_DATA/02_VIRE_WROV/05_INS"
     },
     "folder_columns": {
         "Main TXT File": "Main_TXT_File",
         "TXT Source 2": "TXT_Source_2",
         "TXT Source 3": "TXT_Set3_File",
-        "Qinsy DB": "S-Files",
+        "Qinsy DB": "Qinsy DB",
         "Naviscan": "SBD Files",
-        "SVP": "Notes",
-        "SpintINS": "SprintINS"
+        "SSS": "ROV SSS",
+        "SVP": "SVP",
+        "Sprint log": "Sprint"
     },
     "file_extensions": {
         "Main TXT File": "txt",
@@ -228,17 +217,19 @@
         "TXT Source 3": "txt",
         "Qinsy DB": "db",
         "Naviscan": "SBD",
-        "SVP": "csv",
-        "SpintINS": "BIN"
+        "SSS": "",
+        "SVP": "",
+        "Sprint log": "bin"
     },
     "folder_skips": {
         "Main TXT File": false,
         "TXT Source 2": false,
         "TXT Source 3": false,
         "Qinsy DB": false,
-        "Naviscan": true,
+        "Naviscan": false,
+        "SSS": true,
         "SVP": false,
-        "SpintINS": false
+        "Sprint log": false
     },
     "folder_log_x_instead": {
         "Main TXT File": false,
@@ -246,8 +237,9 @@
         "TXT Source 3": false,
         "Qinsy DB": false,
         "Naviscan": false,
+        "SSS": false,
         "SVP": false,
-        "SpintINS": false
+        "Sprint log": false
     },
     "folder_log_ext_vars": {
         "Main TXT File": false,
@@ -255,10 +247,11 @@
         "TXT Source 3": false,
         "Qinsy DB": false,
         "Naviscan": false,
+        "SSS": false,
         "SVP": false,
-        "SpintINS": false
+        "Sprint log": false
     },
-    "num_custom_buttons": 26,
+    "num_custom_buttons": 24,
     "custom_button_configs": [
         {
             "text": "Vessel move",
@@ -338,22 +331,8 @@
             "event_code": "V-OTH"
         },
         {
-            "text": "TSS BBC",
-            "event_text": "TSS Background  Compensation",
-            "txt_source_key": "TXT Source 2",
-            "tab_group": "WROV",
-            "event_code": "R-OTH"
-        },
-        {
-            "text": "TSS BGC 10m",
-            "event_text": "TSS Background Compensation - 10m test",
-            "txt_source_key": "TXT Source 2",
-            "tab_group": "WROV",
-            "event_code": "R-OTH"
-        },
-        {
-            "text": "TSS Warm up",
-            "event_text": "TSS Warm up",
+            "text": "FMD",
+            "event_text": "FMD Confirm Member as Dry",
             "txt_source_key": "TXT Source 2",
             "tab_group": "WROV",
             "event_code": "R-OTH"
@@ -415,11 +394,11 @@
             "event_code": "R-OTH"
         },
         {
-            "text": "PositionFix",
-            "event_text": "Position Fix OBSROV at location:",
+            "text": "OBSROV OTH",
+            "event_text": "OBSROV",
             "txt_source_key": "TXT Source 3",
             "tab_group": "OBSROV",
-            "event_code": "P-FIX"
+            "event_code": "R-OTH"
         },
         {
             "text": "Log On",
@@ -509,25 +488,13 @@
             "#BAFFC9",
             null
         ],
-        "TSS BBC": [
-            "#ff9933",
-            null
-        ],
-        "TSS BGC 10m": [
-            "#ffa54a",
-            null
-        ],
-        "TSS Warm up": [
-            "#8080ff",
-            null
-        ],
         "Log OFF": [
             "#FFB3BA",
             null
         ],
         "CP": [
-            "#BAE1FF",
-            "#000000"
+            "#80ff80",
+            null
         ],
         "OBSROV out TMS": [
             "#804040",
@@ -557,13 +524,13 @@
             "#00ff40",
             null
         ],
-        "PositionFix": [
-            "#FFDFBA",
+        "FMD": [
+            "#8080ff",
             null
         ]
     },
     "always_on_top": true,
-    "active_logging_threshold_seconds": 9999999999999,
+    "active_logging_threshold_seconds": 15,
     "new_day_event_enabled": true,
     "hourly_event_enabled": true,
     "hourly_log_txt_source_key": "TXT Source 2",
@@ -619,11 +586,10 @@
         "IDC-E": "ID&C End",
         "V-OTH": "Vessel Other",
         "LogON": "LogON",
-        "dfgdfgdfg": "sdfg",
-        "rferf": "wefwer",
+        "LogOff": "LogOff",
         "P-FIX": "Position Fix"
     },
     "auto_sync_enabled": true,
-    "auto_sync_interval_min": 1,
-    "app_version": "2.0"
+    "auto_sync_interval_min": 5,
+    "app_version": "2.1"
 }
