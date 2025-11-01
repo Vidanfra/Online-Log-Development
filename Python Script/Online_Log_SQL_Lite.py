@@ -155,274 +155,668 @@ class ToolTip:
 # --- SQLite Database Mirror ---
 class SQLiteManager:
     """
-    Manages all interactions with the SQLite database mirror.
-    Handles table creation, full synchronization from Excel, and live updates.
+    Manages SQLite database mirroring of an Excel 'LogBook' sheet.
+    
+    Features:
+    - Full synchronization: Makes SQL DB identical to Excel sheet
+    - UUID management: Validates, fixes duplicates, and generates missing UUIDs
+    - Incremental updates: Adds single rows without full sync for fast logging
+    - Header normalization: Replaces spaces with underscores for SQL compatibility
     """
+    
     def __init__(self, db_path):
-        """Initializes the manager and connects to the database."""
+        """
+        Initialize the SQLite manager with a database file path.
+        
+        Args:
+            db_path: Path to the SQLite database file
+        """
         self.db_path = db_path
         self.conn = None
+        self.table_name = None  # Will be set from Excel filename
+        
         try:
-            self.conn = sqlite3.connect(db_path, check_same_thread=False)
-            print(f"Successfully connected to SQLite database at {db_path}")
+            self.conn = sqlite3.connect(
+                db_path,
+                check_same_thread=False,
+                timeout=30.0
+            )
+            # Enable WAL mode for better concurrent access
+            self.conn.execute("PRAGMA journal_mode=WAL")
+            self.conn.execute("PRAGMA busy_timeout=30000")
+            print(f"SQLite: Connected to database at {db_path}")
         except sqlite3.Error as e:
-            print(f"Error connecting to SQLite database: {e}")
+            print(f"SQLite: Connection error - {e}")
             raise e
-            
+    
     def close(self):
-        """Closes the connection to the SQLite database."""
+        """Close the database connection."""
         if self.conn:
             try:
                 self.conn.close()
-                print("SQLite connection successfully closed.")
-            except sqlite3.Error as e:
-                print(f"Error closing SQLite connection: {e}")
-
+                print("SQLite: Database connection closed.")
+            except:
+                pass
+            self.conn = None
+    
     def _sanitize_column_name(self, name):
-        """Converts an Excel header into a valid SQL column name."""
+        """
+        Convert Excel header to SQL-compatible column name.
+        Replaces spaces and hyphens with underscores, removes invalid chars.
+        
+        Args:
+            name: Original column name from Excel
+            
+        Returns:
+            Sanitized column name safe for SQL
+        """
         if not isinstance(name, str):
             name = str(name)
-        # Replace spaces and hyphens with underscores, remove other invalid chars
-        return re.sub(r'[^A-Za-z0-9_]', '', name.replace(' ', '_').replace('-', '_'))
-
-    def _apply_date_conversion(self, df, possible_excel_header_names):
-        """
-        Helper method to locate an Excel date column in the DataFrame and convert
-        the Excel date floats to standardized strings, including pre-cleaning
-        to handle unexpected spacing/string data types.
-        """
-        date_time_df_col = None
-        
-        # 1. Find the actual column in the DataFrame that matches one of the expected headers.
-        for expected_header in possible_excel_header_names:
-            for col in df.columns:
-                if str(col).strip().lower() == expected_header.lower():
-                    date_time_df_col = col
-                    break
-            if date_time_df_col:
-                break
-        
-        if date_time_df_col is not None:
-            print(f"Applying date conversion fix to DataFrame column '{date_time_df_col}' (matched '{expected_header}')...")
-            try:
-                # Clean the column. Replace ALL whitespace (including non-breaking spaces) 
-                # with an empty string, then force convert to float.
-                df[date_time_df_col] = df[date_time_df_col].astype(str).str.replace(r'\s+', '', regex=True)
-                df[date_time_df_col] = pd.to_numeric(df[date_time_df_col], errors='coerce')
-                
-                # Convert Excel's float date (days since 1899-12-30) to datetime objects
-                df[date_time_df_col] = pd.to_datetime(
-                    df[date_time_df_col],
-                    errors='coerce',        
-                    origin='1899-12-30',    
-                    unit='D'                
-                )
-                # Format the datetime objects back to a standardized SQLite TEXT string
-                df[date_time_df_col] = df[date_time_df_col].dt.strftime('%Y-%m-%d %H:%M:%S')
-                # Fill NaT values with empty strings
-                df[date_time_df_col] = df[date_time_df_col].fillna('')
-                
-            except Exception as e:
-                # Re-raise error to show column details in traceback
-                raise Exception(f"Failed to convert or clean column '{date_time_df_col}' for date conversion. Original error: {e}")
-        
-        return df
+        # Replace spaces and hyphens with underscores
+        name = name.replace(' ', '_').replace('-', '_')
+        # Remove any characters that aren't alphanumeric or underscore
+        name = re.sub(r'[^A-Za-z0-9_]', '', name)
+        return name
     
-    def _apply_uuid_generation(self, df):
-        """Generates a UUID for any row where the UUID column is empty (e.g., historical entries)."""
+    def _read_excel_data(self, excel_path, header_finder_func):
+        """
+        Read Excel data into a pandas DataFrame with proper header detection.
         
-        # 1. Determine the expected Excel header for the UUID column
-        uuid_header = "UUID" 
-        uuid_df_col = None
+        Args:
+            excel_path: Path to the Excel file
+            header_finder_func: Function to find the header row index
+            
+        Returns:
+            tuple: (DataFrame, header_row_index) or (None, -1) on error
+        """
+        try:
+            # Find header row
+            header_row_index = header_finder_func(excel_path)
+            if header_row_index == -1:
+                print("SQLite: Could not find header row in Excel file.")
+                return None, -1
+            
+            # Read Excel data
+            print(f"SQLite: Reading Excel data from row {header_row_index + 1}...")
+            df = pd.read_excel(
+                excel_path,
+                sheet_name=0,
+                header=header_row_index,
+                skiprows=header_row_index
+            )
+            
+            # Clean up
+            df.dropna(how='all', inplace=True)
+            df.reset_index(drop=True, inplace=True)
+                        
+            # Convert Excel date/time columns to readable strings
+            self._convert_excel_dates_to_strings(df)
+            
+            print(f"SQLite: Read {len(df)} rows from Excel.")
+            return df, header_row_index
+            
+        except Exception as e:
+            print(f"SQLite: Error reading Excel - {e}")
+            traceback.print_exc()
+            return None, -1
+            
+    def _convert_excel_dates_to_strings(self, df):
+        """
+        Detect and convert Excel date/time columns to readable string format.
+        Excel stores dates as floats (e.g., 45961.5033680556 = 2025-10-31 12:04:51).
+        
+        Args:
+            df: DataFrame with potential date columns
+        """
+        # Common date/time column name patterns (case-insensitive)
+        date_keywords = ['date', 'time', 'datetime', 'timestamp', 'utc', 'local']
         
         for col in df.columns:
-            if str(col).strip().lower() == uuid_header.lower():
-                uuid_df_col = col
+            col_lower = str(col).lower()
+            
+            # Check if column name suggests it's a date/time column
+            is_date_col = any(keyword in col_lower for keyword in date_keywords)
+            
+            if is_date_col:
+                # Check if the column contains numeric values (Excel date format)
+                # Excel dates are stored as floats
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    try:
+                        # Check if values look like Excel dates (typically between 1 and 50000+)
+                        # Also check that not all values are NaN
+                        sample = df[col].dropna()
+                        if len(sample) > 0:
+                            # Convert Excel date numbers to datetime objects, then to strings
+                            # Excel dates are days since 1899-12-30
+                            print(f"SQLite: Converting date column '{col}' from Excel format to strings...")
+                            
+                            # Use pandas to convert Excel serial dates to datetime
+                            # Note: Excel uses 1899-12-30 as day 0 (not 1900-01-01)
+                            df[col] = pd.to_datetime(df[col], unit='D', origin='1899-12-30', errors='coerce')
+                            
+                            # Convert datetime objects to string format
+                            df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
+                            
+                            # Replace NaT (Not a Time) with empty string
+                            df[col] = df[col].fillna('')
+                            
+                            print(f"SQLite: Converted '{col}' successfully.")
+                    except Exception as e:
+                        print(f"SQLite: Could not convert column '{col}': {e}")
+                        # Leave the column as-is if conversion fails
+
+    def _validate_and_fix_excel_rows(self, df, header_row_index):
+            """
+            Validate and fix excel_row values in the DataFrame.
+            - Ensures excel_row column exists as first column
+            - Populates with actual Excel row numbers (data row index + header row + 2)
+            - Fixes empty, duplicate, or malformatted values
+            
+            Args:
+                df: DataFrame to validate
+                header_row_index: The index of the header row in the Excel file (0-based)
+                
+            Returns:
+                DataFrame with validated excel_row as first column
+            """
+            print("SQLite: Validating excel_row values...")
+            
+            # Check if excel_row column already exists
+            excel_row_col = None
+            for col in df.columns:
+                if str(col).strip().lower() == 'excel_row':
+                    excel_row_col = col
+                    break
+            
+            # Calculate actual Excel row numbers
+            # Formula: DataFrame index (0-based) + header_row_index + 2
+            # +1 for Excel's 1-based indexing, +1 more to skip the header row itself
+            excel_row_numbers = [i + header_row_index + 2 for i in range(len(df))]
+            
+            if excel_row_col is None:
+                # Create new excel_row column
+                print("SQLite: Creating 'excel_row' column...")
+                df.insert(0, 'excel_row', excel_row_numbers)
+            else:
+                # Validate and fix existing excel_row column
+                print("SQLite: Validating existing 'excel_row' column...")
+                
+                # Helper function to check if excel_row is valid
+                def is_valid_row_number(val, expected):
+                    if pd.isna(val) or val == '':
+                        return False
+                    try:
+                        val_int = int(val)
+                        # Valid if it's a positive integer
+                        return val_int > 0
+                    except:
+                        return False
+                
+                # Find rows needing fixes
+                needs_fix = []
+                for idx, (actual, expected) in enumerate(zip(df[excel_row_col], excel_row_numbers)):
+                    if not is_valid_row_number(actual, expected):
+                        needs_fix.append(idx)
+                
+                if needs_fix:
+                    print(f"SQLite: Fixing {len(needs_fix)} excel_row values...")
+                    for idx in needs_fix:
+                        df.at[idx, excel_row_col] = excel_row_numbers[idx]
+                
+                # Check for duplicates
+                duplicates = df[excel_row_col].duplicated(keep=False)
+                if duplicates.any():
+                    num_duplicates = duplicates.sum()
+                    print(f"SQLite: Found {num_duplicates} duplicate excel_row values. Regenerating...")
+                    for idx in df[duplicates].index:
+                        df.at[idx, excel_row_col] = excel_row_numbers[idx]
+                
+                # Move excel_row to first position if not already
+                cols = df.columns.tolist()
+                if cols[0] != excel_row_col:
+                    cols.remove(excel_row_col)
+                    cols.insert(0, excel_row_col)
+                    df = df[cols]
+            
+            print(f"SQLite: excel_row column validated. Range: {excel_row_numbers[0]} to {excel_row_numbers[-1]}")
+            return df
+    
+    def _count_uuid_issues(self, df):
+        """
+        Quickly count how many UUIDs need fixing without modifying the DataFrame.
+        
+        Args:
+            df: DataFrame with potential UUID column
+            
+        Returns:
+            int: Total number of UUIDs that need fixing (empty/malformed + duplicates)
+        """
+        # Check if UUID column exists
+        uuid_col = None
+        for col in df.columns:
+            if str(col).strip().upper() == 'UUID':
+                uuid_col = col
                 break
         
-        if uuid_df_col is not None:
-            print(f"Checking column '{uuid_df_col}' for missing UUIDs...")
-            
-            # Identify rows where the UUID column is empty (or NaN/None)
-            mask = df[uuid_df_col].isna() | (df[uuid_df_col] == '') | (df[uuid_df_col].astype(str).str.len() < 10) 
-            
-            if mask.any():
-                num_new_uuids = mask.sum()
-                print(f"Generating {num_new_uuids} new UUIDs for historical/empty entries...")
-                
-                # Generate new UUIDs only for the rows where the mask is True
-                new_uuids = [str(uuid.uuid4()) for _ in range(num_new_uuids)]
-                
-                # Apply the new UUIDs to the masked rows
-                df.loc[mask, uuid_df_col] = new_uuids
-
-        return df
-
-    def sync_excel_to_db(self, excel_path, header_finder_func):
-        """
-        Performs a full synchronization from the Excel file to the SQLite DB.
-        Corrects column conflicts by ensuring all columns in the DataFrame are
-        accounted for in the final table creation.
-        """
-        # Re-establish connection if it was closed (e.g., by upsert_row operations)
-        if not self.conn:
+        if uuid_col is None:
+            return 0
+        
+        # Helper function to check if UUID is valid
+        def is_valid_uuid(val):
+            if pd.isna(val) or val == '':
+                return False
+            val_str = str(val).strip()
+            if len(val_str) < 32:  # UUID should be at least 32 chars (without hyphens)
+                return False
             try:
-                self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-                print(f"Re-established SQLite connection for sync: {self.db_path}")
-            except sqlite3.Error as e:
-                raise ConnectionError(f"Failed to establish database connection: {e}")
+                uuid.UUID(val_str)
+                return True
+            except:
+                return False
+        
+        # Count rows needing UUID fixes
+        needs_fix_mask = ~df[uuid_col].apply(is_valid_uuid)
+        num_needs_fix = needs_fix_mask.sum()
+        
+        # Count duplicates (keep='first' to only count extras)
+        duplicate_mask = df[uuid_col].duplicated(keep='first')
+        num_duplicates = duplicate_mask.sum()
+        
+        return num_needs_fix + num_duplicates
+    
+    def _validate_and_fix_uuids(self, df):
+        """
+        Validate and fix UUIDs in the DataFrame if UUID column exists.
+        - Generates UUIDs for empty cells
+        - Fixes malformatted UUIDs
+        - Regenerates duplicate UUIDs
+        
+        Args:
+            df: DataFrame with potential UUID column
             
-        print("Starting full sync from Excel to SQLite...")
+        Returns:
+            DataFrame with validated UUIDs
+        """
+        # Check if UUID column exists
+        uuid_col = None
+        for col in df.columns:
+            if str(col).strip().upper() == 'UUID':
+                uuid_col = col
+                break
         
-        df = None
-        header_row_index = -1
+        if uuid_col is None:
+            print("SQLite: No UUID column found in Excel. Skipping UUID validation.")
+            return df, {}
         
-        # --- Step 1 & 2: Header finding and DataFrame reading (omitted for brevity) ---
+        print("SQLite: Validating UUIDs...")
+        
+        # Track which rows were fixed
+        uuid_fixes = {}
+        # Helper function to check if UUID is valid
+        def is_valid_uuid(val):
+            if pd.isna(val) or val == '':
+                return False
+            val_str = str(val).strip()
+            if len(val_str) < 32:  # UUID should be at least 32 chars (without hyphens)
+                return False
+            try:
+                # Try to parse as UUID
+                uuid.UUID(val_str)
+                return True
+            except:
+                return False
+        
+        # Find rows needing UUID fixes
+        needs_fix_mask = ~df[uuid_col].apply(is_valid_uuid)
+        num_needs_fix = needs_fix_mask.sum()
+        
+        if num_needs_fix > 0:
+            print(f"SQLite: Generating/fixing {num_needs_fix} UUIDs...")
+            for idx in df[needs_fix_mask].index:
+                new_uuid = str(uuid.uuid4())
+                df.at[idx, uuid_col] = new_uuid
+                uuid_fixes[idx] = new_uuid
+        
+        # Check for duplicates
+        duplicates = df[uuid_col].duplicated(keep=False)
+        if duplicates.any():
+            num_duplicates = duplicates.sum()
+            print(f"SQLite: Found {num_duplicates} duplicate UUIDs. Regenerating...")
+            
+            # Keep first occurrence, regenerate the rest
+            duplicate_mask = df[uuid_col].duplicated(keep='first')
+            for idx in df[duplicate_mask].index:
+                new_uuid = str(uuid.uuid4())
+                df.at[idx, uuid_col] = new_uuid
+                uuid_fixes[idx] = new_uuid
+        
+        if num_needs_fix == 0 and not duplicates.any():
+            print("SQLite: All UUIDs are valid and unique.")
+        
+        return df, uuid_fixes
+    
+    def _write_uuid_fixes_to_excel(self, excel_path, header_row_index, uuid_fixes, uuid_col_name):
+        """
+        Write UUID fixes back to the Excel file.
+        
+        Args:
+            excel_path: Path to the Excel file
+            header_row_index: The index of the header row (0-based)
+            uuid_fixes: Dictionary of {dataframe_index: new_uuid}
+            uuid_col_name: Name of the UUID column in Excel
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not uuid_fixes:
+            return True  # Nothing to fix
+        
+        print(f"SQLite: Writing {len(uuid_fixes)} UUID fixes back to Excel...")
+        
+        app, book, sheet = None, None, None
+        opened_new_app = False
+        
         try:
-            header_row_index = header_finder_func(excel_path)
-            if header_row_index == -1: return
-
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    print(f"DEBUG (Attempt {attempt + 1}): Reading full data using pd.read_excel, skipping {header_row_index} rows.")
-                    df = pd.read_excel(
-                        excel_path,
-                        sheet_name=0,
-                        header=header_row_index,
-                        skiprows=header_row_index
-                    )
-                    df.dropna(how='all', inplace=True) 
-                    df.reset_index(inplace=True)
+            # Try to find already open Excel instance
+            target_norm_path = os.path.normcase(os.path.abspath(excel_path))
+            for running_app in xw.apps:
+                for wb in running_app.books:
+                    try:
+                        if os.path.normcase(os.path.abspath(wb.fullname)) == target_norm_path:
+                            book, app = wb, running_app
+                            break
+                    except:
+                        continue
+                if book:
                     break
-                except Exception:
-                    if attempt == max_retries - 1: raise 
-                    time.sleep(1)
+            
+            # If not found, open new instance
+            if book is None:
+                app = xw.App(visible=False)
+                opened_new_app = True
+                book = app.books.open(excel_path)
+            
+            sheet = book.sheets[0]
+            
+            # Find UUID column position (1-based for Excel)
+            header_row_excel = header_row_index + 1
+            header_range = sheet.range(f'A{header_row_excel}').expand('right')
+            headers = header_range.value
+            
+            uuid_col_index = None
+            for i, header in enumerate(headers, start=1):
+                if header and str(header).strip().upper() == uuid_col_name.strip().upper():
+                    uuid_col_index = i
+                    break
+            
+            if uuid_col_index is None:
+                print(f"SQLite: WARNING - Could not find UUID column '{uuid_col_name}' in Excel header.")
+                return False
+            
+            # Get column letter from index
+            col_letter = xw.utils.col_name(uuid_col_index)
+            
+            # Write each UUID fix
+            for df_index, new_uuid in uuid_fixes.items():
+                # Convert DataFrame index to Excel row number
+                # Formula: df_index + header_row_index + 2 (skip header, 1-based indexing)
+                excel_row = df_index + header_row_index + 2
+                cell_address = f"{col_letter}{excel_row}"
+                
+                sheet.range(cell_address).value = new_uuid
+                print(f"SQLite:   Fixed UUID in row {excel_row}: {new_uuid}")
+            
+            # Save the workbook
+            book.save()
+            print(f"SQLite: Successfully wrote {len(uuid_fixes)} UUID fixes to Excel.")
+            
+            return True
+            
         except Exception as e:
-            print(f"Error during initial read: {e}")
+            print(f"SQLite: ERROR writing UUID fixes to Excel: {e}")
             traceback.print_exc()
-            return
+            return False
+            
+        finally:
+            # Only close if we opened a new app
+            if opened_new_app:
+                if book:
+                    try:
+                        book.close()
+                    except:
+                        pass
+                if app:
+                    try:
+                        app.quit()
+                    except:
+                        pass
+    
+    
+    def _ensure_table_exists(self, df, table_name):
+        """
+        Create or recreate the SQLite table based on DataFrame structure.
         
-        #  Data Conversion & Generation ---
-        utc_headers = ["UTC Date-Time", "Date-Time", "Date-Time (UTC)"]
-        df = self._apply_date_conversion(df, utc_headers)
-        local_headers = ["Local Time", "Local Date-Time", "Local Date"]
-        df = self._apply_date_conversion(df, local_headers)
-
-        # 1. Add/Update 'excel_row_number' column
-        df['excel_row_number'] = df.index + header_row_index + 2
+        Args:
+            df: DataFrame with sanitized column names
+            table_name: Name of the table to create
+        """
+        cursor = self.conn.cursor()
         
-        # 2. Add/Generate 'UUID' column
-        df = self._apply_uuid_generation(df)
-
-        # 3. Sanitize column names for SQL
-        df.columns = [self._sanitize_column_name(h) for h in df.columns]
-
-
-        # --- Step 3, 4, 5: Process and Write to SQLite (Corrected Logic) ---
+        # Check if table exists
+        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+        table_exists = cursor.fetchone() is not None
+        
+        if table_exists:
+            # Get existing columns
+            cursor.execute(f"PRAGMA table_info('{table_name}')")
+            existing_cols = {row[1] for row in cursor.fetchall()}
+            
+            # Get new columns
+            new_cols = set(df.columns)
+            
+            # If columns match, keep the table
+            if existing_cols == new_cols:
+                print(f"SQLite: Table '{table_name}' already exists with correct structure.")
+                return
+            
+            # Otherwise, drop and recreate
+            print(f"SQLite: Table structure changed. Recreating '{table_name}'...")
+            cursor.execute(f"DROP TABLE IF EXISTS '{table_name}'")
+            self.conn.commit()
+        
+        # Create new table
+        print(f"SQLite: Creating table '{table_name}'...")
+        
+        # All columns as TEXT for simplicity and flexibility
+        col_definitions = [f'"{col}" TEXT' for col in df.columns]
+        create_sql = f"CREATE TABLE '{table_name}' ({', '.join(col_definitions)})"
+        
+        cursor.execute(create_sql)
+        self.conn.commit()
+        print(f"SQLite: Table '{table_name}' created successfully.")
+    
+    def full_sync(self, excel_path, header_finder_func, skip_uuid_fixes=False):
+        """
+        Perform a complete synchronization from Excel to SQLite.
+        Makes the database identical to the Excel sheet.
+        
+        Args:
+            excel_path: Path to the Excel file
+            header_finder_func: Function to find the header row
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        print("\n=== SQLite: Starting Full Synchronization ===")
+        
         try:
-            table_name = Path(excel_path).stem
+            # 1. Read Excel data
+            df, header_row = self._read_excel_data(excel_path, header_finder_func)
+            if df is None:
+                return False
             
-            # Use the sanitized UUID column as the DB PRIMARY KEY
-            uuid_pk_col = self._sanitize_column_name('UUID')
-            # Use the sanitized row number column name
-            excel_row_col = self._sanitize_column_name('excel_row_number')
+            # 2. Add/validate excel_row column FIRST (before any other processing)
+            df = self._validate_and_fix_excel_rows(df, header_row)
             
-            # Write everything to the temp table (including excel_row_number)
-            df.to_sql(f"{table_name}_temp", self.conn, if_exists='replace', index=False)
+            # 3. Validate and fix UUIDs if column exists (unless skipped)
+            if skip_uuid_fixes:
+                print("SQLite: Skipping UUID validation as requested.")
+                uuid_fixes = {}
+            else:
+                df, uuid_fixes = self._validate_and_fix_uuids(df)
+                
+                # 3.5. Write UUID fixes back to Excel BEFORE sanitizing column names
+                if uuid_fixes:
+                    # Find original UUID column name (before sanitization)
+                    uuid_col_name = None
+                    for col in df.columns:
+                        if str(col).strip().upper() == 'UUID':
+                            uuid_col_name = col
+                            break
+                    
+                    if uuid_col_name:
+                        write_success = self._write_uuid_fixes_to_excel(
+                            excel_path, 
+                            header_row, 
+                            uuid_fixes, 
+                            uuid_col_name
+                        )
+                        if not write_success:
+                            print("SQLite: WARNING - UUID fixes may not have been written to Excel.")
+                            print("SQLite: Excel and database UUIDs may be out of sync!")
+           
+            # 4. Sanitize column names (spaces to underscores)
+            original_columns = df.columns.tolist()
+            df.columns = [self._sanitize_column_name(col) for col in df.columns]
             
+            # Log column name changes
+            for orig, new in zip(original_columns, df.columns):
+                if orig != new:
+                    print(f"SQLite: Column '{orig}' -> '{new}'")
+            
+            # 5. Set table name from Excel filename
+            self.table_name = Path(excel_path).stem
+            
+            # 6. Ensure table exists with correct structure
+            self._ensure_table_exists(df, self.table_name)
+            
+            # 7. Clear existing data and insert fresh data
             cursor = self.conn.cursor()
             
-            # Build the correct CREATE TABLE statement for the final table
-            # Iterate over ALL sanitized columns from the DataFrame
-            cols_with_types = []
-            for col in df.columns:
-                if col == uuid_pk_col:
-                    cols_with_types.append(f'"{col}" TEXT PRIMARY KEY')
-                # Explicitly add the excel_row_number column as a normal TEXT column
-                # The original error occurred because this column was missing from the CREATE statement
-                elif col == excel_row_col:
-                     cols_with_types.append(f'"{col}" INTEGER')
-                else:
-                    cols_with_types.append(f'"{col}" TEXT')
+            print(f"SQLite: Clearing existing data from '{self.table_name}'...")
+            cursor.execute(f"DELETE FROM '{self.table_name}'")
             
-            create_sql = f'CREATE TABLE "{table_name}" ({", ".join(cols_with_types)})'
+            print(f"SQLite: Inserting {len(df)} rows...")
             
-            cursor.execute(f"DROP TABLE IF EXISTS \"{table_name}\"")
-            cursor.execute(create_sql)
+            # Prepare INSERT statement
+            cols = list(df.columns)
+            col_str = ', '.join(f'"{col}"' for col in cols)
+            placeholders = ', '.join(['?' for _ in cols])
+            insert_sql = f"INSERT INTO '{self.table_name}' ({col_str}) VALUES ({placeholders})"
             
-            # Insert ALL columns from the temp table (including excel_row_number) into the final table
-            all_cols_str = ", ".join(f'"{col}"' for col in df.columns)
-            cursor.execute(f'INSERT INTO "{table_name}" ({all_cols_str}) SELECT {all_cols_str} FROM "{table_name}_temp"')
-            cursor.execute(f'DROP TABLE "{table_name}_temp"')
+            # Insert all rows
+            rows_data = [tuple(row) for row in df.values]
+            cursor.executemany(insert_sql, rows_data)
             
             self.conn.commit()
-            print(f"Full sync complete. Mirrored {len(df)} rows to table '{table_name}'.")
-
-        except sqlite3.OperationalError as e:
-            if "database is locked" in str(e):
-                print("Database is locked, full sync aborted. Will try again on the next cycle.")
-                return
-            else:
-                print(f"An operational error occurred during full sync: {e}")
-                traceback.print_exc()
-                return
-        except Exception as e:
-            print(f"An unexpected error occurred during full sync: {e}")
-            traceback.print_exc()
-            return
             
-    def upsert_row(self, table_name, data_dict, excel_row_pk):
-        """
-        Inserts a new row or updates an existing one based on the primary key (UUID if available, else Excel row number).
-        Uses a fresh, temporary connection within the retry loop to prevent connection pooling deadlocks.
-        """
-        # Use UUID if available, otherwise fall back to excel_row_number
-        uuid_col = self._sanitize_column_name('UUID')
-        pk_col_name = uuid_col if uuid_col in data_dict else 'excel_row_number'
-        
-        # Ensure the PK field is always present in the data dict for the WHERE clause (if updating) 
-        if pk_col_name == 'excel_row_number':
-            data_dict[pk_col_name] = excel_row_pk
-
-        columns = ', '.join(f'"{k}"' for k in data_dict.keys())
-        placeholders = ', '.join('?' for _ in data_dict)
-        sql = f'INSERT OR REPLACE INTO "{table_name}" ({columns}) VALUES ({placeholders})'
-        
-        # Add a retry loop for locked database ---
-        for attempt in range(3):
-            temp_conn = None
+            print(f"SQLite: Full sync complete. {len(df)} rows mirrored to database.")
+            print("=== SQLite: Synchronization Finished ===\n")
+            return True
+            
+        except sqlite3.Error as e:
+            print(f"SQLite: Database error during sync - {e}")
+            traceback.print_exc()
             try:
-                # Use a temporary connection for this operation to avoid locking issues
-                # This ensures the lock is released immediately after the commit.
-                temp_conn = sqlite3.connect(self.db_path, check_same_thread=False) 
-                
-                cursor = temp_conn.cursor()
-                cursor.execute(sql, tuple(data_dict.values()))
-                temp_conn.commit()
-                return True, "OK."
-            except sqlite3.OperationalError as e:
-                if "database is locked" in str(e):
-                    print(f"Database locked on attempt {attempt + 1}. Retrying...")
-                    time.sleep(0.2)
-                    continue
-                else:
-                    print(f"SQLite operational error: {e}")
-                    if temp_conn: temp_conn.rollback()
-                    return False, f"Error: {e}"
-            except sqlite3.Error as e:
-                print(f"SQLite upsert error: {e}")
-                if temp_conn: temp_conn.rollback()
-                return False, f"Error: {e}"
-            finally:
-                if temp_conn:
-                    temp_conn.close() # Ensure the transient connection is closed
-        
-        # NOTE: We no longer close self.conn here - it stays persistent for sync operations
-        
-        print("Failed to upsert row after multiple attempts. Database remained locked.")
-        return False, "DB Locked."
+                self.conn.rollback()
+            except:
+                pass
+            return False
+        except Exception as e:
+            print(f"SQLite: Unexpected error during sync - {e}")
+            traceback.print_exc()
+            return False
     
+    def add_single_row(self, row_data, excel_path=None, excel_row=None):
+        """
+        Add a single row to the database quickly without full sync.
+        Used when logging new events to keep the UI responsive.
+        
+        Args:
+            row_data: Dictionary of {column_name: value}
+                     Column names should match Excel headers (will be sanitized)
+            excel_path: Optional Excel file path to derive table name if not set
+            excel_row: The Excel row number where this data was written (required)
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        # If table name not set, try to derive it from excel_path
+        if not self.table_name and excel_path:
+            self.table_name = Path(excel_path).stem
+            print(f"SQLite: Set table name to '{self.table_name}'")
+        
+        if not self.table_name:
+            print("SQLite: ERROR - No table name set. Cannot add row.")
+            print("SQLite: Run full_sync first or provide excel_path parameter.")
+            return False
+        
+        if excel_row is None:
+            print("SQLite: WARNING - No excel_row provided. This row will be missing its Excel position reference.")
+            print("SQLite: It's recommended to provide the excel_row parameter.")
+        
+        try:
+            # 1. Sanitize column names
+            sanitized_data = {}
+            
+            # Add excel_row FIRST if provided
+            if excel_row is not None:
+                sanitized_data['excel_row'] = str(excel_row)
+            for key, value in row_data.items():
+                sanitized_key = self._sanitize_column_name(key)
+                sanitized_data[sanitized_key] = value
+            
+            # 2. Generate UUID if UUID column exists and value is missing
+            uuid_col = self._sanitize_column_name('UUID')
+            if uuid_col in sanitized_data:
+                current_uuid = sanitized_data[uuid_col]
+                if not current_uuid or str(current_uuid).strip() == '':
+                    sanitized_data[uuid_col] = str(uuid.uuid4())
+                    print(f"SQLite: Generated new UUID for row: {sanitized_data[uuid_col]}")
+            
+            # 3. Insert row
+            cursor = self.conn.cursor()
+            
+            cols = list(sanitized_data.keys())
+            col_str = ', '.join(f'"{col}"' for col in cols)
+            placeholders = ', '.join(['?' for _ in cols])
+            values = [sanitized_data[col] for col in cols]
+            
+            insert_sql = f"INSERT INTO '{self.table_name}' ({col_str}) VALUES ({placeholders})"
+            
+            cursor.execute(insert_sql, values)
+            self.conn.commit()
+            
+            if excel_row is not None:
+                print(f"SQLite: Added 1 row to '{self.table_name}' (Excel row {excel_row}).")
+            else:
+                print(f"SQLite: Added 1 row to '{self.table_name}'.")
+            return True
+            
+        except sqlite3.Error as e:
+            print(f"SQLite: Error adding row - {e}")
+            traceback.print_exc()
+            try:
+                self.conn.rollback()
+            except:
+                pass
+            return False
+        except Exception as e:
+            print(f"SQLite: Unexpected error adding row - {e}")
+            traceback.print_exc()
+            return False
+
+
 # --- FolderMonitor Class ---
 class FolderMonitor(FileSystemEventHandler):
     '''
@@ -971,18 +1365,68 @@ class DataLoggerGUI:
             try:
                 self.sqlite_manager = SQLiteManager(self.db_path)
                 
-                # Run initial sync in background
-                def _sync_worker():
-                    self.update_status("Performing initial sync to SQLite...")
-                    header_finder = lambda path: self._find_header_row(path)
-                    self.sqlite_manager.sync_excel_to_db(self.log_file_path, header_finder)
-                    self.update_status("Initial SQLite sync complete.")
+                # Count UUID issues before starting sync
+                def _count_and_ask():
+                    try:
+                        self.update_status("Analyzing Excel data for UUID issues...")
+                        header_finder = lambda path: self._find_header_row(path)
+                        
+                        # Read Excel data to count UUID issues
+                        df, header_row = self.sqlite_manager._read_excel_data(
+                            self.log_file_path,
+                            header_finder
+                        )
+                        
+                        if df is None:
+                            raise Exception("Failed to read Excel data")
+                        
+                        # Quick count of UUID issues
+                        num_issues = self.sqlite_manager._count_uuid_issues(df)
+                        
+                        if num_issues > 0:
+                            # Estimate time: approximately 0.001 seconds per UUID fix + Excel write time
+                            estimated_seconds = (num_issues * 0.001) + 2  # +2 seconds for Excel operations
+                            time_str = f"{estimated_seconds:.1f} seconds" if estimated_seconds < 60 else f"{estimated_seconds/60:.1f} minutes"
+                            
+                            # Ask user on main thread
+                            def _ask_user():
+                                result = messagebox.askyesno(
+                                    "UUID Fixes Required",
+                                    f"Found {num_issues:,} UUIDs that need fixing.\n\n"
+                                    f"Estimated time: {time_str}\n\n"
+                                    f"Do you want to fix these UUIDs now?\n\n"
+                                    f"Note: Choosing 'No' will enable SQLite mirroring without fixing UUIDs, "
+                                    f"which may cause synchronization issues.",
+                                    icon='warning',
+                                    parent=self.master
+                                )
+                                
+                                if result:
+                                    # User chose to fix UUIDs
+                                    self._perform_initial_sync_with_fixes()
+                                else:
+                                    # User chose to skip UUID fixes
+                                    print("SQLite: User chose to skip UUID fixes. Proceeding without UUID validation.")
+                                    self._perform_initial_sync_without_fixes()
+                            
+                            self.master.after(0, _ask_user)
+                        else:
+                            # No UUID issues, proceed normally
+                            self.master.after(0, self._perform_initial_sync_with_fixes)
                     
-                    # Start the auto-sync timer only after the initial sync is successful
-                    self.master.after(0, self.start_auto_sync)
-
-                sync_thread = threading.Thread(target=_sync_worker, daemon=True)
-                sync_thread.start()
+                    except Exception as e:
+                        print(f"SQLite: Error analyzing UUIDs: {e}")
+                        traceback.print_exc()
+                        self.master.after(0, lambda: messagebox.showerror(
+                            "Error",
+                            f"Failed to analyze UUIDs: {e}\n\nSQLite mirroring will be disabled.",
+                            parent=self.master
+                        ))
+                        self.master.after(0, lambda: self.sqlite_mirror_enabled_var.set(False))
+                
+                # Start counting in background
+                count_thread = threading.Thread(target=_count_and_ask, daemon=True)
+                count_thread.start()
 
             except Exception as e:
                 messagebox.showerror("SQLite Error", f"Failed to initialize SQLite database: {e}", parent=self.master)
@@ -999,6 +1443,39 @@ class DataLoggerGUI:
                 self.sqlite_manager = None
             self.update_status("SQLite mirroring disabled.")
     
+    def _perform_initial_sync_with_fixes(self):
+        """Perform initial sync with UUID validation and fixes."""
+        def _sync_worker():
+            self.update_status("Performing initial full sync to SQLite (with UUID fixes)...")
+            header_finder = lambda path: self._find_header_row(path)
+            success = self.sqlite_manager.full_sync(self.log_file_path, header_finder, skip_uuid_fixes=False)
+            
+            if success:
+                self.update_status("Initial SQLite sync complete.")
+                # Start the auto-sync timer only after successful sync
+                self.master.after(0, self.start_auto_sync)
+            else:
+                self.update_status("Initial SQLite sync failed. Check console for details.")
+        
+        sync_thread = threading.Thread(target=_sync_worker, daemon=True)
+        sync_thread.start()
+    
+    def _perform_initial_sync_without_fixes(self):
+        """Perform initial sync WITHOUT UUID validation (skip UUID fixes)."""
+        def _sync_worker():
+            self.update_status("Performing initial full sync to SQLite (skipping UUID fixes)...")
+            header_finder = lambda path: self._find_header_row(path)
+            success = self.sqlite_manager.full_sync(self.log_file_path, header_finder, skip_uuid_fixes=True)
+            
+            if success:
+                self.update_status("Initial SQLite sync complete (UUIDs not fixed).")
+                # Start the auto-sync timer only after successful sync
+                self.master.after(0, self.start_auto_sync)
+            else:
+                self.update_status("Initial SQLite sync failed. Check console for details.")
+        
+        sync_thread = threading.Thread(target=_sync_worker, daemon=True)
+        sync_thread.start()
     
     def create_status_indicators(self):
         '''
@@ -2178,32 +2655,33 @@ class DataLoggerGUI:
         # --- Part 2: Mirror to SQLite ---
         if success_excel and self.sqlite_mirror_enabled_var.get() and self.sqlite_manager:
             try:
-                table_name = Path(self.log_file_path).stem
-                # Ensure date field is still a string for SQLite storage
-                sqlite_output_data = []
+                # Prepare data dictionary with original Excel headers
+                row_data_for_sqlite = {}
                 for header, value in zip(header_values, output_data):
-                    if header.lower() == dt_col_name_lower and isinstance(value, datetime.datetime):
-                        # Convert back to a standardized string for TEXT storage in SQLite
-                        sqlite_output_data.append(value.strftime("%Y-%m-%d %H:%M:%S"))
-                    else:
-                        sqlite_output_data.append(value)
-
-                data_dict = {
-                    self.sqlite_manager._sanitize_column_name(header): value
-                    for header, value in zip(header_values, sqlite_output_data)
-                }
-                success_sqlite, sqlite_status = self.sqlite_manager.upsert_row(table_name, data_dict, next_row)
+                    if header:  # Skip empty headers
+                        # Convert datetime objects to strings for SQLite
+                        if isinstance(value, datetime.datetime):
+                            value = value.strftime("%Y-%m-%d %H:%M:%S")
+                        row_data_for_sqlite[header] = value
+                
+                # Use the new add_single_row method (fast, no full sync)
+                # Pass excel_path so table name can be derived if needed
+                # Pass excel_row (next_row) so the Excel row position is recorded
+                success_sqlite = self.sqlite_manager.add_single_row(
+                    row_data_for_sqlite, 
+                    excel_path=self.log_file_path,
+                    excel_row=next_row
+                )
+                
                 if success_sqlite:
                     sqlite_message = "SQLite: OK."
-                elif sqlite_status == "DB Locked.":
-                    sqlite_message = "SQLite: Busy."
-                    print("Could not update SQLite mirror; database was busy.")
                 else:
-                    sqlite_message = f"SQLite: Fail ({sqlite_status})."
-                    print(f"Error during SQLite upsert: {sqlite_status}")
+                    sqlite_message = "SQLite: Fail."
+                    print("SQLite: Failed to add row. Check console for details.")
+                    
             except Exception as e:
                 sqlite_message = f"SQLite: Fail ({type(e).__name__})."
-                print(f"Error during SQLite upsert: {e}")
+                print(f"Error during SQLite single row add: {e}")
                 traceback.print_exc()
 
         return success_excel, success_sqlite, f"{excel_message} {sqlite_message}"
@@ -2704,12 +3182,13 @@ class DataLoggerGUI:
                 print(f"Automatic DB sync scheduled to run every {interval_minutes} minutes.")
                 self.update_status(f"Auto-sync scheduled every {interval_minutes} mins.")
 
-    def stop_auto_sync(self):
+    def stop_auto_sync(self, log_message=True):
         """Stops the scheduled periodic sync."""
         if self._auto_sync_timer_id:
             self.master.after_cancel(self._auto_sync_timer_id)
             self._auto_sync_timer_id = None
-            print("Automatic DB sync timer cancelled.")
+            if log_message:
+                print("Automatic DB sync stopped.")
 
     def _periodic_sync_worker(self):
         """The worker function that runs on the timer, offloading the heavy work."""
@@ -2720,12 +3199,17 @@ class DataLoggerGUI:
         def _sync_in_thread():
             """This function contains the slow code that runs on a separate thread."""
             self.master.after(0, self.update_status, "Starting periodic background sync...")
-            print("Running periodic background sync...")
+            print("\n--- Running Periodic Background Sync ---")
             try:
                 header_finder = lambda path: self._find_header_row(path)
-                self.sqlite_manager.sync_excel_to_db(self.log_file_path, header_finder)
-                self.master.after(0, self.update_status, "Periodic background sync complete.")
-                print("Periodic sync complete.")
+                success = self.sqlite_manager.full_sync(self.log_file_path, header_finder)
+                
+                if success:
+                    self.master.after(0, self.update_status, "Periodic background sync complete.")
+                    print("--- Periodic Sync Complete ---\n")
+                else:
+                    self.master.after(0, self.update_status, "Periodic sync had errors.")
+                    print("--- Periodic Sync Failed ---\n")
             except Exception as e:
                 error_msg = f"Auto-sync failed: {e}"
                 self.master.after(0, self.update_status, error_msg)
@@ -2733,7 +3217,15 @@ class DataLoggerGUI:
                 traceback.print_exc()
             finally:
                 # IMPORTANT: Reschedule the next sync *after* the current one finishes
-                self.start_auto_sync()
+                # Don't log cancellation message since we're just rescheduling
+                self.stop_auto_sync(log_message=False)
+                if self.auto_sync_enabled_var.get() and self.sqlite_mirror_enabled_var.get():
+                    interval_minutes = self.auto_sync_interval_min_var.get()
+                    if interval_minutes > 0:
+                        delay_ms = interval_minutes * 60 * 1000
+                        self._auto_sync_timer_id = self.master.after(delay_ms, self._periodic_sync_worker)
+                        print(f"Next automatic sync scheduled in {interval_minutes} minutes.")
+
 
         # Run the actual sync in a background thread to not freeze the GUI
         sync_thread = threading.Thread(target=_sync_in_thread, daemon=True)

@@ -161,7 +161,7 @@
         },
         {
             "field": "Local Time",
-            "column_name": "Local Time",
+            "column_name": "Local Date-Time",
             "skip": false,
             "source": "PC Time + Offset"
         },
