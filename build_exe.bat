@@ -1,13 +1,17 @@
 @echo off
 REM ========================================
-REM Build Script for Online Logger v2.0
+REM Build Script for Online Logger
 REM Creates an executable using PyInstaller
 REM ========================================
+
+REM === VERSION CONFIGURATION ===
+SET VERSION=2.2
+REM ==============================
 
 echo.
 echo ========================================
 echo   Online Logger - Build Script
-echo   Version: 2.0
+echo   Version: %VERSION%
 echo ========================================
 echo.
 
@@ -33,16 +37,16 @@ echo.
 
 REM Clean previous build artifacts
 echo [2/5] Cleaning previous build artifacts...
-if exist "dist\Online_Log_SQL_Lite" (
-    rmdir /s /q "dist\Online_Log_SQL_Lite"
+if exist "dist\Online_Logger_v%VERSION%" (
+    rmdir /s /q "dist\Online_Logger_v%VERSION%"
     echo Removed old dist folder.
 )
 if exist "build" (
     rmdir /s /q "build"
     echo Removed old build folder.
 )
-if exist "Online_Log_SQL_Lite.spec" (
-    del /q "Online_Log_SQL_Lite.spec"
+if exist "Online_Logger_v%VERSION%.spec" (
+    del /q "Online_Logger_v%VERSION%.spec"
     echo Removed old spec file.
 )
 echo.
@@ -51,14 +55,14 @@ REM Build the executable
 echo [3/5] Building executable with PyInstaller...
 echo.
 echo Configuration:
-echo - Name: Online Logger v2.0
+echo - Name: Online Logger v%VERSION%
 echo - Icon: _repositoryfiles\OnlineLoggerLogo.ico
 echo - Console: Enabled (for debugging)
 echo - One Directory Mode
 echo.
 
 pyinstaller ^
-    --name="Online_Logger_v2.0" ^
+    --name="Online_Logger_v%VERSION%" ^
     --icon="_repositoryfiles\OnlineLoggerLogo.ico" ^
     --console ^
     --onedir ^
@@ -91,29 +95,29 @@ echo [4/5] Copying additional files to distribution folder...
 
 REM Copy settings folder with all JSON files and config subfolder
 if exist "settings" (
-    xcopy /E /I /Y "settings" "dist\Online_Logger_v2.0\settings" >nul
+    xcopy /E /I /Y "settings" "dist\Online_Logger_v%VERSION%\settings" >nul
     echo Copied settings folder with project JSONs and config.
 )
 
 REM Copy Guide folder
 if exist "Guide" (
-    xcopy /E /I /Y "Guide" "dist\Online_Logger_v2.0\Guide" >nul
+    xcopy /E /I /Y "Guide" "dist\Online_Logger_v%VERSION%\Guide" >nul
     echo Copied Guide folder.
 )
 
 REM Copy README and launcher
 if exist "README.md" (
-    copy /Y "README.md" "dist\Online_Logger_v2.0\" >nul
+    copy /Y "README.md" "dist\Online_Logger_v%VERSION%\" >nul
     echo Copied README.md
 )
 
 if exist "BUILD_README.md" (
-    copy /Y "BUILD_README.md" "dist\Online_Logger_v2.0\" >nul
+    copy /Y "BUILD_README.md" "dist\Online_Logger_v%VERSION%\" >nul
     echo Copied BUILD_README.md
 )
 
 if exist "Start_Online_Logger.bat" (
-    copy /Y "Start_Online_Logger.bat" "dist\Online_Logger_v2.0\" >nul
+    copy /Y "Start_Online_Logger.bat" "dist\Online_Logger_v%VERSION%\" >nul
     echo Copied launcher script
 )
 
@@ -124,22 +128,22 @@ REM Create ZIP archive for distribution
 echo [5/6] Creating ZIP archive for distribution...
 
 REM Delete old zip if it exists
-if exist "Online_Logger_v2.0.zip" (
-    del /q "Online_Logger_v2.0.zip"
+if exist "Online_Logger_v%VERSION%.zip" (
+    del /q "Online_Logger_v%VERSION%.zip"
     echo Removed old ZIP file.
 )
 
 REM Create new zip using PowerShell
-powershell -Command "Compress-Archive -Path 'dist\Online_Logger_v2.0' -DestinationPath 'Online_Logger_v2.0.zip' -Force"
+powershell -Command "Compress-Archive -Path 'dist\Online_Logger_v%VERSION%' -DestinationPath 'Online_Logger_v%VERSION%.zip' -Force"
 
 if errorlevel 1 (
     echo WARNING: Failed to create ZIP file!
     echo The executable is still available in the dist folder.
 ) else (
     REM Get zip file size
-    for %%A in ("Online_Logger_v2.0.zip") do set zipsize=%%~zA
+    for %%A in ("Online_Logger_v%VERSION%.zip") do set zipsize=%%~zA
     set /a zipsizeMB=!zipsize! / 1048576
-    echo Created: Online_Logger_v2.0.zip (~!zipsizeMB! MB)
+    echo Created: Online_Logger_v%VERSION%.zip (~!zipsizeMB! MB)
 )
 
 echo.
@@ -152,10 +156,10 @@ echo   Build Summary
 echo ========================================
 echo.
 echo Executable location:
-echo   dist\Online_Logger_v2.0\Online_Logger_v2.0.exe
+echo   dist\Online_Logger_v%VERSION%\Online_Logger_v%VERSION%.exe
 echo.
 echo Distribution ZIP:
-echo   Online_Logger_v2.0.zip
+echo   Online_Logger_v%VERSION%.zip
 echo.
 echo Console window: ENABLED (for debugging)
 echo.
@@ -167,7 +171,7 @@ REM Ask if user wants to open the dist folder
 echo.
 choice /C YN /M "Open dist folder now"
 if errorlevel 2 goto :end
-if errorlevel 1 explorer "dist\Online_Logger_v2.0"
+if errorlevel 1 explorer "dist\Online_Logger_v%VERSION%"
 
 :end
 echo.

@@ -1,6 +1,6 @@
 {
-    "log_file_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01_Online_Log/600061_Cnooc_Log/Online_Log/DailyLog-Horizon_v14.xlsb",
-    "sqlite_db_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/01_Online_Log/600061_Cnooc_Log/Online_Log/DailyLog-Horizon_v14.db",
+    "log_file_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/600061 - VIRE - CNOOC/CNO_600061_Online_Log_20251029.xlsb",
+    "sqlite_db_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/600061 - VIRE - CNOOC/new_db2.db",
     "time_offset_hours": 0.0,
     "txt_folder_path": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
     "txt_folder_path_set2": "U:/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
