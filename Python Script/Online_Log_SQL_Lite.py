@@ -28,7 +28,7 @@ start_time = time.perf_counter()
 
 # --- DEFINED CONSTANTS ---
 # APPLICATION VERSION
-APP_VERSION = "2.1"
+APP_VERSION = "2.3"
 
 # PATHS
 # Stores the last-used project path across sessions
