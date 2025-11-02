@@ -307,8 +307,8 @@ class SQLiteManager:
 
     def _validate_and_fix_excel_rows(self, df, header_row_index):
             """
-            Validate and fix excel_row values in the DataFrame.
-            - Ensures excel_row column exists as first column
+            Validate and fix index values in the DataFrame.
+            - Ensures index column exists as first column
             - Populates with actual Excel row numbers (data row index + header row + 2)
             - Fixes empty, duplicate, or malformatted values
             
@@ -317,31 +317,31 @@ class SQLiteManager:
                 header_row_index: The index of the header row in the Excel file (0-based)
                 
             Returns:
-                DataFrame with validated excel_row as first column
+                DataFrame with validated index as first column
             """
-            print("SQLite: Validating excel_row values...")
+            print("SQLite: Validating index values...")
             
-            # Check if excel_row column already exists
-            excel_row_col = None
+            # Check if index column already exists
+            index_col = None
             for col in df.columns:
-                if str(col).strip().lower() == 'excel_row':
-                    excel_row_col = col
+                if str(col).strip().lower() == 'index':
+                    index_col = col
                     break
             
             # Calculate actual Excel row numbers
             # Formula: DataFrame index (0-based) + header_row_index + 2
             # +1 for Excel's 1-based indexing, +1 more to skip the header row itself
-            excel_row_numbers = [i + header_row_index + 2 for i in range(len(df))]
+            index_numbers = [i + header_row_index + 2 for i in range(len(df))]
             
-            if excel_row_col is None:
-                # Create new excel_row column
-                print("SQLite: Creating 'excel_row' column...")
-                df.insert(0, 'excel_row', excel_row_numbers)
+            if index_col is None:
+                # Create new index column
+                print("SQLite: Creating 'index' column...")
+                df.insert(0, 'index', index_numbers)
             else:
-                # Validate and fix existing excel_row column
-                print("SQLite: Validating existing 'excel_row' column...")
+                # Validate and fix existing index column
+                print("SQLite: Validating existing 'index' column...")
                 
-                # Helper function to check if excel_row is valid
+                # Helper function to check if index is valid
                 def is_valid_row_number(val, expected):
                     if pd.isna(val) or val == '':
                         return False
@@ -354,31 +354,31 @@ class SQLiteManager:
                 
                 # Find rows needing fixes
                 needs_fix = []
-                for idx, (actual, expected) in enumerate(zip(df[excel_row_col], excel_row_numbers)):
+                for idx, (actual, expected) in enumerate(zip(df[index_col], index_numbers)):
                     if not is_valid_row_number(actual, expected):
                         needs_fix.append(idx)
                 
                 if needs_fix:
-                    print(f"SQLite: Fixing {len(needs_fix)} excel_row values...")
+                    print(f"SQLite: Fixing {len(needs_fix)} index values...")
                     for idx in needs_fix:
-                        df.at[idx, excel_row_col] = excel_row_numbers[idx]
+                        df.at[idx, index_col] = index_numbers[idx]
                 
                 # Check for duplicates
-                duplicates = df[excel_row_col].duplicated(keep=False)
+                duplicates = df[index_col].duplicated(keep=False)
                 if duplicates.any():
                     num_duplicates = duplicates.sum()
-                    print(f"SQLite: Found {num_duplicates} duplicate excel_row values. Regenerating...")
+                    print(f"SQLite: Found {num_duplicates} duplicate index values. Regenerating...")
                     for idx in df[duplicates].index:
-                        df.at[idx, excel_row_col] = excel_row_numbers[idx]
+                        df.at[idx, index_col] = index_numbers[idx]
                 
-                # Move excel_row to first position if not already
+                # Move index to first position if not already
                 cols = df.columns.tolist()
-                if cols[0] != excel_row_col:
-                    cols.remove(excel_row_col)
-                    cols.insert(0, excel_row_col)
+                if cols[0] != index_col:
+                    cols.remove(index_col)
+                    cols.insert(0, index_col)
                     df = df[cols]
             
-            print(f"SQLite: excel_row column validated. Range: {excel_row_numbers[0]} to {excel_row_numbers[-1]}")
+            print(f"SQLite: index column validated. Range: {index_numbers[0]} to {index_numbers[-1]}")
             return df
     
     def _count_uuid_issues(self, df):
@@ -655,7 +655,7 @@ class SQLiteManager:
             if df is None:
                 return False
             
-            # 2. Add/validate excel_row column FIRST (before any other processing)
+            # 2. Add/validate index column FIRST (before any other processing)
             df = self._validate_and_fix_excel_rows(df, header_row)
             
             # 3. Validate and fix UUIDs if column exists (unless skipped)
@@ -769,9 +769,9 @@ class SQLiteManager:
             # 1. Sanitize column names
             sanitized_data = {}
             
-            # Add excel_row FIRST if provided
+            # Add index FIRST if provided (Excel row number)
             if excel_row is not None:
-                sanitized_data['excel_row'] = str(excel_row)
+                sanitized_data['index'] = str(excel_row)
             for key, value in row_data.items():
                 sanitized_key = self._sanitize_column_name(key)
                 sanitized_data[sanitized_key] = value
