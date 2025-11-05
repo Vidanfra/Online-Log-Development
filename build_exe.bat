@@ -5,7 +5,7 @@ REM Creates an executable using PyInstaller
 REM ========================================
 
 REM === VERSION CONFIGURATION ===
-SET VERSION=2.3
+SET VERSION=2.4
 REM ==============================
 
 echo.

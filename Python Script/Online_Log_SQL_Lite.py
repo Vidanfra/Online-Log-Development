@@ -28,7 +28,7 @@ start_time = time.perf_counter()
 
 # --- DEFINED CONSTANTS ---
 # APPLICATION VERSION
-APP_VERSION = "2.3"
+APP_VERSION = "2.4"
 
 # PATHS
 # Stores the last-used project path across sessions
@@ -198,6 +198,53 @@ class SQLiteManager:
             except:
                 pass
             self.conn = None
+    
+    def verify_wal_mode(self):
+        """
+        Verify and force WAL mode to ensure concurrent access works properly.
+        
+        Returns:
+            bool: True if WAL mode is active, False otherwise
+        """
+        try:
+            cursor = self.conn.cursor()
+            
+            # Check current journal mode
+            cursor.execute("PRAGMA journal_mode")
+            current_mode = cursor.fetchone()[0].lower()
+            
+            if current_mode != 'wal':
+                print(f"SQLite: WARNING - Database is in '{current_mode}' mode, attempting to enable WAL...")
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA journal_mode")
+                new_mode = cursor.fetchone()[0].lower()
+                
+                if new_mode == 'wal':
+                    print("SQLite: Successfully enabled WAL mode")
+                    self.conn.commit()
+                else:
+                    print(f"SQLite: CRITICAL - Cannot enable WAL mode. Current mode: {new_mode}")
+                    print("SQLite: Concurrent access will NOT work properly!")
+                    print("SQLite: Possible causes:")
+                    print("  - Database is on a network drive (not supported)")
+                    print("  - File permissions issue")
+                    print("  - Database file is corrupted")
+                    return False
+            else:
+                print("SQLite: Database is correctly in WAL mode")
+            
+            # Verify WAL checkpoint works
+            try:
+                cursor.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                print("SQLite: WAL checkpoint test successful")
+            except sqlite3.Error as e:
+                print(f"SQLite: WARNING - WAL checkpoint test failed: {e}")
+            
+            return True
+            
+        except sqlite3.Error as e:
+            print(f"SQLite: Error verifying WAL mode: {e}")
+            return False
     
     def _sanitize_column_name(self, name):
         """
@@ -1364,6 +1411,22 @@ class DataLoggerGUI:
             
             try:
                 self.sqlite_manager = SQLiteManager(self.db_path)
+                
+                # NEW: Verify WAL mode after connection
+                if not self.sqlite_manager.verify_wal_mode():
+                    messagebox.showwarning(
+                        "Database Configuration Issue",
+                        "The database could not be set to WAL mode.\n\n"
+                        "This may cause locking issues if Field Log Viewer is used while Online Logger is running.\n\n"
+                        "Possible causes:\n"
+                        "• Database is on a network drive (not recommended)\n"
+                        "• File permissions issue\n"
+                        "• Database file is corrupted\n\n"
+                        "Recommendation: Move database to a local drive (C:\\ or D:\\)",
+                        parent=self.master
+                    )
+                    # Don't disable, but warn the user
+                    print("SQLite: Continuing despite WAL mode issue...")
                 
                 # Count UUID issues before starting sync
                 def _count_and_ask():
