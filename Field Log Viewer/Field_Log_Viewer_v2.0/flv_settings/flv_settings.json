@@ -1,0 +1,57 @@
+{
+    "db_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/600061 - VIRE - CNOOC/CNO_600061_Online_Log_20251029.db",
+    "excel_path": "C:/Users/vicente.danvila/Desktop/PROJECTS/Online-Log-Development/600061 - VIRE - CNOOC/CNO_600061_Field_Log.xlsb",
+    "selected_table_name": "CNO_600061_Online_Log_20251029",
+    "keywords": [
+        "Log On",
+        "Log Off",
+        "SVP",
+        "On Deck ",
+        "Off Deck"
+    ],
+    "colors_rgb": [
+        [
+            255,
+            204,
+            204
+        ],
+        [
+            255,
+            255,
+            153
+        ],
+        [
+            204,
+            255,
+            204
+        ],
+        [
+            204,
+            229,
+            255
+        ],
+        [
+            255,
+            229,
+            204
+        ]
+    ],
+    "selected_columns": [
+        "index",
+        "UTC_Date_Time",
+        "Local_Date_Time",
+        "Runline",
+        "KP",
+        "KP_Ref",
+        "Event",
+        "Code",
+        "Latitude",
+        "Longitude",
+        "Easting_m",
+        "Northing_m",
+        "DCC",
+        "SBD_Files",
+        "Qinsy_DB",
+        "Sprint"
+    ]
+}
