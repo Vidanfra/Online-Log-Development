@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, colorchooser
+from tkinter import filedialog, messagebox, colorchooser, ttk
 import sqlite3
 import xlwings as xw
 import threading
@@ -7,20 +7,12 @@ import json
 import os
 import time
 
-# --- Constants (Modified) ---
+# --- Constants ---
 EVENT_COLUMN_NAME = 'Event'
-
-# Get the directory where this script is located
+DEFAULT_TABLE_NAME = 'DailyLog-Horizon_v14'
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Settings file should be in the same directory as the script
-SETTINGS_FILE = os.path.join(SCRIPT_DIR, 'flv_settings/flv_settings.json')
-
-# TABLE_NAME is now dynamic, but we keep the old name for status/settings defaults
-DEFAULT_TABLE_NAME = 'DailyLog-Horizon_v14' 
-UNIQUE_ID_COLUMN = 'index' 
-MAX_FETCH_RETRIES = 5
-
-
+SETTINGS_FILE = os.path.join(SCRIPT_DIR, 'flv_settings.json')
+DEFAULT_COLUMNS = ["DateTime", "Runline", "KP", "KP ref", "Event", "Latitude", "Longitude"]
 
 class ColumnSelector(tk.Toplevel):
     """A modal dialog window for selecting columns from a list."""
@@ -28,14 +20,12 @@ class ColumnSelector(tk.Toplevel):
         super().__init__(parent)
         self.title("Select Columns to Import")
         self.geometry("400x500")
-
         self.transient(parent)
         self.grab_set()
-
         self.result = None
         self.vars = {col: tk.BooleanVar(value=(col in selected_columns)) for col in all_columns}
 
-        # --- Main frame ---
+        # Main Layout
         main_frame = tk.Frame(self, padx=10, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -45,13 +35,13 @@ class ColumnSelector(tk.Toplevel):
         tk.Button(controls_frame, text="Select All", command=self._select_all).pack(side=tk.LEFT)
         tk.Button(controls_frame, text="Deselect All", command=self._deselect_all).pack(side=tk.LEFT, padx=10)
 
-        # Bottom buttons
+        # Bottom Buttons
         bottom_frame = tk.Frame(main_frame)
         bottom_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
         tk.Button(bottom_frame, text="OK", command=self._on_ok, width=10).pack(side=tk.RIGHT)
         tk.Button(bottom_frame, text="Cancel", command=self.destroy, width=10).pack(side=tk.RIGHT, padx=10)
 
-        # Scrollable Checkbox Area
+        # Scrollable Area
         scroll_area_frame = tk.Frame(main_frame)
         scroll_area_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -69,762 +59,493 @@ class ColumnSelector(tk.Toplevel):
         for col in all_columns:
             tk.Checkbutton(checkbox_frame, text=col, variable=self.vars[col]).pack(anchor='w')
         
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-
     def _select_all(self):
-        for var in self.vars.values():
-            var.set(True)
+        for var in self.vars.values(): var.set(True)
 
     def _deselect_all(self):
-        for var in self.vars.values():
-            var.set(False)
+        for var in self.vars.values(): var.set(False)
 
     def _on_ok(self):
         self.result = [col for col, var in self.vars.items() if var.get()]
         if not self.result:
-            messagebox.showwarning("No Columns Selected", "You must select at least one column to import.", parent=self)
+            messagebox.showwarning("No Columns Selected", "You must select at least one column.")
             return
         self.destroy()
 
 # ==============================================================================
-# ----------------------------- ExcelUpdaterApp Class --------------------------
+# ----------------------------- LogViewerApp Class -----------------------------
 # ==============================================================================
 
-class ExcelUpdaterApp:
+class LogViewerApp:
     def __init__(self, root):
-        """Initialize the GUI application."""
         self.root = root
-        self.root.title("Excel Updater from SQLite DB (Index Sync)")
-        self.root.geometry("650x700")  # Increased height to ensure status bar is always visible 
+        self.root.title("Field Log Viewer (Native)")
+        self.root.geometry("1100x800") 
 
-        # --- Settings File ---
+        # --- APPLY GRID STYLING ---
+        style = ttk.Style()
+        style.theme_use("clam") 
+        
+        style.configure("Treeview", 
+                        background="white",
+                        foreground="black",
+                        rowheight=25,
+                        fieldbackground="white")
+        
+        style.configure("Treeview.Heading", 
+                        font=('Arial', 9, 'bold'),
+                        background="#d9d9d9",
+                        foreground="black")
+        
+        style.map('Treeview', background=[('selected', '#0078D7')])
+
+        # --- State Variables ---
         self.settings_file = SETTINGS_FILE
-        
-        # --- Data for column selection ---
         self.all_db_columns = []
-        self.selected_db_columns = [] # This is the single source of truth for column selection!
-        
-        # --- Table Selection Variables ---
+        self.selected_db_columns = [] 
         self.available_tables = []
-        self.selected_table_name = tk.StringVar(value=DEFAULT_TABLE_NAME) # Will hold the table name
-
+        self.selected_table_name = tk.StringVar(value=DEFAULT_TABLE_NAME)
         self.db_path = tk.StringVar()
-        self.excel_path = tk.StringVar()
-        
-        # --- Dynamic keyword management lists ---
         self.keyword_widgets = [] 
-        self.selected_colors_rgb = [
-            (255, 204, 204), (255, 255, 153), (204, 255, 204),
-            (204, 229, 255), (255, 229, 204), (229, 204, 255),
-            (204, 255, 255), (255, 204, 255), (255, 240, 200), (200, 240, 255) 
-        ]
+        self.selected_colors_rgb = []
+        self.temp_cell_value = "" 
         
-        # --- Tracking largest successful DB pull size ---
-        self.max_db_count = 0
+        # --- Data Cache for Filtering ---
+        self.full_dataset = []      # Stores all rows from DB
+        self.current_display_cols = []
+        self.current_event_idx = -1
+        self.active_highlight_rules = []
 
-        # Create status bar FIRST (before main_frame) so it's always visible
-        self.status_label = tk.Label(root, text="Ready. Please select files and enter keywords.", bd=1, relief=tk.SUNKEN, anchor=tk.W, padx=5, pady=3)
+        # --- Top Control Panel ---
+        control_frame = tk.Frame(root, padx=10, pady=10)
+        control_frame.pack(side=tk.TOP, fill=tk.X)
+
+        # Row 0: DB Selection
+        tk.Label(control_frame, text="Database:").grid(row=0, column=0, sticky='w')
+        tk.Entry(control_frame, textvariable=self.db_path, width=60).grid(row=0, column=1, padx=5, sticky='w')
+        tk.Button(control_frame, text="Browse...", command=self.select_db_file).grid(row=0, column=2, padx=5, sticky='w')
+        
+        # Row 1: Table & Columns
+        tk.Label(control_frame, text="Table:").grid(row=1, column=0, sticky='w', pady=5)
+        self.table_option_menu = tk.OptionMenu(control_frame, self.selected_table_name, DEFAULT_TABLE_NAME, command=self._on_table_selected)
+        self.table_option_menu.grid(row=1, column=1, sticky='ew', padx=5)
+        self.select_columns_button = tk.Button(control_frame, text="Select Columns...", command=self.open_column_selector, state='disabled')
+        self.select_columns_button.grid(row=1, column=2, padx=5, sticky='w')
+
+        # Row 2: Keywords Frame
+        kw_frame = tk.LabelFrame(control_frame, text="Highlight Rules (Comma separated keywords)")
+        kw_frame.grid(row=2, column=0, columnspan=3, sticky='ew', pady=10)
+        
+        self.keyword_scroll_frame = tk.Frame(kw_frame)
+        self.keyword_scroll_frame.pack(fill='x', expand=True, padx=5, pady=5)
+        
+        tk.Button(kw_frame, text="+ Add Rule", command=lambda: self.add_keyword_row(len(self.keyword_widgets))).pack(anchor='w', padx=5, pady=(0,5))
+
+        # Row 3: Action Buttons AND Filter
+        btn_frame = tk.Frame(control_frame)
+        btn_frame.grid(row=3, column=0, columnspan=3, pady=10)
+        
+        self.load_btn = tk.Button(btn_frame, text="🔄 Load Data to Viewer", command=self.start_load_thread, bg="#4CAF50", fg="white", font=('Arial', 10, 'bold'), padx=15, pady=5)
+        self.load_btn.pack(side=tk.LEFT, padx=(0, 20))
+
+        tk.Button(btn_frame, text="📤 Export to Excel", command=self.export_to_excel, bg="#2196F3", fg="white", font=('Arial', 10), padx=15, pady=5).pack(side=tk.LEFT, padx=(0, 40))
+
+        # --- FILTER UI ---
+        tk.Label(btn_frame, text="🔍 Filter Events:", font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+        self.filter_var = tk.StringVar()
+        # Bind the key release event to filter instantly as you type
+        self.filter_entry = tk.Entry(btn_frame, textvariable=self.filter_var, width=30)
+        self.filter_entry.pack(side=tk.LEFT, padx=5)
+        self.filter_entry.bind("<KeyRelease>", self.apply_filter)
+        
+        # --- Bottom: Data Viewer (Treeview) ---
+        tree_frame = tk.Frame(root)
+        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Scrollbars
+        tree_scroll_y = tk.Scrollbar(tree_frame)
+        tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        tree_scroll_x = tk.Scrollbar(tree_frame, orient=tk.HORIZONTAL)
+        tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.tree = ttk.Treeview(tree_frame, yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        tree_scroll_y.config(command=self.tree.yview)
+        tree_scroll_x.config(command=self.tree.xview)
+
+        # --- COPY FUNCTIONALITY ---
+        self.tree.bind("<Control-c>", lambda e: self.copy_selection_to_clipboard())
+        
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="Copy Cell Value", command=self.copy_clicked_cell)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Copy Selected Row(s)", command=self.copy_selection_to_clipboard)
+        
+        self.tree.bind("<Button-3>", self.show_context_menu) # Windows/Linux
+        self.tree.bind("<Button-2>", self.show_context_menu) # MacOS
+
+        # Status Bar
+        self.status_label = tk.Label(root, text="Ready.", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Now create main frame - it will fill remaining space above status bar
-        main_frame = tk.Frame(root, padx=15, pady=15)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        main_frame.columnconfigure(0, weight=1)
-
-        # --- File Selection Widgets (Row 0-1) ---
-        tk.Label(main_frame, text="1. Select SQLite Database File:", anchor='w').grid(row=0, column=0, columnspan=3, sticky='ew', pady=(0, 5))
-        db_entry = tk.Entry(main_frame, textvariable=self.db_path, state='readonly')
-        db_entry.grid(row=1, column=0, sticky='ew', ipady=4)
-        self.select_columns_button = tk.Button(main_frame, text="Select Columns...", command=self.open_column_selector, state='disabled')
-        self.select_columns_button.grid(row=1, column=1, sticky='ew', padx=(10, 0))
-        tk.Button(main_frame, text="Browse...", command=self.select_db_file).grid(row=1, column=2, sticky='ew', padx=(10, 0))
-        
-        # --- Table Selection Widgets (New Row 2) ---
-        table_frame = tk.Frame(main_frame)
-        table_frame.grid(row=2, column=0, columnspan=3, sticky='ew', pady=(10, 5))
-        tk.Label(table_frame, text="2. Select Database Table:", anchor='w').pack(side=tk.LEFT)
-        
-        self.table_option_menu = tk.OptionMenu(table_frame, self.selected_table_name, DEFAULT_TABLE_NAME, command=self._on_table_selected)
-        self.table_option_menu.config(state='disabled')
-        self.table_option_menu.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
-        
-        # --- Excel File Selection (Old Row 2, now Row 3) ---
-        tk.Label(main_frame, text="3. Select Target Excel File:", anchor='w').grid(row=3, column=0, columnspan=3, sticky='ew', pady=(10, 5))
-        excel_entry = tk.Entry(main_frame, textvariable=self.excel_path, state='readonly')
-        excel_entry.grid(row=4, column=0, sticky='ew', ipady=4)
-        tk.Button(main_frame, text="Browse...", command=self.select_excel_file).grid(row=4, column=2, sticky='ew', padx=(10, 0))
-
-        # --- Status Label for Index Requirement (Old Row 4, now Row 5) ---
-        tk.Label(main_frame, 
-                 text=f"The program synchronizes by appending new data and deleting obsolete data using the '{UNIQUE_ID_COLUMN}' column.", 
-                 anchor='w', fg='blue').grid(row=5, column=0, columnspan=3, sticky='ew', pady=(10, 10))
-
-
-        # --- KEYWORDS FRAME (Old Row 5, now Row 6) ---
-        keywords_container = tk.LabelFrame(main_frame, text="4. Enter Keywords and Choose Highlight Colors", padx=10, pady=10)
-        keywords_container.grid(row=6, column=0, columnspan=3, sticky='ew', pady=(20, 10))
-        keywords_container.columnconfigure(0, weight=1)
-
-        # Frame to hold the dynamically added keyword rows
-        self.keyword_rows_frame = tk.Frame(keywords_container)
-        self.keyword_rows_frame.pack(fill='x', expand=True)
-        self.keyword_rows_frame.columnconfigure(0, weight=1)
-        
-        # Add Button to add more rows
-        add_button_frame = tk.Frame(keywords_container)
-        add_button_frame.pack(fill='x', pady=(10, 0))
-        tk.Button(add_button_frame, text="+ Add Rule", command=lambda: self.add_keyword_row(len(self.keyword_widgets))).pack(side=tk.LEFT)
-        # --- END KEYWORDS FRAME ---
-        
-        # --- General Settings/Save Frame (New Row 7) ---
-        settings_control_frame = tk.Frame(main_frame)
-        settings_control_frame.grid(row=8, column=0, columnspan=3, sticky='ew', pady=(5, 5))
-
-        tk.Button(settings_control_frame, 
-                  text="💾 Manually Save Settings", 
-                  command=self.manual_save_settings_click,
-                  bg="#1E90FF", fg="white", 
-                  font=('Helvetica', 10, 'bold')).pack(side=tk.RIGHT, padx=5)
-
-
-        self.update_button = tk.Button(main_frame, text="Synchronize Excel Sheet", command=self.start_update_thread, bg="#4CAF50", fg="white", font=('Helvetica', 10, 'bold'))
-        self.update_button.grid(row=9, column=0, columnspan=3, pady=(15, 10), ipady=8, sticky='ew') # Changed to row 9
-
-        # Status bar was already created earlier (before main_frame)
-        # This ensures it's always visible at the bottom
-
         self.load_settings()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     # ==========================================================================
-    # --- New Manual Save Method ---
+    # --- Copy/Paste Logic ---
     # ==========================================================================
-    
-    def manual_save_settings_click(self):
-        """Saves current settings and provides user feedback."""
-        try:
-            self.save_settings()
-            self.status_label.config(text="Settings manually saved.")
-        except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save settings: {e}")
-
-    # ==========================================================================
-    # --- Other Methods ---
-    # ==========================================================================
-    
-    def _fetch_table_names(self):
-        """Connects to the DB and returns a list of all non-sqlite tables."""
-        db_path = self.db_path.get()
-        if not db_path:
-            return []
+    def show_context_menu(self, event):
+        row_id = self.tree.identify_row(event.y)
+        col_id = self.tree.identify_column(event.x)
         
-        conn = None
-        try:
-            # Added timeout here for good measure, though not strictly required for SELECT on master table
-            conn = sqlite3.connect(db_path, timeout=10.0) 
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-            tables = sorted([row[0] for row in cursor.fetchall()])
-            return tables
-        except Exception as e:
-            print(f"Error fetching tables: {e}")
-            return []
-        finally:
-            if conn:
-                conn.close()
-
-    def _update_table_option_menu(self):
-        """Updates the OptionMenu with the newly fetched table names."""
-        self.available_tables = self._fetch_table_names()
-        
-        menu = self.table_option_menu["menu"]
-        menu.delete(0, "end") # Clear existing options
-
-        if not self.available_tables:
-            self.table_option_menu.config(state='disabled')
-            self.selected_table_name.set("No Tables Found")
-            return
-        
-        self.table_option_menu.config(state='normal')
-
-        # Add all fetched tables to the menu
-        for table in self.available_tables:
-            menu.add_command(label=table, command=tk._setit(self.selected_table_name, table, self._on_table_selected))
-
-        # Restore previously selected table or set to the first one found
-        current_selection = self.selected_table_name.get()
-        if current_selection not in self.available_tables:
-            if self.available_tables:
-                # Use the default table name if it exists, otherwise use the first table
-                if DEFAULT_TABLE_NAME in self.available_tables:
-                    self.selected_table_name.set(DEFAULT_TABLE_NAME)
+        if row_id:
+            if row_id not in self.tree.selection():
+                self.tree.selection_set(row_id)
+            
+            try:
+                col_index = int(col_id.replace('#', '')) - 1
+                values = self.tree.item(row_id)['values']
+                if 0 <= col_index < len(values):
+                    self.temp_cell_value = str(values[col_index])
                 else:
-                    self.selected_table_name.set(self.available_tables[0])
-            else:
-                self.selected_table_name.set("Select Table")
-        
-        self._load_and_set_db_columns() # Load columns for the new selection
+                    self.temp_cell_value = ""
+            except Exception:
+                self.temp_cell_value = ""
 
-    def _on_table_selected(self, table_name):
-        """Callback when a table is selected from the OptionMenu."""
-        self.status_label.config(text=f"Table selected: {table_name}. Loading columns...")
-        self.save_settings()
-        self._load_and_set_db_columns()
+            state = "normal" if self.temp_cell_value else "disabled"
+            self.context_menu.entryconfig("Copy Cell Value", state=state)
+            self.context_menu.post(event.x_root, event.y_root)
+
+    def copy_clicked_cell(self):
+        if self.temp_cell_value:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.temp_cell_value)
+            self.root.update() 
+
+    def copy_selection_to_clipboard(self):
+        selected_items = self.tree.selection()
+        if not selected_items: return
+
+        text_to_copy = ""
+        for item_id in selected_items:
+            values = self.tree.item(item_id)['values']
+            line = "\t".join(str(v) if v is not None else "" for v in values)
+            text_to_copy += line + "\n"
+
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text_to_copy)
+        self.root.update()
+        self.status_label.config(text=f"Copied {len(selected_items)} rows to clipboard.")
 
     # ==========================================================================
-    # --- Keyword and Color Methods ---
+    # --- Settings & UI Logic ---
     # ==========================================================================
-
     def add_keyword_row(self, index, initial_keyword="", initial_rgb=None):
-        """Dynamically creates a new keyword entry row."""
-        
-        # FIX for ZeroDivisionError: Use the fixed default colors list for initial indexing
         default_fixed_colors = [
             (255, 204, 204), (255, 255, 153), (204, 255, 204),
-            (204, 229, 255), (255, 229, 204), (229, 204, 255),
-            (204, 255, 255), (255, 204, 255), (255, 240, 200), (200, 240, 255) 
+            (204, 229, 255), (255, 229, 204)
         ]
         
         if initial_rgb is None:
-            # Use the fixed list length to calculate the default color index
-            default_color_index = index % len(default_fixed_colors)
-            initial_rgb = default_fixed_colors[default_color_index]
+            initial_rgb = default_fixed_colors[index % len(default_fixed_colors)]
             
-        # Append the chosen or default color to the instance's tracking list.
         if index < len(self.selected_colors_rgb):
             self.selected_colors_rgb[index] = initial_rgb
         else:
             self.selected_colors_rgb.append(initial_rgb)
 
-
-        row_frame = tk.Frame(self.keyword_rows_frame)
-        row_frame.grid(row=index, column=0, sticky='ew', pady=4)
-        row_frame.columnconfigure(0, weight=1)
-
+        row_frame = tk.Frame(self.keyword_scroll_frame)
+        row_frame.pack(fill='x', pady=2)
+        
         entry = tk.Entry(row_frame)
         entry.insert(0, initial_keyword)
-        entry.grid(row=0, column=0, sticky='ew', padx=(0, 10))
+        entry.pack(side=tk.LEFT, fill='x', expand=True, padx=5)
         
         color_label = tk.Label(row_frame, width=4, relief='sunken', bg=self.get_hex_from_rgb(initial_rgb))
-        color_label.grid(row=0, column=1, padx=(0, 10))
+        color_label.pack(side=tk.LEFT, padx=5)
         
-        color_button = tk.Button(row_frame, text="Choose Color...", command=lambda idx=index: self.choose_color(idx))
-        color_button.grid(row=0, column=2)
-
-        self.keyword_widgets.append({
-            'row_frame': row_frame,
-            'entry': entry, 
-            'label': color_label, 
-            'index': index 
-        })
-
-    def on_closing(self):
-        self.save_settings()
-        self.root.destroy()
-
-    def save_settings(self):
-        current_keywords = [widget['entry'].get() for widget in self.keyword_widgets]
-        colors_to_save = self.selected_colors_rgb[:len(current_keywords)] 
+        tk.Button(row_frame, text="Color...", command=lambda idx=index: self.choose_color(idx)).pack(side=tk.LEFT)
         
-        settings = {
-            "db_path": self.db_path.get(),
-            "excel_path": self.excel_path.get(),
-            "selected_table_name": self.selected_table_name.get(), # Save the selected table
-            "keywords": current_keywords,
-            "colors_rgb": colors_to_save,
-            "selected_columns": self.selected_db_columns # This is where the column list is saved
-        }
-        try:
-            with open(self.settings_file, 'w') as f:
-                json.dump(settings, f, indent=4)
-        except Exception as e:
-            print(f"Error saving settings: {e}")
-
-    def load_settings(self):
-        
-        default_keywords = ["CRITICAL, FATAL", "ERROR", "WARNING, Failure, Low"]
-        
-        # Reset dynamic components
-        for widget in self.keyword_widgets:
-            widget['row_frame'].destroy()
-        self.keyword_widgets = []
-        self.selected_colors_rgb = []
-        
-        
-        if not os.path.exists(self.settings_file):
-            # Create default keyword rows if no settings file exists
-            for i, keyword in enumerate(default_keywords):
-                self.add_keyword_row(i, initial_keyword=keyword)
-            # Important: Table name will be the DEFAULT_TABLE_NAME constant
-            return
-
-        try:
-            with open(self.settings_file, 'r') as f:
-                settings = json.load(f)
-                
-            self.db_path.set(settings.get("db_path", ""))
-            self.excel_path.set(settings.get("excel_path", ""))
-            self.selected_table_name.set(settings.get("selected_table_name", DEFAULT_TABLE_NAME)) # Load saved table
-            self.selected_db_columns = settings.get("selected_columns", []) 
-            
-            loaded_keywords = settings.get("keywords", [])
-            loaded_colors = settings.get("colors_rgb", [])
-
-            if not loaded_keywords:
-                loaded_keywords = default_keywords
-                
-            for i, keyword in enumerate(loaded_keywords):
-                color = tuple(loaded_colors[i]) if i < len(loaded_colors) else None
-                self.add_keyword_row(i, initial_keyword=keyword, initial_rgb=color)
-            
-            # After loading DB path, fetch tables and columns
-            if self.db_path.get():
-                self._update_table_option_menu()
-            
-            self.status_label.config(text="Settings loaded successfully.")
-        except Exception as e:
-            self.status_label.config(text=f"Error loading settings: {e}. Using defaults.")
-            # Ensure defaults are created if loading fails
-            for i, keyword in enumerate(default_keywords):
-                self.add_keyword_row(i, initial_keyword=keyword)
-            self.selected_table_name.set(DEFAULT_TABLE_NAME)
-
+        self.keyword_widgets.append({'row_frame': row_frame, 'entry': entry, 'label': color_label, 'index': index})
 
     def choose_color(self, index):
-        while index >= len(self.selected_colors_rgb):
-            self.selected_colors_rgb.append((255, 255, 255)) 
-
-        initial_color_rgb = self.selected_colors_rgb[index]
-        initial_color_hex = self.get_hex_from_rgb(initial_color_rgb)
-        
-        color_data = colorchooser.askcolor(title="Choose highlight color", initialcolor=initial_color_hex)
-        
+        color_data = colorchooser.askcolor(initialcolor=self.get_hex_from_rgb(self.selected_colors_rgb[index]))
         if color_data and color_data[0]:
-            new_rgb = tuple(map(int, color_data[0]))
-            self.selected_colors_rgb[index] = new_rgb
-            
-            widget_match = next((w for w in self.keyword_widgets if w['index'] == index), None)
-            if widget_match:
-                widget_match['label'].config(bg=color_data[1])
-            
-            self.save_settings()
+            self.selected_colors_rgb[index] = tuple(map(int, color_data[0]))
+            self.keyword_widgets[index]['label'].config(bg=color_data[1])
 
-    def get_hex_from_rgb(self, rgb_tuple):
-        return f'#{int(rgb_tuple[0]):02x}{int(rgb_tuple[1]):02x}{int(rgb_tuple[2]):02x}'
+    def get_hex_from_rgb(self, rgb): return f'#{int(rgb[0]):02x}{int(rgb[1]):02x}{int(rgb[2]):02x}'
+    
+    def save_settings(self):
+        settings = {
+            "db_path": self.db_path.get(),
+            "selected_table_name": self.selected_table_name.get(),
+            "keywords": [w['entry'].get() for w in self.keyword_widgets],
+            "colors_rgb": self.selected_colors_rgb[:len(self.keyword_widgets)],
+            "selected_columns": self.selected_db_columns
+        }
+        try:
+            with open(self.settings_file, 'w') as f: json.dump(settings, f, indent=4)
+        except: pass
 
+    def load_settings(self):
+        for w in self.keyword_widgets: w['row_frame'].destroy()
+        self.keyword_widgets = []
+        self.selected_colors_rgb = []
+
+        if os.path.exists(self.settings_file):
+            try:
+                with open(self.settings_file, 'r') as f:
+                    data = json.load(f)
+                    self.db_path.set(data.get("db_path", ""))
+                    self.selected_table_name.set(data.get("selected_table_name", DEFAULT_TABLE_NAME))
+                    self.selected_db_columns = data.get("selected_columns", [])
+                    kw = data.get("keywords", ["Error", "Warning"])
+                    cl = data.get("colors_rgb", [])
+                    for i, k in enumerate(kw):
+                        c = tuple(cl[i]) if i < len(cl) else None
+                        self.add_keyword_row(i, k, c)
+                if self.db_path.get(): self._update_table_option_menu()
+            except:
+                 self.add_keyword_row(0, "Error")
+        else:
+            self.add_keyword_row(0, "Error")
+
+    # ==========================================================================
+    # --- DB & Column Logic ---
+    # ==========================================================================
     def select_db_file(self):
-        path = filedialog.askopenfilename(title="Select a Database File", filetypes=(("SQLite files", "*.db *.sqlite *.sqlite3"), ("All files", "*.*")))
+        path = filedialog.askopenfilename(filetypes=(("SQLite DB", "*.db *.sqlite *.sqlite3"), ("All Files", "*.*")))
         if path:
             self.db_path.set(path)
-            self.status_label.config(text=f"Database selected: {path}. Fetching tables...")
-            self._update_table_option_menu() # Fetch tables upon DB selection
+            self._update_table_option_menu()
             self.save_settings()
+
+    def _fetch_table_names(self):
+        if not self.db_path.get(): return []
+        try:
+            conn = sqlite3.connect(self.db_path.get())
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            res = sorted([row[0] for row in cursor.fetchall()])
+            conn.close()
+            return res
+        except: return []
+
+    def _update_table_option_menu(self):
+        self.available_tables = self._fetch_table_names()
+        menu = self.table_option_menu["menu"]
+        menu.delete(0, "end")
+        
+        if not self.available_tables:
+            self.table_option_menu.config(state='disabled')
+            self.selected_table_name.set("No Tables Found")
+            return
+            
+        self.table_option_menu.config(state='normal')
+        for t in self.available_tables:
+            menu.add_command(label=t, command=tk._setit(self.selected_table_name, t, self._on_table_selected))
+            
+        if self.selected_table_name.get() not in self.available_tables:
+            if DEFAULT_TABLE_NAME in self.available_tables:
+                self.selected_table_name.set(DEFAULT_TABLE_NAME)
+            else:
+                self.selected_table_name.set(self.available_tables[0])
+                
+        self._load_and_set_db_columns()
+
+    def _on_table_selected(self, val):
+        self._load_and_set_db_columns()
+        self.save_settings()
 
     def _load_and_set_db_columns(self):
-        """Reads column headers from the selected DB and enables the column selector."""
-        db_path = self.db_path.get()
-        table_name = self.selected_table_name.get()
-
-        if not db_path or table_name in ("No Tables Found", "Select Table", DEFAULT_TABLE_NAME) and DEFAULT_TABLE_NAME not in self.available_tables:
-            self.all_db_columns = []
-            self.selected_db_columns = []
-            self.select_columns_button.config(state='disabled')
-            return
-
-        conn = None
         try:
-            conn = sqlite3.connect(db_path, timeout=10.0)
+            conn = sqlite3.connect(self.db_path.get())
             cursor = conn.cursor()
-            
-            cursor.execute(f'PRAGMA table_info("{table_name}")') 
-            
+            cursor.execute(f'PRAGMA table_info("{self.selected_table_name.get()}")')
             self.all_db_columns = [info[1] for info in cursor.fetchall()]
             conn.close()
-
-            # --- FIX: Direct persistence logic using the loaded data ---
             
-            # Check if the existing selected_db_columns (loaded from settings) 
-            # are still valid for the current table.
+            valid_existing_selection = [c for c in self.selected_db_columns if c in self.all_db_columns]
             
-            # **The fix is primarily in this block:**
-            if self.selected_db_columns:
-                # Filter the loaded selection against the newly fetched all_db_columns
-                valid_saved = [col for col in self.selected_db_columns if col in self.all_db_columns]
-                
-                # Check if we have at least one valid column from the saved setting.
-                if valid_saved:
-                    # Crucially, ONLY use the saved columns. We don't need a percentage check 
-                    # as the user wants their specific selection.
-                    self.selected_db_columns = valid_saved
-                else:
-                    # Saved data had no columns in common with the new table, default to all.
-                    self.selected_db_columns = self.all_db_columns[:]
+            if valid_existing_selection:
+                self.selected_db_columns = valid_existing_selection
             else:
-                # No selection loaded from settings, default to all.
-                self.selected_db_columns = self.all_db_columns[:]
-
-            # End Fix
+                default_matches = [c for c in DEFAULT_COLUMNS if c in self.all_db_columns]
+                if default_matches:
+                    self.selected_db_columns = default_matches
+                else:
+                    self.selected_db_columns = self.all_db_columns[:]
             
             self.select_columns_button.config(state='normal')
-            self.status_label.config(text=f"Table '{table_name}' loaded. {len(self.selected_db_columns)} of {len(self.all_db_columns)} columns selected.")
-        except Exception as e:
-            messagebox.showerror("Database Error", f"Could not read table info from '{table_name}':\n{e}")
-            self.all_db_columns = []
-            self.selected_db_columns = []
-            self.select_columns_button.config(state='disabled')
-        finally:
-            if conn:
-                conn.close()
+        except: pass
 
     def open_column_selector(self):
-        """Opens the Toplevel window for column selection."""
         dialog = ColumnSelector(self.root, self.all_db_columns, self.selected_db_columns)
         self.root.wait_window(dialog)
-        if dialog.result is not None:
+        if dialog.result:
             self.selected_db_columns = dialog.result
-            self.status_label.config(text=f"{len(self.selected_db_columns)} of {len(self.all_db_columns)} columns selected. Saving selection...")
             self.save_settings()
 
-    def select_excel_file(self):
-        path = filedialog.askopenfilename(title="Select an Excel File", filetypes=(("Excel files", "*.xlsx *.xls *.xlsm *.xlsb"), ("All files", "*.*")))
-        if path:
-            self.excel_path.set(path)
-            self.status_label.config(text=f"Excel file selected: {path}")
+    # ==========================================================================
+    # --- DATA LOADING & FILTERING ---
+    # ==========================================================================
+    def start_load_thread(self):
+        if not self.db_path.get():
+            messagebox.showerror("Error", "Select a database file first.")
+            return
+        self.save_settings()
+        self.load_btn.config(state='disabled', text="Loading...")
+        # Clear current filter when reloading data
+        self.filter_var.set("") 
+        threading.Thread(target=self.load_data_to_treeview, daemon=True).start()
+
+    def load_data_to_treeview(self):
+        try:
+            cols = self.selected_db_columns
+            if not cols: return
             
-
-    def start_update_thread(self):
-        if not self.db_path.get() or not self.excel_path.get():
-            messagebox.showerror("Error", "Please select both a database and an Excel file.")
-            return
-        if not self.selected_db_columns:
-            messagebox.showerror("Error", "No columns are selected to import. Please use the 'Select Columns...' button.")
-            return
-        if UNIQUE_ID_COLUMN not in self.selected_db_columns:
-            messagebox.showerror("Error", f"Synchronization requires the '{UNIQUE_ID_COLUMN}' column to be selected.")
-            return
-
-        self.update_button.config(state=tk.DISABLED, text="Synchronizing...")
-        thread = threading.Thread(target=self.update_sheet)
-        thread.daemon = True
-        thread.start()
-
-    # --- ID Standardization Helper Function (KEPT) ---
-    def standardize_id(self, id_raw):
-        """
-        Converts ID from database or Excel into a clean string format (e.g., '631').
-        Handles float string formats like '631.0' that Excel can produce.
-        """
-        if id_raw is None:
-            return None
-        
-        id_str = str(id_raw).strip()
-        
-        # Check if the string can be cleanly converted to an integer
-        try:
-            # If it's a float-string (e.g., '3242.0'), convert it to int first to drop the .0
-            if '.' in id_str and id_str.endswith('.0'):
-                return str(int(float(id_str)))
-            # If it's just a number string, try to clean it up
-            return str(int(id_str))
-        except ValueError:
-            # If it's not a standard number (e.g., a text-based index), return the original string
-            return id_str
-        
-    def fetch_data_once(self, query):
-        """Executes the query once and returns the data."""
-        conn = None
-        try:
-            # --- FIX: Added timeout=10.0 (seconds) ---
-            conn = sqlite3.connect(self.db_path.get(), timeout=10.0) 
+            conn = sqlite3.connect(self.db_path.get())
             cursor = conn.cursor()
+            safe_cols = [f'"{c}"' for c in cols]
+            query = f'SELECT {", ".join(safe_cols)} FROM "{self.selected_table_name.get()}"'
             cursor.execute(query)
-            data = cursor.fetchall()
-            return data
-        # IMPORTANT: Catching sqlite3.OperationalError for a clean exit on lock/timeout
-        except sqlite3.OperationalError as e:
-            # --- Added diagnostic print for clear feedback when a lock occurs ---
-            print(f"Database access failed (Lock/Timeout/Operational Error): {e}")
-            return []
-        finally:
-            if conn:
-                conn.close()
-
-    def get_unique_id_count(self, data, unique_id_col_index):
-        """Helper to get the count of unique, standardized IDs."""
-        if not data:
-            return 0
-        db_ids = set(self.standardize_id(row[unique_id_col_index]) for row in data)
-        db_ids.discard(None)
-        return len(db_ids)
-
-    def fetch_with_retry(self, query, unique_id_col_index):
-        """
-        Fetches data from DB with retry logic based on count consistency and maximum count seen.
-        """
-        
-        largest_data_so_far = []
-        largest_count_so_far = self.max_db_count
-        
-        for attempt in range(MAX_FETCH_RETRIES):
-            self.root.after(0, lambda: self.status_label.config(text=f"DB Fetch Attempt {attempt + 1}: Retrieving data..."))
             
-            # --- Fetch 1 ---
-            data1 = self.fetch_data_once(query)
-            count1 = self.get_unique_id_count(data1, unique_id_col_index)
-            
-            # --- CRITICAL FIX: If count is low/zero, wait longer and retry immediately ---
-            if count1 < 100 and count1 < largest_count_so_far:
-                print(f"DB Fetch Warning: Initial pull failed (Count: {count1}). Waiting 1.0s and retrying...")
-                time.sleep(1.0)
-                data1 = self.fetch_data_once(query)
-                count1 = self.get_unique_id_count(data1, unique_id_col_index)
-                
-            # --- Fetch 2 (Validation) ---
-            time.sleep(0.2) # Increased pause to 200ms
-            data2 = self.fetch_data_once(query)
-            count2 = self.get_unique_id_count(data2, unique_id_col_index)
-            
-            # Update largest count seen
-            current_max = max(count1, count2)
-            if current_max > largest_count_so_far:
-                largest_count_so_far = current_max
-                largest_data_so_far = data1 if count1 >= count2 else data2
+            # --- Store data in Memory for filtering ---
+            self.full_dataset = cursor.fetchall()
+            self.current_display_cols = cols
+            conn.close()
 
-            
-            if count1 == count2:
-                # Stable pull achieved.
-                if count1 >= self.max_db_count:
-                    # Stable and >= historical max. SUCCESS condition.
-                    print(f"DB Fetch Success: Stable count {count1} confirmed (Attempt {attempt + 1}).")
-                    self.max_db_count = count1 # Update the historical max count
-                    return data1 # Return the stable data
-
-                elif count1 < self.max_db_count:
-                    # Stable but smaller than the historical max (e.g., stable 5874 < max 6126).
-                    # This means data was deleted OR the DB is currently only allowing partial pulls.
-                    print(f"DB Fetch Warning: Stable count {count1} is lower than historical Max Seen ({self.max_db_count}).")
-
-                    if attempt == MAX_FETCH_RETRIES - 1:
-                        # On final attempt, accept the largest dataset found so far.
-                        print(f"DB Fetch Returning: Max retries reached. Returning largest dataset seen ({largest_count_so_far}).")
-                        return largest_data_so_far
-                    
-                    # Otherwise, continue retrying, hoping the max count will appear.
-            
-            else:
-                print(f"DB Fetch Warning: Counts mismatched (Attempt {attempt + 1}). Count 1: {count1}, Count 2: {count2}. Largest seen: {largest_count_so_far}. Retrying...")
-                
-                if attempt == MAX_FETCH_RETRIES - 1:
-                    # Last attempt: return the largest dataset retrieved.
-                    print(f"DB Fetch Failure: Could not achieve stability. Returning largest dataset fetched: {largest_count_so_far}.")
-                    return largest_data_so_far if largest_data_so_far else data1
-
-                # --- MODIFIED LINE: Wait longer between retries (increased from 0.5 to 1.5) ---
-                time.sleep(1.5) # Wait before next retry set
-
-        return [] # Should only be reached if MAX_FETCH_RETRIES=0
-    
-    def _apply_highlights_to_range(self, sheet, data_range, event_col_index, highlight_rules):
-        """Applies keyword-based highlighting to a given xlwings Range."""
-        if not highlight_rules or event_col_index == -1:
-            return
-
-        # Read all event cells once to minimize calls to Excel
-        try:
-            event_cells = data_range.columns[event_col_index].value
-            # Ensure it's a list even if it's a single cell value
-            if not isinstance(event_cells, list):
-                event_cells = [event_cells] if event_cells is not None else []
-        except Exception as e:
-            print(f"Error reading event column for highlighting: {e}")
-            return
-
-        for i, cell_content_raw in enumerate(event_cells):
-            cell_content = str(cell_content_raw).strip().lower()
-            
-            # Apply highlighting if any phrase matches
-            for rule in highlight_rules:
-                if any(phrase in cell_content for phrase in rule['phrases']):
-                    row_to_format = data_range.rows[i]
-                    row_to_format.color = rule['color']
-                    
-                    # Apply borders (same as your existing logic)
-                    for border_id in [7, 8, 9, 10, 11]:
-                        border = row_to_format.api.Borders(border_id)
-                        border.LineStyle = 1
-                        border.Weight = 2
-                        border.ColorIndex = 15
-                    break
-
-    def update_sheet(self):
-        app, wb = None, None
-        
-        try:
-            # 0. --- Dynamic keyword reading ---
-            highlight_rules = []
+            # Prepare Rules
+            self.active_highlight_rules = []
             for i, widget in enumerate(self.keyword_widgets):
-                keyword_text = widget['entry'].get().strip().lower()
-                color = self.selected_colors_rgb[i] if i < len(self.selected_colors_rgb) else (255, 255, 255)
-                if keyword_text:
-                    phrases = [p.strip() for p in keyword_text.split(',') if p.strip()]
-                    if phrases:
-                        highlight_rules.append({'phrases': phrases, 'color': color})
-            # --- End Dynamic keyword reading ---
+                txt = widget['entry'].get().strip().lower()
+                if txt:
+                    self.active_highlight_rules.append({
+                        'phrases': [p.strip() for p in txt.split(',') if p.strip()],
+                        'tag': f'rule_{i}',
+                        'hex': self.get_hex_from_rgb(self.selected_colors_rgb[i])
+                    })
+            
+            # Find Event Index
+            self.current_event_idx = -1
+            lower_cols = [c.lower() for c in cols]
+            if EVENT_COLUMN_NAME.lower() in lower_cols:
+                self.current_event_idx = lower_cols.index(EVENT_COLUMN_NAME.lower())
 
-            # 1. Setup Query
-            table_name = self.selected_table_name.get() # Get the currently selected table
-            self.status_label.config(text=f"Setting up DB query for table '{table_name}'...")
-            
-            # This line correctly quotes column names
-            safe_columns = [f'"{col}"' for col in self.selected_db_columns]
-            
-            # --- FIX APPLIED HERE: Quote the table name to handle hyphens/special characters ---
-            query = f"SELECT {', '.join(safe_columns)} FROM \"{table_name}\"" 
-            
-            db_headers = self.selected_db_columns
-            lower_db_headers = [str(h).lower() for h in db_headers]
-            
-            if UNIQUE_ID_COLUMN.lower() not in lower_db_headers:
-                raise ValueError(f"Required column '{UNIQUE_ID_COLUMN}' not selected in the current table.")
-
-            unique_id_col_index = lower_db_headers.index(UNIQUE_ID_COLUMN.lower())
-            event_col_index = lower_db_headers.index(EVENT_COLUMN_NAME.lower()) if EVENT_COLUMN_NAME.lower() in lower_db_headers else -1
-
-            # 2. Fetch ALL Data from DB (Using Retry Logic)
-            db_data = self.fetch_with_retry(query, unique_id_col_index)
-            raw_db_count = len(db_data)
-            
-            if not db_data and raw_db_count == 0:
-                messagebox.showerror("DB Error", f"Failed to retrieve any data from table '{table_name}' after multiple attempts. Cannot synchronize.")
-                return
-
-            # 3. Excel Setup
-            self.status_label.config(text="Connecting to Excel...")
-            wb = xw.Book(self.excel_path.get())
-            app = wb.app
-            sheet, app.screen_updating = wb.sheets[0], False
-            
-            # 4. Read Existing Data and Perform Synchronization
-            self.status_label.config(text="Reading existing data in Excel for synchronization...")
-
-            try:
-                last_row = sheet.range('A' + str(sheet.api.Rows.Count)).end('up').row
-            except Exception:
-                last_row = 1
-            
-            # Write headers if they don't exist
-            if last_row == 1 or sheet.range('A1').value is None or sheet.range('A1').value.lower() != db_headers[0].lower():
-                sheet.range('A1').value = db_headers
-                sheet.range('A1').expand('right').font.bold = True
-                last_row = 1 
-            
-            existing_rows_map = {} # {standardized_id: row_number}
-            
-            if last_row > 1:
-                unique_id_column_letter = chr(ord('A') + unique_id_col_index)
-                
-                unique_id_col_range = sheet.range(f'{unique_id_column_letter}1:{unique_id_column_letter}{last_row}')
-                unique_id_col_range.number_format = '@' 
-                
-                id_range = sheet.range(f'{unique_id_column_letter}2:{unique_id_column_letter}{last_row}')
-                existing_ids_raw = id_range.value
-                
-                if not isinstance(existing_ids_raw, list):
-                     existing_ids_raw = [existing_ids_raw] if existing_ids_raw is not None else []
-
-                for i, row_id_raw in enumerate(existing_ids_raw):
-                    if row_id_raw is None: continue 
-                    
-                    standardized_id = self.standardize_id(row_id_raw)
-                    if standardized_id is None: continue 
-                    
-                    existing_rows_map[standardized_id] = i + 2 
-
-            # Identify rows to ADD to Excel and rows to DELETE from Excel
-            db_ids = set(self.standardize_id(row[unique_id_col_index]) for row in db_data)
-            db_ids.discard(None) 
-            
-            excel_ids = set(existing_rows_map.keys())
-
-            ids_to_add = db_ids - excel_ids
-            ids_to_delete = excel_ids - db_ids
-            
-            # --- DIAGNOSTIC PRINTING ---
-            print("\n--- Synchronization Diagnostics (Standardized) ---")
-            print(f"Table: {table_name}")
-            print(f"Raw DB Records Fetched: {raw_db_count}")
-            print(f"Unique/Valid DB Records: {len(db_ids)}")
-            print(f"Total Excel Records: {len(excel_ids)}")
-            print(f"IDs to Add: {len(ids_to_add)} (Example: {list(ids_to_add)[:5]})")
-            print(f"IDs to Delete: {len(ids_to_delete)} (Example: {list(ids_to_delete)[:5]})")
-            print("--------------------------------------------------")
-            # --- END DIAGNOSTIC PRINTING ---
-
-            # Find the actual rows to delete in Excel
-            rows_to_delete_nums = sorted([existing_rows_map[id_val] for id_val in ids_to_delete], reverse=True)
-            
-            # Find the new data rows to add (must use the original DB data list)
-            data_to_add = []
-            for row in db_data:
-                db_id = self.standardize_id(row[unique_id_col_index])
-                if db_id in ids_to_add:
-                    data_to_add.append(row)
-
-            # 5. Apply Synchronization Changes
-            
-            # A) Delete rows from Excel
-            if rows_to_delete_nums:
-                self.status_label.config(text=f"Deleting {len(rows_to_delete_nums)} obsolete rows from Excel...")
-                for row_num in rows_to_delete_nums:
-                    sheet.range(f'A{row_num}').api.EntireRow.Delete()
-                last_row = sheet.range('A' + str(sheet.api.Rows.Count)).end('up').row
-                
-            # B) Append new rows to Excel
-            start_row_new_data = last_row + 1 if last_row > 1 or sheet.range('A1').value else 2
-            
-            if data_to_add:
-                
-                self.status_label.config(text=f"Appending {len(data_to_add)} new rows to Excel, starting at row {start_row_new_data}...")
-                
-                # Write Data
-                data_range_new = sheet.range(f'A{start_row_new_data}').resize(len(data_to_add), len(db_headers))
-                data_range_new.number_format = '@'
-                data_range_new.value = data_to_add
-            
-            # 6. Apply Highlighting (New and Existing Data)
-            
-            final_last_row = sheet.range('A' + str(sheet.api.Rows.Count)).end('up').row
-            
-            if final_last_row > 1 and highlight_rules:
-                self.status_label.config(text="Applying/Re-applying highlights to all existing rows...")
-                
-                # Highlight the entire data region (excluding header row 1)
-                data_range_all = sheet.range(f'A2:A{final_last_row}').expand('right')
-                
-                # Apply the rules to the entire dataset
-                self._apply_highlights_to_range(sheet, data_range_all, event_col_index, highlight_rules)
-
-            
-            if not data_to_add and not rows_to_delete_nums and not highlight_rules:
-                 self.status_label.config(text="Synchronization complete. No differences found.")
-                 messagebox.showinfo("Success", "Synchronization complete. No new or missing records found.")
-                 return
-
-            sheet.autofit()
-            self.status_label.config(text="Success! Excel sheet synchronized. Please save the file.")
-            messagebox.showinfo("Success", "The Excel sheet has been synchronized successfully.\n\nPlease save the file in Excel to keep the changes.")
+            # Render Full Dataset initially
+            self.root.after(0, lambda: self._render_tree(self.full_dataset))
             
         except Exception as e:
-            self.status_label.config(text=f"An error occurred: {e}")
-            messagebox.showerror("Error", f"An unexpected error occurred during synchronization:\n\n{e}")
+            self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
         finally:
-            if app:
-                try: app.screen_updating = True
-                except Exception as e: print(f"Could not re-enable screen updating: {e}")
+            self.root.after(0, lambda: self.load_btn.config(state='normal', text="🔄 Load Data to Viewer"))
+
+    def apply_filter(self, event=None):
+        """Filters the stored self.full_dataset based on entry box."""
+        if not self.full_dataset: return
+
+        search_term = self.filter_var.get().strip().lower()
+        
+        if not search_term:
+            # If empty, show everything
+            self._render_tree(self.full_dataset)
+            return
+
+        filtered_rows = []
+        
+        for row in self.full_dataset:
+            # If we know the Event column, search ONLY there
+            if self.current_event_idx != -1:
+                cell_val = str(row[self.current_event_idx]).lower() if row[self.current_event_idx] else ""
+                if search_term in cell_val:
+                    filtered_rows.append(row)
+            else:
+                # Fallback: Search the whole row if "Event" column not selected
+                if any(search_term in str(cell).lower() for cell in row if cell is not None):
+                    filtered_rows.append(row)
+
+        self._render_tree(filtered_rows)
+
+    def _render_tree(self, rows_to_show):
+        self.tree.delete(*self.tree.get_children())
+        
+        self.tree["columns"] = self.current_display_cols
+        self.tree["show"] = "headings"
+        
+        # Zebra Stripes
+        self.tree.tag_configure('oddrow', background='#F2F2F2') 
+        self.tree.tag_configure('evenrow', background='white')
+        
+        for col in self.current_display_cols:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=120)
+
+        # Highlight Rules
+        for rule in self.active_highlight_rules:
+            self.tree.tag_configure(rule['tag'], background=rule['hex'])
+
+        # Update Status
+        if self.filter_var.get():
+             self.status_label.config(text=f"Filtered: {len(rows_to_show)} of {len(self.full_dataset)} records.")
+        else:
+             self.status_label.config(text=f"Showing {len(rows_to_show)} records.")
+
+        # Batch Insert
+        for i, row in enumerate(rows_to_show):
+            tags_to_apply = []
+            
+            # Determine Highlight
+            highlight_tag = None
+            if self.current_event_idx != -1 and row[self.current_event_idx]:
+                content = str(row[self.current_event_idx]).lower()
+                for rule in self.active_highlight_rules:
+                    if any(p in content for p in rule['phrases']):
+                        highlight_tag = rule['tag']
+                        break
+            
+            if highlight_tag:
+                tags_to_apply = [highlight_tag]
+            else:
+                tags_to_apply = ['oddrow' if i % 2 else 'evenrow']
+            
+            display_row = [str(item) if item is not None else "" for item in row]
+            self.tree.insert("", "end", values=display_row, tags=tuple(tags_to_apply))
+
+    # ==========================================================================
+    # --- Excel Export ---
+    # ==========================================================================
+    def export_to_excel(self):
+        if not self.tree.get_children():
+            messagebox.showinfo("Empty", "No data to export. Load data first.")
+            return
+            
+        try:
+            self.status_label.config(text="Exporting to Excel (opening new instance)...")
+            
+            app = xw.App(visible=True)
+            wb = app.books.add()
+            ws = wb.sheets[0]
+            
+            headers = self.tree["columns"]
+            ws.range('A1').value = headers
+            ws.range('A1').expand('right').font.bold = True
+            
+            data = []
+            for child in self.tree.get_children():
+                data.append(self.tree.item(child)['values'])
                 
-            self.root.after(0, lambda: self.update_button.config(state=tk.NORMAL, text="Synchronize Excel Sheet"))
+            if data:
+                ws.range('A2').value = data
+                ws.autofit()
+                
+            self.status_label.config(text="Export Complete.")
+            
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export: {e}")
+            self.status_label.config(text="Export Failed.")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = ExcelUpdaterApp(root)
+    app = LogViewerApp(root)
     root.mainloop()

@@ -1,15 +1,13 @@
 {
     "db_path": "J:/CNO_600061/07_ADMIN/01_VIRE/01_ONLINE_ADMIN/02_SQL_DB/db.sqlite",
     "excel_path": "C:/Users/Administrator/Desktop/Current Field Log Viewer/Old/600061_CNOOC_FieldLogViewer.xlsx",
-    "selected_table_name": "fieldlog",
     "keywords": [
-        "Log On",
-        "Log Off",
-        "SVP",
-        "On Deck ",
-        "Off Deck"
+        "Log on",
+        "Log Off ",
+        "Midnight position",
+        "MIDNIGHT"
     ],
-    "colors_rgb": [
+    "colors": [
         [
             255,
             204,
@@ -29,11 +27,6 @@
             204,
             229,
             255
-        ],
-        [
-            255,
-            229,
-            204
         ]
     ],
     "selected_columns": [
@@ -44,28 +37,8 @@
         "kp",
         "kp_ref",
         "event",
-        "survey_id",
-        "rov_mbes",
-        "rov_sbp",
-        "rov_sss",
-        "rov_video",
-        "rov_cathxvoyis",
-        "g_watch",
-        "dive_nr",
-        "code",
         "latitude",
         "longitude",
-        "easting_m",
-        "northing_m",
-        "dcc",
-        "mbe_range",
-        "mbe_power",
-        "mbe_gain",
-        "pulse_lenght",
-        "sbd_files",
-        "qinsy_db",
-        "sprint",
-        "barometer",
-        "uuid"
+        "qinsy_db"
     ]
 }
