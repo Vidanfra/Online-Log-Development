@@ -22,11 +22,11 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                                QGridLayout, QFrame, QMenu, QInputDialog, QComboBox, QTableWidget,
                                QTableWidgetItem, QHeaderView, QColorDialog, QSpinBox, QGroupBox, QTextEdit, QTextBrowser,
                                QCheckBox, QDialogButtonBox, QTreeWidget, QTreeWidgetItem, QDoubleSpinBox, QSizePolicy)
-from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QPolygon, QBrush, QPainterPath, QPalette, QIcon
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QPolygon, QBrush, QPainterPath, QPalette, QIcon, QTextCursor
 from PySide6.QtWidgets import QAbstractItemView
 
 # --- CONSTANTS ---
-APP_VERSION = "2.1"
+APP_VERSION = "2.2"
 PROJECT_STATE_FILE = "settings/config/last_project.json"
 PROJECT_TEMPLATE_FILE = "settings/config/blank_project.json"
 EVENT_CODES_FILE = "settings/event_codes.json"
@@ -140,8 +140,9 @@ class ConfigManager:
                 with open(path, 'r') as f:
                     loaded = json.load(f)
                     self.settings.update(loaded)
-                    # Legacy variable merge
-                    if "txt_folder_path" in loaded:
+                    
+                    # FIX: Only apply legacy migration if the new dictionary DOES NOT exist yet
+                    if "txt_folder_paths" not in loaded and "txt_folder_path" in loaded:
                         self.settings["txt_folder_paths"]["Main TXT"] = loaded.get("txt_folder_path", "")
                         self.settings["txt_folder_paths"]["TXT Source 2"] = loaded.get("txt_folder_path_set2", "")
                         self.settings["txt_folder_paths"]["TXT Source 3"] = loaded.get("txt_folder_path_set3", "")
@@ -169,7 +170,7 @@ class ExcelLogger:
         self.log_file_path = log_file_path
         self.sqlite_manager = sqlite_manager
 
-    def log_entry(self, row_data, bg_color=None, date_columns=None):
+    def log_entry(self, row_data, bg_color=None, date_columns=None, static_configs=None):
         if not self.log_file_path or not os.path.exists(self.log_file_path): 
             return False, False, "Excel file path is invalid or missing."
 
@@ -178,6 +179,20 @@ class ExcelLogger:
             date_cols = [str(c).lower() for c in (date_columns or []) if c]
 
             wb = xw.Book(self.log_file_path)
+            
+            # --- FIX: Safely read static cells on the isolated background thread ---
+            if static_configs:
+                for config in static_configs:
+                    excel_col_key = config.get("field", "").strip()
+                    lookup_str = config.get("column_name", "").strip()
+                    try:
+                        match = re.match(r"='?([^'!]+)'?!([A-Z]+\d+)", lookup_str)
+                        if match: clean_row_data[excel_col_key] = wb.sheets[match.group(1)].range(match.group(2)).value
+                        elif re.match(r"=?([A-Z]+\d+)", lookup_str): clean_row_data[excel_col_key] = wb.sheets[0].range(re.match(r"=?([A-Z]+\d+)", lookup_str).group(1)).value
+                    except Exception as e:
+                        pass # Ignore errors if cell is empty or locked
+            # ----------------------------------------------------------------------
+
             sheet = wb.sheets[0]
 
             headers, header_row_idx = self._find_headers(sheet, clean_row_data)
@@ -470,6 +485,21 @@ class MonitorManager:
 # THREAD WORKERS
 # =====================================================================
 
+class MonitorSetupWorker(QObject):
+    finished = Signal(bool, str)
+    def __init__(self, manager, configs):
+        super().__init__()
+        self.manager = manager
+        self.configs = configs
+        
+    def run(self):
+        try:
+            # The heavy os.walk scanning happens safely inside here now
+            success, msg = self.manager.start_monitoring(self.configs)
+            self.finished.emit(success, msg)
+        except Exception as e:
+            self.finished.emit(False, f"Error: {str(e)}")
+
 class SqliteSyncWorker(QObject):
     finished = Signal(bool, str)
     def __init__(self, manager, excel_path, header_func):
@@ -533,18 +563,36 @@ class UdpListenerWorker(QObject):
     def stop(self): self.running = False
 
 class LogWorker(QObject):
-    finished = Signal(bool, bool, str)
-    def __init__(self, excel_logger, task_data):
+    finished = Signal(bool, bool, str, object, str) 
+    
+    def __init__(self, excel_logger, task_data, btn=None, orig_text=None):
         super().__init__()
-        self.logger, self.data = excel_logger, task_data
+        self.logger = excel_logger
+        self.data = task_data
+        self.btn = btn
+        self.orig_text = orig_text if orig_text else ""
+        
     def run(self):
+        print(f"[DEBUG - LOG WORKER] Thread started for action: '{self.orig_text}'")
         try:
-            try: import pythoncom; pythoncom.CoInitialize()
+            try: 
+                import pythoncom; pythoncom.CoInitialize()
+                print(f"[DEBUG - LOG WORKER] COM Initialized. Sending data to Excel...")
             except ImportError: pass
-            s_ex, s_sq, msg = self.logger.log_entry(self.data['row_data'], self.data['bg_color'], self.data.get('date_columns', ["UTC Date-Time", "Local Time"]))
-            self.finished.emit(s_ex, s_sq, msg)
-        except Exception as e: self.finished.emit(False, False, f"Thread Error: {str(e)}")
+            
+            s_ex, s_sq, msg = self.logger.log_entry(
+                self.data['row_data'], 
+                self.data['bg_color'], 
+                self.data.get('date_columns', ["UTC Date-Time", "Local Time"]),
+                self.data.get('static_configs', [])
+            )
+            print(f"[DEBUG - LOG WORKER] Excel write complete. Success: {s_ex}")
+            self.finished.emit(s_ex, s_sq, msg, self.btn, self.orig_text)
+        except Exception as e: 
+            print(f"[DEBUG - LOG WORKER] CRASHED: {str(e)}")
+            self.finished.emit(False, False, f"Thread Error: {str(e)}", self.btn, self.orig_text)
         finally:
+            print(f"[DEBUG - LOG WORKER] Releasing COM lock and closing thread.")
             try: import pythoncom; pythoncom.CoUninitialize()
             except ImportError: pass
 
@@ -555,22 +603,41 @@ class HourlyCalcWorker(QObject):
         self.log_file_path, self.event_col, self.kp_col, self.line_col, self.dt_col = log_file_path, event_col, kp_col, line_col, dt_col
         self.curr_kp, self.curr_line, self.curr_time = curr_kp, curr_line, curr_time
         self.last_kp, self.last_line, self.last_time = last_kp, last_line, last_time
+        
     def run(self):
+        print("\n[DEBUG - HOURLY WORKER] Thread started.")
         try:
-            try: import pythoncom; pythoncom.CoInitialize()
+            try: 
+                import pythoncom; pythoncom.CoInitialize()
+                print("[DEBUG - HOURLY WORKER] COM Initialized.")
             except ImportError: pass
-            if self.last_kp is None or self.last_line is None: self._lookup_history_in_excel()
-            self.finished.emit(True, self._generate_event_text(), self.curr_kp, self.curr_line, self.curr_time)
-        except Exception as e: self.finished.emit(False, str(e), None, None, None)
+            
+            if self.last_kp is None or self.last_line is None: 
+                print("[DEBUG - HOURLY WORKER] Memory cache empty. Must read Excel history...")
+                self._lookup_history_in_excel()
+                print(f"[DEBUG - HOURLY WORKER] History lookup complete! Found Last KP: {self.last_kp}")
+            else:
+                print("[DEBUG - HOURLY WORKER] Memory cache hit! Skipping Excel history read.")
+                
+            event_text = self._generate_event_text()
+            self.finished.emit(True, event_text, self.curr_kp, self.curr_line, self.curr_time)
+            
+        except Exception as e: 
+            print(f"[DEBUG - HOURLY WORKER] CRASHED: {str(e)}")
+            self.finished.emit(False, str(e), None, None, None)
         finally:
+            print("[DEBUG - HOURLY WORKER] Releasing COM lock and closing thread.\n")
             try: import pythoncom; pythoncom.CoUninitialize()
             except ImportError: pass
 
     def _lookup_history_in_excel(self):
         try:
+            print("[DEBUG - HOURLY WORKER] Connecting to xlwings App...")
             wb = xw.Book(self.log_file_path)
             sheet = wb.sheets[0]
             h_idx, h_vals = -1, []
+            
+            print("[DEBUG - HOURLY WORKER] Scanning for headers...")
             for i in range(1, 31):
                 row_vals = sheet.range(f'A{i}:AZ{i}').value
                 if not row_vals: continue
@@ -578,15 +645,19 @@ class HourlyCalcWorker(QObject):
                 if str(self.event_col).lower().strip() in curr_h:
                     h_idx, h_vals = i, curr_h
                     break
+                    
             if h_idx != -1:
                 e_idx = h_vals.index(str(self.event_col).lower().strip())
                 k_idx = h_vals.index(str(self.kp_col).lower().strip()) if str(self.kp_col).lower().strip() in h_vals else -1
                 l_idx = h_vals.index(str(self.line_col).lower().strip()) if str(self.line_col).lower().strip() in h_vals else -1
                 t_idx = h_vals.index(str(self.dt_col).lower().strip()) if str(self.dt_col).lower().strip() in h_vals else -1
+                
                 if k_idx != -1:
                     last_row = sheet.range('A' + str(sheet.cells.last_cell.row)).end('up').row
                     start_row = max(h_idx + 1, last_row - 500)
+                    
                     if last_row >= start_row:
+                        print(f"[DEBUG - HOURLY WORKER] Pulling rows {start_row} to {last_row} from Excel...")
                         data_block = sheet.range((start_row, 1), (last_row, len(h_vals))).value
                         if data_block and not isinstance(data_block[0], list): data_block = [data_block]
                         for row in reversed(data_block):
@@ -602,7 +673,8 @@ class HourlyCalcWorker(QObject):
                                             except Exception: pass
                                     break
                                 except Exception: continue
-        except Exception: pass
+        except Exception as e: 
+            print(f"[DEBUG - HOURLY WORKER] History Lookup Failed: {e}")
 
     def _generate_event_text(self):
         if self.last_kp is not None and self.last_line is not None:
@@ -631,6 +703,15 @@ class AutoScalingButton(QPushButton):
         super().__init__(text, parent)
         self._min_size, self._max_size = 8, 36
         self.wedge_color = None
+        self._is_updating = False
+        
+        # Stop the button from pushing the layout around when its text changes:
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+    def sizeHint(self):
+        # Override sizeHint so dynamic text/font changes NEVER trigger layout shifts!
+        from PySide6.QtCore import QSize
+        return QSize(100, 65)
 
     def set_wedge_color(self, color_hex):
         self.wedge_color = color_hex
@@ -645,21 +726,69 @@ class AutoScalingButton(QPushButton):
         self._scale_font()
 
     def _scale_font(self):
-        if not self.text() or self.width() <= 0 or self.height() <= 0: return
-        font = self.font()
+        # Prevent recursive calculation loops
+        if getattr(self, '_is_updating', False): return
+        self._is_updating = True
+        
+        # 1. Clean the text of any existing artificial newlines so we can test it fresh
+        current_text = self.text().replace('\n', ' ')
+        if not current_text or self.width() <= 0 or self.height() <= 0: 
+            self._is_updating = False
+            return
+        
         margin_x, margin_y = 34, 30
+        target_w = self.width() - margin_x
+        target_h = self.height() - margin_y
+        
+        best_size = 0
+        best_text = current_text
+        
+        # Test A: Standard single-line text
         for size in range(self._max_size, self._min_size - 1, -1):
+            font = self.font()
             font.setPointSize(size)
             fm = QFontMetrics(font)
-            rect = fm.boundingRect(0, 0, 10000, 10000, int(Qt.AlignmentFlag.AlignCenter), self.text())
-            if rect.width() <= (self.width() - margin_x) and rect.height() <= (self.height() - margin_y): break
-        self.setFont(font)
+            rect = fm.boundingRect(0, 0, 10000, 10000, int(Qt.AlignmentFlag.AlignCenter), current_text)
+            if rect.width() <= target_w and rect.height() <= target_h:
+                best_size = size
+                break
+                
+        # Test B: Multi-line text (Find the space closest to the center and break the line)
+        if ' ' in current_text:
+            mid = len(current_text) // 2
+            spaces = [i for i, c in enumerate(current_text) if c == ' ']
+            closest_space = min(spaces, key=lambda x: abs(x - mid))
+            split_text = current_text[:closest_space] + '\n' + current_text[closest_space+1:]
+            
+            # Check if this split allows for a BIGGER font size than Test A
+            for size in range(self._max_size, best_size, -1): 
+                font = self.font()
+                font.setPointSize(size)
+                fm = QFontMetrics(font)
+                rect = fm.boundingRect(0, 0, 10000, 10000, int(Qt.AlignmentFlag.AlignCenter), split_text)
+                if rect.width() <= target_w and rect.height() <= target_h:
+                    best_size = size
+                    best_text = split_text
+                    break
+        
+        # 3. Apply the winning font size
+        final_font = self.font()
+        final_font.setPointSize(max(best_size, self._min_size))
+        self.setFont(final_font)
+        
+        # 4. Apply the winning text format
+        if self.text() != best_text:
+            self.blockSignals(True)
+            super().setText(best_text)
+            self.blockSignals(False)
+            
+        self._is_updating = False
 
     def paintEvent(self, event):
-        # 1. Let PySide6 draw the dark background and text
+        # Let PySide6 draw the dark background and text
         super().paintEvent(event)
 
-        # 2. Draw the wedge on top
+        # Draw the wedge on top
         if hasattr(self, 'wedge_color') and self.wedge_color:
             color = QColor(self.wedge_color)
             if color.isValid():
@@ -768,8 +897,8 @@ class HandoverReportDialog(QDialog):
         super().__init__(parent)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
         self.gui = parent
-        self.setWindowTitle("Shift Handover Report")
-        self.resize(550, 600)
+        self.setWindowTitle("Shift Handover Report Builder")
+        self.resize(950, 650)
         self.setStyleSheet("""
             QDialog { background-color: palette(window); }
             QLabel { color: palette(window-text); font-weight: bold; font-size: 13px; }
@@ -779,47 +908,156 @@ class HandoverReportDialog(QDialog):
             QPushButton#ActionBtn { background-color: #0078D4; color: white; border: none; }
             QPushButton#ActionBtn:hover { background-color: #106ebe; }
             QComboBox { background-color: palette(base); color: palette(text); border: 1px solid rgba(128, 128, 128, 0.6); border-radius: 4px; padding: 4px; }
+            QGroupBox { font-weight: bold; border: 1px solid rgba(128, 128, 128, 0.4); border-radius: 6px; margin-top: 10px; padding-top: 15px; }
+            QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top left; padding: 0 5px; left: 10px; }
+            QCheckBox { spacing: 8px; color: palette(window-text); font-weight: bold; }
+            QCheckBox::indicator { width: 16px; height: 16px; border: 2px solid palette(text); border-radius: 4px; background-color: transparent; }
+            QCheckBox::indicator:hover { border: 2px solid #0078D4; }
+            QCheckBox::indicator:checked { background-color: #0078D4; border: 2px solid #0078D4; image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'); }
         """)
         
-        layout = QVBoxLayout(self)
+        main_layout = QHBoxLayout(self)
         
-        top_lay = QHBoxLayout()
-        top_lay.addWidget(QLabel("Timeframe:"))
+        # --- Load Saved Preferences ---
+        prefs = self.gui.config.get("handover_report_prefs", {})
+        
+        # ================= LEFT PANEL (Controls) =================
+        left_panel = QWidget()
+        left_panel.setFixedWidth(350)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 10, 0)
+        
+        left_layout.addWidget(QLabel("Timeframe:"))
         self.combo_time = QComboBox()
-        
-        # --- UPDATED: Smarter Shift Options ---
         self.combo_time.addItems([
-            "Last 12 Hours (Current Shift)", 
-            "Previous 12 Hours (Prior Shift)", 
-            "Last 24 Hours", 
+            "Current 12h Shift (0600-1800 or 1800-0600)", 
+            "Previous 12h Shift", 
+            "Current Day (00:00 - 23:59)", 
+            "Previous Day",
             "All Time (Entire Log)"
         ])
         
-        # Re-generate the report instantly when the user changes the dropdown
-        self.combo_time.currentIndexChanged.connect(self.generate_report)
+        # Restore saved dropdown index
+        self.combo_time.setCurrentIndex(prefs.get("timeframe_index", 0))
+        self.combo_time.currentIndexChanged.connect(self.on_preferences_changed)
+        left_layout.addWidget(self.combo_time)
         
-        top_lay.addWidget(self.combo_time)
+        # --- Metrics Configuration Group ---
+        metrics_group = QGroupBox("Included Metrics & Events")
+        metrics_layout = QVBoxLayout(metrics_group)
         
-        btn_gen = QPushButton("Refresh")
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+        
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        
+        # Standard Checkboxes (Restoring saved state)
+        self.chk_dist = QCheckBox("Total Distance Surveyed")
+        self.chk_dist.setChecked(prefs.get("chk_dist", True))
+        
+        self.chk_active_lines = QCheckBox("List of Active Lines")
+        self.chk_active_lines.setChecked(prefs.get("chk_active_lines", True))
+        
+        self.chk_completed_lines = QCheckBox("List of Completed Lines (EOL)")
+        self.chk_completed_lines.setChecked(prefs.get("chk_completed_lines", True))
+        
+        for chk in [self.chk_dist, self.chk_active_lines, self.chk_completed_lines]:
+            chk.toggled.connect(self.on_preferences_changed)
+            scroll_layout.addWidget(chk)
+            
+        line1 = QFrame(); line1.setFrameShape(QFrame.Shape.HLine); line1.setStyleSheet("background-color: rgba(128,128,128,0.3); margin: 5px 0;"); scroll_layout.addWidget(line1)
+        scroll_layout.addWidget(QLabel("Background System Events:"))
+
+        # Internal Event Checkboxes (Restoring saved state)
+        self.system_events = {
+            "_SYS_LOG_ON": ("Log ons", "Log on"),
+            "_SYS_LOG_OFF": ("Log offs", "Log off"),
+            "_SYS_HOURLY": ("Hourly/Manual KP Logs", "Current KP"),
+            "_SYS_MIDNIGHT": ("Midnight Logs", "New Day")
+        }
+        self.sys_checkboxes = {}
+        sys_prefs = prefs.get("sys_events", {})
+        
+        for sys_key, (display_name, search_term) in self.system_events.items():
+            chk = QCheckBox(display_name)
+            chk.setChecked(sys_prefs.get(sys_key, False)) # Default to false so report isn't cluttered
+            chk.toggled.connect(self.on_preferences_changed)
+            self.sys_checkboxes[sys_key] = chk
+            scroll_layout.addWidget(chk)
+
+        line2 = QFrame(); line2.setFrameShape(QFrame.Shape.HLine); line2.setStyleSheet("background-color: rgba(128,128,128,0.3); margin: 5px 0;"); scroll_layout.addWidget(line2)
+        scroll_layout.addWidget(QLabel("Your Custom Event Codes:"))
+
+        # Custom Event Code Checkboxes (Restoring saved state)
+        self.code_checkboxes = {}
+        event_codes = self.gui.config.get("event_codes", {})
+        code_prefs = prefs.get("custom_codes", {})
+        
+        if not event_codes:
+            lbl = QLabel("<i>No custom codes defined.</i>"); lbl.setStyleSheet("color: gray;")
+            scroll_layout.addWidget(lbl)
+        else:
+            for code, desc in event_codes.items():
+                chk = QCheckBox(f"[{code}] {desc}")
+                chk.setChecked(code_prefs.get(code, True)) # Default true
+                chk.toggled.connect(self.on_preferences_changed)
+                self.code_checkboxes[code] = chk
+                scroll_layout.addWidget(chk)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        metrics_layout.addWidget(scroll)
+        left_layout.addWidget(metrics_group)
+        
+        btn_gen = QPushButton("🔄 Refresh Report")
         btn_gen.setObjectName("ActionBtn")
         btn_gen.clicked.connect(self.generate_report)
-        top_lay.addWidget(btn_gen)
-        top_lay.addStretch()
-        layout.addLayout(top_lay)
+        left_layout.addWidget(btn_gen)
+        
+        main_layout.addWidget(left_panel)
+        
+        # ================= RIGHT PANEL (Text Area) =================
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         
         self.text_out = QTextEdit()
         self.text_out.setReadOnly(True)
-        layout.addWidget(self.text_out)
+        right_layout.addWidget(self.text_out)
         
         bot_lay = QHBoxLayout()
         btn_copy = QPushButton("📋 Copy to Clipboard")
         btn_copy.clicked.connect(self.copy_to_clipboard)
         bot_lay.addStretch()
         bot_lay.addWidget(btn_copy)
-        layout.addLayout(bot_lay)
+        right_layout.addLayout(bot_lay)
+        
+        main_layout.addWidget(right_panel)
         
         # Auto-generate on open
         self.generate_report()
+
+    def on_preferences_changed(self):
+        """Saves the layout preferences to settings.json and instantly regenerates the report."""
+        prefs = {
+            "timeframe_index": self.combo_time.currentIndex(),
+            "chk_dist": self.chk_dist.isChecked(),
+            "chk_active_lines": self.chk_active_lines.isChecked(),
+            "chk_completed_lines": self.chk_completed_lines.isChecked(),
+            "sys_events": {key: chk.isChecked() for key, chk in self.sys_checkboxes.items()},
+            "custom_codes": {code: chk.isChecked() for code, chk in self.code_checkboxes.items()}
+        }
+        
+        # Update config in memory and write to the JSON file
+        self.gui.config.set("handover_report_prefs", prefs)
+        self.gui.config.save()
+        
+        # Refresh the text view
+        self.generate_report()
+
 
     def generate_report(self):
         excel_path = self.gui.config.get("log_file_path")
@@ -841,20 +1079,24 @@ class HandoverReportDialog(QDialog):
             df = pd.read_excel(excel_path, header=header_idx)
             df.dropna(how='all', inplace=True)
             
-            # Find key columns
-            date_col = next((c for c in df.columns if any(k in str(c).lower() for k in ['date', 'time', 'utc'])), None)
+            # Smart Column Identification
+            date_col = next((c for c in df.columns if 'local' in str(c).lower() and 'time' in str(c).lower()), None)
+            if not date_col:
+                date_col = next((c for c in df.columns if any(k in str(c).lower() for k in ['date', 'time', 'utc'])), None)
+                
             event_col = next((c for c in df.columns if 'event' in str(c).lower()), None)
             line_col = next((c for c in df.columns if 'line' in str(c).lower()), None)
+            kp_col = next((c for c in df.columns if str(c).strip().lower() == 'kp'), None)
+            code_col = next((c for c in df.columns if 'code' in str(c).lower()), None)
             
             if not date_col or not event_col:
                 self.text_out.setPlainText("Error: Could not identify Date or Event columns in the Excel file.")
                 return
                 
-            # --- FIX 1: Robust Date Parsing for Excel Serial Numbers ---
+            # Robust Date Parsing
             def parse_excel_date(val):
                 if pd.isna(val): return pd.NaT
                 if isinstance(val, (int, float)):
-                    # Convert raw Excel serial number to Python Datetime
                     return pd.Timestamp('1899-12-30') + pd.to_timedelta(val, unit='D')
                 return pd.to_datetime(val, errors='coerce')
                 
@@ -865,67 +1107,173 @@ class HandoverReportDialog(QDialog):
                 self.text_out.setPlainText("Error: No valid dates could be parsed from the log.")
                 return
 
-            # Strip accidental timezones to prevent comparison crashes
             if hasattr(df[date_col].dt, 'tz_localize'):
                 df[date_col] = df[date_col].dt.tz_localize(None)
             
-            # --- FIX 2: Anchor to the Latest Log Entry ---
-            # Counts backwards from the newest row in the file, ignoring the PC clock.
-            anchor_time = df[date_col].max()
-            time_txt = self.combo_time.currentText()
+            # --- True Real-Time Shift Boundaries ---
+            now = datetime.datetime.now()
+            time_txt = self.combo_time.currentText().lower() 
             
-            if time_txt == "Last 12 Hours (Current Shift)": 
-                df = df[df[date_col] >= (anchor_time - pd.Timedelta(hours=12))]
+            # Determine current 12h shift start (0600 or 1800)
+            if now.hour >= 18: current_shift_start = now.replace(hour=18, minute=0, second=0, microsecond=0)
+            elif now.hour >= 6: current_shift_start = now.replace(hour=6, minute=0, second=0, microsecond=0)
+            else: current_shift_start = (now - datetime.timedelta(days=1)).replace(hour=18, minute=0, second=0, microsecond=0)
+
+            # Apply exact boundaries
+            if "current 12" in time_txt or "current shift" in time_txt:
+                start_time = pd.Timestamp(current_shift_start)
+                end_time = start_time + pd.Timedelta(hours=12)
+            elif "previous 12" in time_txt or "prior" in time_txt:
+                start_time = pd.Timestamp(current_shift_start) - pd.Timedelta(hours=12)
+                end_time = pd.Timestamp(current_shift_start)
+            elif "current day" in time_txt or "24" in time_txt:
+                # Exactly 00:00:00 to 23:59:59 of TODAY
+                start_time = pd.Timestamp(now).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_time = start_time + pd.Timedelta(days=1)
+            elif "previous day" in time_txt:
+                # Exactly 00:00:00 to 23:59:59 of YESTERDAY
+                start_time = (pd.Timestamp(now) - pd.Timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end_time = start_time + pd.Timedelta(days=1)
+            else:
+                start_time = df[date_col].min() if not df.empty else pd.Timestamp(now)
+                end_time = pd.Timestamp(now) + pd.Timedelta(days=1)
                 
-            elif time_txt == "Previous 12 Hours (Prior Shift)": 
-                start_time = anchor_time - pd.Timedelta(hours=24)
-                end_time = anchor_time - pd.Timedelta(hours=12)
-                df = df[(df[date_col] >= start_time) & (df[date_col] < end_time)]
-                
-            elif time_txt == "Last 24 Hours": 
-                df = df[df[date_col] >= (anchor_time - pd.Timedelta(hours=24))]
+            df_shift = df[(df[date_col] >= start_time) & (df[date_col] < end_time)].copy()
             
-            if df.empty:
-                self.text_out.setPlainText(f"No events found in the selected timeframe:\n{time_txt}\n\n(Latest log entry was: {anchor_time.strftime('%Y-%m-%d %H:%M:%S')})")
+            if df_shift.empty:
+                self.text_out.setPlainText(f"No events found in the selected timeframe:\n{self.combo_time.currentText()}\nDate Bounds: {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
                 return
                 
-            # Extract Metrics
-            total_entries = len(df)
-            lines_surveyed = [str(x) for x in df[line_col].dropna().unique() if str(x).strip()] if line_col else []
-            
-            # Parse total distance from Log off texts (e.g. "Traveled: 12.345 km")
+            # --- Optional Metric: Macro-Segment Distance Calculation ---
             total_distance = 0.0
-            for ev in df[event_col].dropna():
-                match = re.search(r'Traveled:\s*([\d\.]+)\s*km', str(ev))
-                if match: total_distance += float(match.group(1))
+            if self.chk_dist.isChecked() and kp_col and line_col:
+                df_before = df[df[date_col] < start_time].sort_values(by=date_col).tail(1)
+                df_calc = pd.concat([df_before, df_shift.sort_values(by=date_col)])
+                active_line, start_kp, last_kp = None, None, None
                 
-            # Count event occurrences 
+                for idx, row in df_calc.iterrows():
+                    # Safely parse values
+                    try:
+                        kp = float(row[kp_col])
+                        if pd.isna(kp): continue
+                    except (ValueError, TypeError): continue
+                        
+                    line = str(row[line_col]).strip()
+                    if not line or line.lower() == 'nan': line = "Unknown Line"
+                    ev_str = str(row.get(event_col, "")).lower()
+
+                    # Pre-shift anchor
+                    if row[date_col] < start_time:
+                        if "log off" not in ev_str:
+                            active_line, start_kp, last_kp = line, kp, kp
+                        continue
+                        
+                    # --- Processing Rows INSIDE the Shift ---
+                    # A. Explicit Log off
+                    if "log off" in ev_str:
+                        if active_line is not None and start_kp is not None: 
+                            total_distance += abs(kp - start_kp)
+                        active_line, start_kp, last_kp = None, None, None
+                        continue
+                        
+                    # B. Explicit Log on
+                    if "log on" in ev_str:
+                        if active_line is not None and start_kp is not None and last_kp is not None: 
+                            total_distance += abs(last_kp - start_kp)
+                        active_line, start_kp, last_kp = line, kp, kp
+                        continue
+                        
+                    # C. Line Change
+                    if active_line is not None and line != active_line:
+                        if start_kp is not None and last_kp is not None: 
+                            total_distance += abs(last_kp - start_kp)
+                        active_line, start_kp, last_kp = line, kp, kp
+                        continue
+                        
+                    # D. Standard ongoing log event
+                    if active_line is None: 
+                        active_line, start_kp = line, kp
+                    last_kp = kp
+                        
+                # End of Shift
+                if active_line is not None and start_kp is not None and last_kp is not None:
+                    total_distance += abs(last_kp - start_kp)
+
+            # --- Extract General Metrics ---
+            total_entries = len(df_shift)
+            
+            active_lines_list = []
+            if self.chk_active_lines.isChecked() and line_col:
+                active_lines_list = [str(x) for x in df_shift[line_col].dropna().unique() if str(x).strip() and str(x).lower() != 'nan']
+                
+            completed_lines_list = []
+            if self.chk_completed_lines.isChecked() and line_col:
+                for idx, row in df_shift.iterrows():
+                    ev_str = str(row.get(event_col, "")).lower()
+                    code_str = str(row.get(code_col, "")).strip().lower() if code_col else ""
+                    
+                    # Consider a line completed if the user explicitly clicked Log off OR logged an End Of Line code
+                    if "log off" in ev_str or "eol" in code_str:
+                        ln = str(row.get(line_col, "")).strip()
+                        if ln and ln.lower() != 'nan' and ln not in completed_lines_list:
+                            completed_lines_list.append(ln)
+                
+            # --- Flexible Event Counting STRICTLY by Code ---
             event_counts = {}
-            for ev in df[event_col].dropna():
-                ev_str = str(ev)
-                if "Log on" in ev_str: key = "Log ons"
-                elif "Log off" in ev_str: key = "Log offs"
-                elif "SVP" in ev_str: key = "SVPs Taken"
-                elif "Current KP" in ev_str: key = "Hourly/Manual KP Logs"
-                elif "New Day" in ev_str or "Midnight" in ev_str: key = "Midnight Logs"
-                else: key = "Custom/Other Events"
-                event_counts[key] = event_counts.get(key, 0) + 1
+            target_sys = {key: val for key, val in self.system_events.items() if self.sys_checkboxes[key].isChecked()}
+            target_codes = {code: chk for code, chk in self.code_checkboxes.items() if chk.isChecked()}
+            
+            for idx, row in df_shift.iterrows():
+                ev_str = str(row.get(event_col, ""))
+                code_str = str(row.get(code_col, "")).strip() if code_col else ""
                 
-            # Build Report
+                # Check requested system events (Log on, Log off, Hourly)
+                for sys_key, (display_name, search_term) in target_sys.items():
+                    if search_term.lower() in ev_str.lower():
+                        event_counts[display_name] = event_counts.get(display_name, 0) + 1
+                        
+                # STRICTLY Check requested custom codes from the Code column
+                for code in target_codes.keys():
+                    if not code: continue
+                    # Match if the Code Column exactly equals the Code, OR if the Code is baked into the Event text
+                    if (code_str.lower() == code.lower()) or (f"[{code.upper()}]" in ev_str.upper()):
+                        display_name = f"[{code}] {self.gui.config.get('event_codes', {}).get(code, '')}"
+                        event_counts[display_name] = event_counts.get(display_name, 0) + 1
+                
+            # --- Build Text Output ---
             report = f"--- SHIFT HANDOVER REPORT ---\n"
-            report += f"Timeframe: {time_txt}\n"
-            report += f"Data Up To: {anchor_time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            
+            # Format the Date nicely. If shift spans two days, show both dates.
+            date_str_start = start_time.strftime('%Y-%m-%d')
+            date_str_end = (end_time - pd.Timedelta(seconds=1)).strftime('%Y-%m-%d') # Subtract 1 second so 00:00 falls on the correct day
+            if date_str_start == date_str_end:
+                report += f"Date: {date_str_start}\n"
+            else:
+                report += f"Date: {date_str_start} to {date_str_end}\n"
+                
+            report += f"Timeframe: {self.combo_time.currentText()}\n"
+            report += f"Shift Bounds: {start_time.strftime('%H:%M')} to {end_time.strftime('%H:%M')} (Local Time)\n\n"
             
             report += f"📊 LOG SUMMARY:\n"
             report += f"• Total Log Entries: {total_entries}\n"
-            if lines_surveyed:
-                report += f"• Unique Lines Active: {len(lines_surveyed)}\n  ( {', '.join(lines_surveyed)} )\n"
-            if total_distance > 0:
-                report += f"• Est. Distance Surveyed: {total_distance:.3f} km\n"
+            
+            if self.chk_dist.isChecked() and total_distance > 0:
+                report += f"• Exact Distance Surveyed: {total_distance:.3f} km\n"
+            
+            if self.chk_active_lines.isChecked() and active_lines_list:
+                report += f"• Unique Lines Surveyed ({len(active_lines_list)}):\n"
+                for ln in active_lines_list:
+                    report += f"    ◦ {ln}\n"
                 
-            report += f"\n🔖 EVENT BREAKDOWN:\n"
-            for k, v in sorted(event_counts.items()):
-                report += f"• {k}: {v}\n"
+            if self.chk_completed_lines.isChecked() and completed_lines_list:
+                report += f"• Lines Completed / EOL ({len(completed_lines_list)}):\n"
+                for ln in completed_lines_list:
+                    report += f"    ◦ {ln}\n"
+                
+            if event_counts:
+                report += f"\n🔖 EVENT BREAKDOWN:\n"
+                for k, v in sorted(event_counts.items()):
+                    report += f"• {k}: {v}\n"
                 
             self.text_out.setPlainText(report)
             
@@ -1177,7 +1525,7 @@ class SettingsDialog(QDialog):
         self.main_layout.addWidget(self.nav_list)
         right_area = QVBoxLayout(); right_area.addWidget(self.stack)
         self.btn_save_all = QPushButton("SAVE ALL AND CLOSE"); self.btn_save_all.setFixedHeight(45); self.btn_save_all.setStyleSheet("QPushButton { background-color: #0078d4; color: white; font-weight: bold; font-size: 14px; border-radius: 6px; border: none; } QPushButton:hover { background-color: #106ebe; }")
-        self.btn_save_all.clicked.connect(self.save_and_close)
+        self.btn_save_all.clicked.connect(self.accept)
         right_area.addWidget(self.btn_save_all)
         self.main_layout.addLayout(right_area)
         self.nav_list.itemClicked.connect(lambda it: self.stack.setCurrentIndex(self.nav_list.indexOfTopLevelItem(it)))
@@ -1240,7 +1588,7 @@ class SettingsDialog(QDialog):
             
             success, msg = self.gui.config.save()
             if success:
-                self.save_and_close()
+                self.accept()
                 self.gui.setWindowTitle(f"Online Logger - {name}")
                 QMessageBox.information(self, "Success", f"Project saved as '{name}'.")
             else:
@@ -1505,48 +1853,102 @@ class SettingsDialog(QDialog):
             if hasattr(self, 'spin_threshold'): self.spin_threshold.setValue(min(int(c.get('active_logging_threshold_seconds', 15)), 3600))
         except Exception: traceback.print_exc()
 
-    def save_and_close(self):
-        c = self.gui.config
-        c.set('log_file_path', self.edit_log_path.text().strip()); c.set('sqlite_db_path', self.edit_db_path.text().strip())
-        txt_aliases, txt_paths = {}, {}
-        for k, (a_w, p_w) in self.txt_source_widgets.items():
-            txt_aliases[k] = a_w.text().strip()
-            txt_paths[k] = p_w.text().strip()
-        c.set('txt_source_aliases', txt_aliases); c.set('txt_folder_paths', txt_paths)
-        new_gen = [{"field": ref['field'], "source": ref['source'], "column_name": ref['col'].text().strip()} for ref in getattr(self, 'generated_input_refs', [])]
-        c.set('generated_fields_config', new_gen)
-        new_static = [{"field": ref['field'].text().strip(), "description": ref['desc'].text().strip(), "column_name": ref['cell'].text().strip(), "skip": False} for ref in getattr(self, 'static_input_refs', []) if ref['field'].text().strip()]
-        c.set('static_field_configs', new_static)
-        f_paths, f_cols, f_exts, f_skips, f_logx, f_logext = {}, {}, {}, {}, {}, {}
-        for refs in getattr(self, 'folder_input_refs', []):
-            name, path = refs['name'].text().strip(), refs['path'].text().strip()
-            if name and path:
-                f_paths[name] = path; f_cols[name] = refs['col'].text().strip() or name; f_exts[name] = refs['ext'].text().strip(); f_skips[name] = refs['skip'].isChecked(); f_logx[name] = refs['log_x'].isChecked(); f_logext[name] = refs['log_ext'].isChecked()
-        c.set('folder_paths', f_paths); c.set('folder_columns', f_cols); c.set('file_extensions', f_exts); c.set('folder_skips', f_skips); c.set('folder_log_x_instead', f_logx); c.set('folder_log_ext_vars', f_logext)
-        c.set('time_offset_hours', self.spin_tz.value()); c.set('active_logging_threshold_seconds', self.spin_threshold.value()); c.set('new_day_event_enabled', self.chk_new_day.isChecked()); c.set('hourly_event_enabled', self.chk_hourly.isChecked()); c.set('calculate_logoff_values', self.chk_logoff.isChecked())
-        if hasattr(self, 'combo_new_day_code'):
-            code_text = self.combo_new_day_code.currentText()
-            c.set('new_day_event_code', code_text.split(" - ")[0] if " - " in code_text else code_text)
-        if hasattr(self, 'codes_table'):
-            new_codes = {}
-            for row in range(self.codes_table.rowCount()):
-                c_item, d_item = self.codes_table.item(row, 0), self.codes_table.item(row, 1)
-                if c_item and c_item.text().strip(): new_codes[c_item.text().strip()] = d_item.text().strip() if d_item else ""
-            c.set('event_codes', new_codes)
-        if hasattr(self, 'chk_udp_enabled'):
-            c.set('udp_trigger_enabled', self.chk_udp_enabled.isChecked())
-            c.set('udp_payload_recording', self.edit_udp_rec.text().strip() or "RECORDING")
-            c.set('udp_payload_idle', self.edit_udp_idle.text().strip() or "IDLE")
-            if hasattr(self.gui, 'restart_udp_listener'): self.gui.restart_udp_listener()
+    def save_settings(self):
+        # Prevent redundant saves if multiple close triggers fire at once
+        if getattr(self, '_is_saved', False): return True
+        
+        try:
+            c = self.gui.config
+            c.set('log_file_path', self.edit_log_path.text().strip())
+            c.set('sqlite_db_path', self.edit_db_path.text().strip())
             
-        success, msg = c.save()
-        if not success:
-            QMessageBox.critical(self, "Save Error", msg)
-            return
+            txt_aliases, txt_paths = {}, {}
+            for k, (a_w, p_w) in self.txt_source_widgets.items():
+                txt_aliases[k] = a_w.text().strip()
+                txt_paths[k] = p_w.text().strip()
+            c.set('txt_source_aliases', txt_aliases)
+            c.set('txt_folder_paths', txt_paths)
             
-        if hasattr(self.gui, 'refresh_custom_buttons'): self.gui.refresh_custom_buttons()
-        if hasattr(self.gui, 'refresh_main_buttons'): self.gui.refresh_main_buttons()
-        self.accept()
+            new_gen = [{"field": ref['field'], "source": ref['source'], "column_name": ref['col'].text().strip()} for ref in getattr(self, 'generated_input_refs', [])]
+            c.set('generated_fields_config', new_gen)
+            
+            new_static = [{"field": ref['field'].text().strip(), "description": ref['desc'].text().strip(), "column_name": ref['cell'].text().strip(), "skip": False} for ref in getattr(self, 'static_input_refs', []) if ref['field'].text().strip()]
+            c.set('static_field_configs', new_static)
+            
+            f_paths, f_cols, f_exts, f_skips, f_logx, f_logext = {}, {}, {}, {}, {}, {}
+            for refs in getattr(self, 'folder_input_refs', []):
+                name, path = refs['name'].text().strip(), refs['path'].text().strip()
+                if name and path:
+                    f_paths[name] = path
+                    f_cols[name] = refs['col'].text().strip() or name
+                    f_exts[name] = refs['ext'].text().strip()
+                    f_skips[name] = refs['skip'].isChecked()
+                    f_logx[name] = refs['log_x'].isChecked()
+                    f_logext[name] = refs['log_ext'].isChecked()
+            c.set('folder_paths', f_paths)
+            c.set('folder_columns', f_cols)
+            c.set('file_extensions', f_exts)
+            c.set('folder_skips', f_skips)
+            c.set('folder_log_x_instead', f_logx)
+            c.set('folder_log_ext_vars', f_logext)
+            
+            c.set('time_offset_hours', self.spin_tz.value())
+            c.set('active_logging_threshold_seconds', self.spin_threshold.value())
+            c.set('new_day_event_enabled', self.chk_new_day.isChecked())
+            c.set('hourly_event_enabled', self.chk_hourly.isChecked())
+            c.set('calculate_logoff_values', self.chk_logoff.isChecked())
+            
+            if hasattr(self, 'combo_new_day_code'):
+                code_text = self.combo_new_day_code.currentText()
+                c.set('new_day_event_code', code_text.split(" - ")[0] if " - " in code_text else code_text)
+                
+            if hasattr(self, 'codes_table'):
+                new_codes = {}
+                for row in range(self.codes_table.rowCount()):
+                    c_item, d_item = self.codes_table.item(row, 0), self.codes_table.item(row, 1)
+                    if c_item and c_item.text().strip(): 
+                        new_codes[c_item.text().strip()] = d_item.text().strip() if d_item else ""
+                c.set('event_codes', new_codes)
+                
+            if hasattr(self, 'chk_udp_enabled'):
+                c.set('udp_trigger_enabled', self.chk_udp_enabled.isChecked())
+                c.set('udp_trigger_port', self.spin_udp_port.value())
+                c.set('udp_payload_recording', self.edit_udp_rec.text().strip() or "RECORDING")
+                c.set('udp_payload_idle', self.edit_udp_idle.text().strip() or "IDLE")
+                if hasattr(self.gui, 'restart_udp_listener'): 
+                    self.gui.restart_udp_listener()
+                
+            success, msg = c.save()
+            if not success:
+                QMessageBox.critical(self, "Save Error", f"Failed to save settings file:\n{msg}")
+                return False
+                
+            if hasattr(self.gui, 'refresh_custom_buttons'): self.gui.refresh_custom_buttons()
+            if hasattr(self.gui, 'refresh_main_buttons'): self.gui.refresh_main_buttons()
+            
+            self._is_saved = True
+            print("[SYSTEM] Settings successfully saved to file.")
+            return True
+            
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Settings Crash", f"A critical error occurred while trying to save your settings:\n\n{str(e)}")
+            return False
+
+    # Intercept all window close events to force an auto-save
+    def closeEvent(self, event):
+        if self.save_settings():
+            event.accept()
+        else:
+            event.ignore() # Don't close the window if the save failed!
+
+    def accept(self):
+        if self.save_settings():
+            super().accept()
+
+    def reject(self):
+        if self.save_settings():
+            super().reject()
 
 
 # =====================================================================
@@ -1586,7 +1988,7 @@ class DataLoggerMainWindow(QMainWindow):
 
         self.setup_static_ui()
         self.refresh_custom_buttons() 
-        if self.config.get("sqlite_db_path"): self.chk_sqlite_enabled.setChecked(True)
+        if self.config.get("sqlite_enabled", False): self.chk_sqlite_enabled.setChecked(True)
         if self.config.get("always_on_top"): self.chk_always_on_top.setChecked(True)
         if self.config.get("new_day_event_enabled", True): self.schedule_new_day()
         if self.config.get("hourly_event_enabled", True): self.schedule_hourly_log()
@@ -1665,7 +2067,7 @@ class DataLoggerMainWindow(QMainWindow):
         btn_grid = QGridLayout(); btn_grid.setSpacing(8)
         row, col = 0, 0
         for btn_name in ["Log on", "Log off", "Event", "SVP", "Manual KP Log"]:
-            btn = AutoScalingButton(btn_name); btn.setMinimumHeight(40)
+            btn = AutoScalingButton(btn_name); btn.setMinimumHeight(60)
             bg, fg = self._get_color_tuple(btn_name); btn.setStyleSheet(self._get_button_stylesheet(bg, fg))
             
             btn.set_wedge_color(bg) 
@@ -1676,25 +2078,44 @@ class DataLoggerMainWindow(QMainWindow):
             col += 1
             if col > 1: col, row = 0, row + 1
             
-        btn_hist = QPushButton("Add Historic Event"); btn_hist.setObjectName("ActionBtn"); btn_hist.setCursor(Qt.CursorShape.PointingHandCursor); btn_hist.clicked.connect(self.add_historic_event); btn_hist.setMinimumHeight(40); btn_grid.addWidget(btn_hist, row, col)
+        btn_hist = QPushButton("Add Historic Event"); btn_hist.setObjectName("ActionBtn"); btn_hist.setCursor(Qt.CursorShape.PointingHandCursor); btn_hist.clicked.connect(self.add_historic_event); btn_hist.setMinimumHeight(60); btn_grid.addWidget(btn_hist, row, col)
         
         # --- Shift Report Button ---
         col += 1
         if col > 1: col, row = 0, row + 1
-        btn_handover = QPushButton("📄 Shift Report"); btn_handover.setObjectName("ActionBtn"); btn_handover.setCursor(Qt.CursorShape.PointingHandCursor); btn_handover.clicked.connect(lambda: HandoverReportDialog(self).exec()); btn_handover.setMinimumHeight(40); btn_grid.addWidget(btn_handover, row, col)
+        btn_handover = QPushButton("📄 Shift Report"); btn_handover.setObjectName("ActionBtn"); btn_handover.setCursor(Qt.CursorShape.PointingHandCursor); btn_handover.clicked.connect(lambda: HandoverReportDialog(self).exec()); btn_handover.setMinimumHeight(60); btn_grid.addWidget(btn_handover, row, col)
 
         self.general_layout.addLayout(btn_grid); self.general_layout.addStretch()
 
-        sys_btn_layout = QHBoxLayout(); sys_btn_layout.setSpacing(8)
-        self.btn_toggle_monitor = QPushButton("Start Monitoring"); self.btn_toggle_monitor.setObjectName("ActionBtn"); self.btn_toggle_monitor.setCursor(Qt.CursorShape.PointingHandCursor); self.btn_toggle_monitor.clicked.connect(self.toggle_monitoring)
-        btn_set = QPushButton("⚙️ Settings"); btn_set.setObjectName("ActionBtn"); btn_set.setCursor(Qt.CursorShape.PointingHandCursor); btn_set.clicked.connect(lambda: SettingsDialog(self).exec())
+       # --- System & Status Buttons (2-Column Grid) ---
+        sys_btn_layout = QGridLayout(); sys_btn_layout.setSpacing(8)
         
-        # --- NEW HELP BUTTON ---
-        btn_help = QPushButton("? Help"); btn_help.setObjectName("ActionBtn"); btn_help.setCursor(Qt.CursorShape.PointingHandCursor); btn_help.clicked.connect(lambda: HelpDialog(self).exec())
+        self.btn_toggle_monitor = QPushButton("Start Monitoring")
+        self.btn_toggle_monitor.setObjectName("ActionBtn")
+        self.btn_toggle_monitor.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_monitor.clicked.connect(self.toggle_monitoring)
         
-        sys_btn_layout.addWidget(self.btn_toggle_monitor)
-        sys_btn_layout.addWidget(btn_set)
-        sys_btn_layout.addWidget(btn_help)
+        btn_set = QPushButton("⚙️ Settings")
+        btn_set.setObjectName("ActionBtn")
+        btn_set.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_set.clicked.connect(lambda: SettingsDialog(self).exec())
+        
+        btn_help = QPushButton("❓ Help")
+        btn_help.setObjectName("ActionBtn")
+        btn_help.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_help.clicked.connect(lambda: HelpDialog(self).exec())
+        
+        btn_debug = QPushButton("🐞 Debug")
+        btn_debug.setObjectName("ActionBtn")
+        btn_debug.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_debug.clicked.connect(lambda: DebugDialog(self).exec())
+        
+        # Add to Grid: widget, row, column
+        sys_btn_layout.addWidget(self.btn_toggle_monitor, 0, 0)
+        sys_btn_layout.addWidget(btn_set, 0, 1)
+        sys_btn_layout.addWidget(btn_help, 1, 0)
+        sys_btn_layout.addWidget(btn_debug, 1, 1)
+        
         self.config_layout.addLayout(sys_btn_layout)
         
         separator = QFrame(); separator.setFrameShape(QFrame.Shape.HLine); separator.setStyleSheet("background-color: rgba(128,128,128,0.2); margin: 5px 0px;"); self.config_layout.addWidget(separator)
@@ -1868,34 +2289,94 @@ class DataLoggerMainWindow(QMainWindow):
         if not self.monitor_manager.is_monitoring:
             folder_configs = {}
             for name, path in self.config.get("folder_paths", {}).items():
-                folder_configs[name] = {"path": path, "ext": self.config.get("file_extensions", {}).get(name, ""), "skip": self.config.get("folder_skips", {}).get(name, False)}
-            success, msg = self.monitor_manager.start_monitoring(folder_configs)
+                folder_configs[name] = {
+                    "path": path, 
+                    "ext": self.config.get("file_extensions", {}).get(name, ""), 
+                    "skip": self.config.get("folder_skips", {}).get(name, False)
+                }
             
-            if success:
-                self.lbl_mon.setText("● LIVE"); self.lbl_mon.setStyleSheet("color: #28a745; font-weight: 900; font-size: 14px;")
-                self.btn_toggle_monitor.setText("Stop Monitoring"); self.btn_toggle_monitor.setStyleSheet("QPushButton { background-color: rgba(40, 167, 69, 0.15); border: 2px solid #28a745; color: #28a745; border-radius: 6px; padding: 8px 15px; font-weight: bold; }")
-                self.update_status(msg)
-            else:
-                QMessageBox.warning(self, "Monitor Failed", msg)
-                self.update_status("Monitor failed to start.")
+            # 1. Update UI for the scanning phase
+            self.btn_toggle_monitor.setEnabled(False)
+            self.btn_toggle_monitor.setText("Scanning...")
+            self.progress_bar.setVisible(True)
+            self.update_status("Scanning folders to build initial file cache. Please wait...")
+            
+            # 2. Push the heavy folder scanning to a background QThread
+            self.mon_thread = QThread()
+            self.mon_worker = MonitorSetupWorker(self.monitor_manager, folder_configs)
+            self.mon_worker.moveToThread(self.mon_thread)
+            self._active_threads.append((self.mon_thread, self.mon_worker))
+            
+            self.mon_thread.started.connect(self.mon_worker.run)
+            self.mon_worker.finished.connect(self._on_monitor_started)
+            self.mon_worker.finished.connect(self.mon_thread.quit)
+            self.mon_worker.finished.connect(self.mon_worker.deleteLater)
+            self.mon_thread.finished.connect(self.mon_thread.deleteLater)
+            self.mon_thread.finished.connect(lambda t=self.mon_thread, w=self.mon_worker: self._active_threads.remove((t, w)) if (t, w) in self._active_threads else None)
+            
+            self.mon_thread.start()
+            
         else:
             self.monitor_manager.stop_monitoring()
-            self.lbl_mon.setText("● Inactive"); self.lbl_mon.setStyleSheet("color: #FF6B6B; font-weight: bold; font-size: 13px;")
-            self.btn_toggle_monitor.setText("Start Monitoring"); self.btn_toggle_monitor.setStyleSheet("")
+            self.lbl_mon.setText("● Inactive")
+            self.lbl_mon.setStyleSheet("color: #FF6B6B; font-weight: bold; font-size: 13px;")
+            self.btn_toggle_monitor.setText("Start Monitoring")
+            self.btn_toggle_monitor.setStyleSheet("")
             self.update_status("Folder monitoring stopped.")
 
+    def _on_monitor_started(self, success, msg):
+        """Callback triggered when the background scan finishes."""
+        self.progress_bar.setVisible(False)
+        self.btn_toggle_monitor.setEnabled(True)
+        
+        if success:
+            self.lbl_mon.setText("● LIVE")
+            self.lbl_mon.setStyleSheet("color: #28a745; font-weight: 900; font-size: 14px;")
+            self.btn_toggle_monitor.setText("Stop Monitoring")
+            self.btn_toggle_monitor.setStyleSheet("QPushButton { background-color: rgba(40, 167, 69, 0.15); border: 2px solid #28a745; color: #28a745; border-radius: 6px; padding: 8px 15px; font-weight: bold; }")
+            self.update_status(msg)
+        else:
+            self.btn_toggle_monitor.setText("Start Monitoring")
+            self.btn_toggle_monitor.setStyleSheet("")
+            QMessageBox.warning(self, "Monitor Failed", msg)
+            self.update_status("Monitor failed to start.")
+
     def toggle_sqlite_mirroring(self, checked):
-        if hasattr(self, 'btn_manual_sync') and self.btn_manual_sync: self.btn_manual_sync.setEnabled(checked)
+        self.config.set("sqlite_enabled", checked)
+        self.config.save()
+        
+        if hasattr(self, 'btn_manual_sync') and self.btn_manual_sync: 
+            self.btn_manual_sync.setEnabled(checked)
+            
         if checked:
-            if not self.config.get("log_file_path") or not os.path.exists(self.config.get("log_file_path")):
-                QMessageBox.critical(self, "Error", "You must set a valid Excel Log Path in Settings before enabling SQLite."); 
-                self.chk_sqlite_enabled.blockSignals(True); self.chk_sqlite_enabled.setChecked(False); self.chk_sqlite_enabled.blockSignals(False); return
-            db_path = self.config.get("sqlite_db_path") or str(Path(self.config.get("log_file_path")).with_suffix('.db'))
-            self.update_status(f"Enabling SQLite mirror at {db_path}"); self.sqlite_manager = SQLiteManager(db_path)
-            self.run_manual_sqlite_sync(); self.start_auto_sync()
+            excel_path = self.config.get("log_file_path")
+            
+            # Check if the path is valid
+            if not excel_path or not os.path.exists(excel_path):
+                error_msg = "You must set a valid Excel Log Path in Settings before enabling SQLite."
+                self.update_status(f"SQLite disabled: {error_msg}")
+                
+                # ONLY show the loud popup if the app is fully visible (meaning the user manually clicked it)
+                # If it's not visible yet, it means the app is still booting up, so we skip the popup!
+                if self.isVisible():
+                    QMessageBox.critical(self, "Error", error_msg)
+                
+                # Silently uncheck the box
+                self.chk_sqlite_enabled.blockSignals(True)
+                self.chk_sqlite_enabled.setChecked(False)
+                self.chk_sqlite_enabled.blockSignals(False)
+                return
+                
+            db_path = self.config.get("sqlite_db_path") or str(Path(excel_path).with_suffix('.db'))
+            self.update_status(f"Enabling SQLite mirror at {db_path}")
+            self.sqlite_manager = SQLiteManager(db_path)
+            self.run_manual_sqlite_sync()
+            self.start_auto_sync()
         else:
             self.stop_auto_sync()
-            if self.sqlite_manager: self.sqlite_manager.close(); self.sqlite_manager = None
+            if self.sqlite_manager: 
+                self.sqlite_manager.close()
+                self.sqlite_manager = None
             self.update_status("SQLite mirroring disabled.")
 
     def run_manual_sqlite_sync(self):
@@ -2053,105 +2534,124 @@ class DataLoggerMainWindow(QMainWindow):
         # Native PySide6 button handling
         if triggering_button:
             original_text = triggering_button.text()
+            if original_text == "Working...":
+                original_text = getattr(self, 'original_manual_btn_text', event_type)
+                
             triggering_button.setEnabled(False)
             triggering_button.setText("Working...")
             
         self.update_status(f"Processing '{event_type}'...")
-        
-        # 1. Gather all data synchronously first
-        row_data = {}
-        base_time = override_utc_datetime if override_utc_datetime else datetime.datetime.now()
-        
-        txt_data = self._get_parsed_txt_data(txt_source_key)
-        for k, v in txt_data.items(): 
-            row_data[str(k).strip()] = v
-
-        kp_col_name = "KP"
-        for cfg in self.config.get("all_txt_mappings", {}).get(txt_source_key, []):
-            if cfg.get("field") == "KP" and not cfg.get("skip"): 
-                kp_col_name = cfg.get("column_name", "KP")
-                break
-
-        if event_type == "Log on":
-            try:
-                self._cached_log_on_kp = float(row_data.get(kp_col_name, ""))
-                self._cached_log_on_time = base_time
-                self.update_status("Log On successful. Stored KP.")
-            except ValueError: 
-                self._cached_log_on_kp, self._cached_log_on_time = None, None
-                
-        elif event_type == "Log off" and self.config.get("calculate_logoff_values", True):
-            log_on_kp = getattr(self, '_cached_log_on_kp', None)
-            log_on_time = getattr(self, '_cached_log_on_time', None)
-            if log_on_kp is not None and log_on_time is not None:
-                try:
-                    time_diff_secs = (base_time - log_on_time).total_seconds()
-                    distance_km = abs(float(row_data.get(kp_col_name, "")) - log_on_kp)
-                    speed_knots = (distance_km / 1.852) / (time_diff_secs / 3600.0) if time_diff_secs > 1 else 0.0
-                    event_text_for_excel = f"Log off - Traveled: {distance_km:.3f} km @ {speed_knots:.2f} kts"
-                except ValueError: pass
-            self._cached_log_on_kp, self._cached_log_on_time = None, None
-
-        for config in self.config.get("generated_fields_config", []):
-            target_col = config.get("column_name", config.get("field")).strip()
-            src = config.get("source", "")
-            if "UUID" in src or config["field"] == "UUID": row_data[target_col] = str(uuid.uuid4())
-            elif "UTC" in src or config["field"] == "Date-Time": row_data[target_col] = base_time.strftime("%Y-%m-%d %H:%M:%S")
-            elif "Local" in src or config["field"] == "Local Time": row_data[target_col] = (base_time + datetime.timedelta(hours=self.config.get("time_offset_hours", 0.0))).strftime("%Y-%m-%d %H:%M:%S")
-            elif config["field"] == "Event": row_data[target_col] = event_text_for_excel
-            elif config["field"] == "Code":
-                code = self.config.get("main_button_configs", {}).get(event_type, {}).get("event_code", "")
-                if not code:
-                    for cb in self.config.get("custom_button_configs", []):
-                        if cb.get("text") == event_type: 
-                            code = cb.get("event_code", "")
-                            break
-                row_data[target_col] = code
-            elif config["field"] == "KP Ref.": row_data[target_col] = self.config.get("txt_source_aliases", {}).get(txt_source_key, txt_source_key)
-
-        for k, v in self._get_static_excel_data().items(): row_data[k.strip()] = v
-
-        if self.monitor_manager.is_monitoring and not skip_monitored_folders:
-            paths = self.config.get("folder_paths", {})
-            skips = self.config.get("folder_skips", {})
-            cols = self.config.get("folder_columns", {})
-            log_x = self.config.get("folder_log_x_instead", {})
-            log_ext = self.config.get("folder_log_ext_vars", {})
-            for name in paths.keys():
-                if skips.get(name, False): continue
-                latest_file_path = self.monitor_manager.get_latest_file(name)
-                if latest_file_path: 
-                    row_data[cols.get(name, name).strip()] = "X" if log_x.get(name, False) else (os.path.basename(latest_file_path) if log_ext.get(name, False) else os.path.splitext(os.path.basename(latest_file_path))[0])
-
-        if override_txt_data: 
-            for k, v in override_txt_data.items(): row_data[str(k).strip()] = v
             
-        if additional_data:
-            for k, v in additional_data.items(): row_data[str(k).strip()] = v
+        try:
+            # 1. Gather all data synchronously first
+            row_data = {}
+            base_time = override_utc_datetime if override_utc_datetime else datetime.datetime.now()
+            
+            txt_data = self._get_parsed_txt_data(txt_source_key)
+            for k, v in txt_data.items(): 
+                row_data[str(k).strip()] = v
 
-        if not any(k for k in row_data.keys() if "UUID" in str(k).upper()): row_data["UUID"] = str(uuid.uuid4())
-        if not any(k for k in row_data.keys() if "Event" in str(k)): row_data["Event"] = event_text_for_excel
+            kp_col_name = "KP"
+            for cfg in self.config.get("all_txt_mappings", {}).get(txt_source_key, []):
+                if cfg.get("field") == "KP" and not cfg.get("skip"): 
+                    kp_col_name = cfg.get("column_name", "KP")
+                    break
 
-        bg, _ = self._get_color_tuple(event_type)
-        
-        # 2. PySide6 Threading using our LogWorker class (Handles the pythoncom COM lock internally)
-        logger = ExcelLogger(self.config.get("log_file_path"), self.sqlite_manager)
-        thread = QThread()
-        worker = LogWorker(logger, {'row_data': row_data, 'bg_color': bg})
-        worker.moveToThread(thread)
-        self._active_threads.append((thread, worker))
-        
-        thread.started.connect(worker.run)
-        
-        # Safely pass variables to the callback using lambda
-        worker.finished.connect(lambda s_ex, s_sq, m, b=triggering_button, t=original_text: self._on_log_complete(s_ex, s_sq, m, b, t))
-        
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda: self._active_threads.remove((thread, worker)) if (thread, worker) in self._active_threads else None)
-        
-        thread.start()
+            if event_type == "Log on":
+                try:
+                    self._cached_log_on_kp = float(row_data.get(kp_col_name, ""))
+                    self._cached_log_on_time = base_time
+                    self.update_status("Log On successful. Stored KP.")
+                except ValueError: 
+                    self._cached_log_on_kp, self._cached_log_on_time = None, None
+                    
+            elif event_type == "Log off" and self.config.get("calculate_logoff_values", True):
+                log_on_kp = getattr(self, '_cached_log_on_kp', None)
+                log_on_time = getattr(self, '_cached_log_on_time', None)
+                if log_on_kp is not None and log_on_time is not None:
+                    try:
+                        time_diff_secs = (base_time - log_on_time).total_seconds()
+                        distance_km = abs(float(row_data.get(kp_col_name, "")) - log_on_kp)
+                        speed_knots = (distance_km / 1.852) / (time_diff_secs / 3600.0) if time_diff_secs > 1 else 0.0
+                        event_text_for_excel = f"Log off - Traveled: {distance_km:.3f} km @ {speed_knots:.2f} kts"
+                    except ValueError: pass
+                self._cached_log_on_kp, self._cached_log_on_time = None, None
+
+            for config in self.config.get("generated_fields_config", []):
+                target_col = config.get("column_name", config.get("field")).strip()
+                src = config.get("source", "")
+                if "UUID" in src or config["field"] == "UUID": row_data[target_col] = str(uuid.uuid4())
+                elif "UTC" in src or config["field"] == "Date-Time": row_data[target_col] = base_time.strftime("%Y-%m-%d %H:%M:%S")
+                elif "Local" in src or config["field"] == "Local Time": row_data[target_col] = (base_time + datetime.timedelta(hours=self.config.get("time_offset_hours", 0.0))).strftime("%Y-%m-%d %H:%M:%S")
+                elif config["field"] == "Event": row_data[target_col] = event_text_for_excel
+                elif config["field"] == "Code":
+                    code = self.config.get("main_button_configs", {}).get(event_type, {}).get("event_code", "")
+                    if not code:
+                        for cb in self.config.get("custom_button_configs", []):
+                            if cb.get("text") == event_type: 
+                                code = cb.get("event_code", "")
+                                break
+                    row_data[target_col] = code
+                elif config["field"] == "KP Ref.": row_data[target_col] = self.config.get("txt_source_aliases", {}).get(txt_source_key, txt_source_key)
+
+            for k, v in self._get_static_excel_data().items(): row_data[k.strip()] = v
+
+            if self.monitor_manager.is_monitoring and not skip_monitored_folders:
+                paths = self.config.get("folder_paths", {})
+                skips = self.config.get("folder_skips", {})
+                cols = self.config.get("folder_columns", {})
+                log_x = self.config.get("folder_log_x_instead", {})
+                log_ext = self.config.get("folder_log_ext_vars", {})
+                for name in paths.keys():
+                    if skips.get(name, False): continue
+                    latest_file_path = self.monitor_manager.get_latest_file(name)
+                    if latest_file_path: 
+                        row_data[cols.get(name, name).strip()] = "X" if log_x.get(name, False) else (os.path.basename(latest_file_path) if log_ext.get(name, False) else os.path.splitext(os.path.basename(latest_file_path))[0])
+
+            if override_txt_data: 
+                for k, v in override_txt_data.items(): row_data[str(k).strip()] = v
+                
+            if additional_data:
+                for k, v in additional_data.items(): row_data[str(k).strip()] = v
+
+            if not any(k for k in row_data.keys() if "UUID" in str(k).upper()): row_data["UUID"] = str(uuid.uuid4())
+            if not any(k for k in row_data.keys() if "Event" in str(k)): row_data["Event"] = event_text_for_excel
+
+            bg, _ = self._get_color_tuple(event_type)
+            
+            # 2. PySide6 Threading - FIX: No Lambda!
+            logger = ExcelLogger(self.config.get("log_file_path"), self.sqlite_manager)
+            thread = QThread()
+            
+            # Pass button, text, and static configs into the worker so it handles them safely
+            worker_payload = {
+                'row_data': row_data, 
+                'bg_color': bg,
+                'static_configs': self.config.get("static_field_configs", [])
+            }
+            worker = LogWorker(logger, worker_payload, triggering_button, original_text)
+            worker.moveToThread(thread)
+            self._active_threads.append((thread, worker))
+            
+            # ---> THIS IS THE MISSING LINE WE NEED TO ADD BACK <---
+            thread.started.connect(worker.run) 
+            
+            # Connect directly to the method. Qt will automatically route this to the Main UI Thread!
+            worker.finished.connect(self._on_log_complete)
+            
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.finished.connect(lambda t=thread, w=worker: self._active_threads.remove((t, w)) if (t, w) in self._active_threads else None)
+            
+            thread.start()
+            
+        except Exception as e:
+            traceback.print_exc()
+            self.update_status(f"Log Prep Failed: {e}")
+            if triggering_button:
+                triggering_button.setEnabled(True)
+                triggering_button.setText(original_text)
 
     def _on_log_complete(self, excel_success, sqlite_success, msg, btn, orig_text):
         if btn: btn.setEnabled(True); btn.setText(orig_text)
@@ -2171,24 +2671,53 @@ class DataLoggerMainWindow(QMainWindow):
             )
 
     def schedule_new_day(self):
+        """Calculates exact milliseconds until midnight and schedules the trigger."""
         now = datetime.datetime.now()
-        midnight = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time.min)
-        QTimer.singleShot(int((midnight - now).total_seconds() * 1000) + 1000, self.trigger_new_day)
+        
+        # Calculate exactly when tomorrow's midnight is
+        tomorrow = now + datetime.timedelta(days=1)
+        midnight = datetime.datetime(
+            year=tomorrow.year, 
+            month=tomorrow.month, 
+            day=tomorrow.day, 
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        
+        # Calculate the exact difference in milliseconds
+        time_until_midnight_ms = int((midnight - now).total_seconds() * 1000)
+        
+        # Add a tiny 1-second buffer to ensure it triggers ON the new day, not right before it
+        trigger_delay_ms = time_until_midnight_ms + 1000
+
+        print(f"[SYSTEM] Next Midnight 'New Day' log scheduled in {time_until_midnight_ms/1000/3600:.2f} hours.")
+        
+        # Use a persistent QTimer
+        if hasattr(self, 'midnight_timer') and self.midnight_timer:
+            self.midnight_timer.stop()
+            
+        self.midnight_timer = QTimer(self)
+        self.midnight_timer.setSingleShot(True) # Only run once, we will manually reschedule it
+        self.midnight_timer.timeout.connect(self.trigger_new_day)
+        self.midnight_timer.start(trigger_delay_ms)
 
     def trigger_new_day(self):
+        print("\n[SYSTEM] Executing Midnight 'New Day' Event...")
         if self.config.get("new_day_event_enabled", True):
             overrides = {}
             code = self.config.get("new_day_event_code", "")
             
-            # If a code is selected, locate the target Excel column for "Code" and override it
             if code:
                 for cfg in self.config.get("generated_fields_config", []):
                     if cfg.get("field") == "Code": 
                         overrides[cfg.get("column_name", "Code").strip()] = code
                         break
                         
-            self._perform_log_action("New Day", "Midnight Position", None, "Main TXT", over_txt=overrides)
+            # Perform the log action in the background
+            self._perform_log_action("New Day", "Midnight Position", None, "Main TXT", override_txt_data=overrides)
+        else:
+            print("[SYSTEM] 'New Day' event is disabled in settings. Skipping.")
             
+        # Reschedule for tomorrow's midnight
         self.schedule_new_day()
 
     def schedule_hourly_log(self):
@@ -2202,6 +2731,7 @@ class DataLoggerMainWindow(QMainWindow):
             self.trigger_manual_hourly_log_action(None)
 
     def trigger_manual_hourly_log_action(self, btn):
+        print("\n[DEBUG - HOURLY TRIGGER] Hourly Log Initiated.")
         if not self.config.get("hourly_event_enabled", True): 
             if btn: QMessageBox.information(self, "Disabled", "The 'Hourly KP Log' event is disabled.")
             return
@@ -2212,7 +2742,10 @@ class DataLoggerMainWindow(QMainWindow):
             self.update_status("Manual KP Log skipped: Excel file missing.")
             return 
             
-        if getattr(self, 'is_calculating_kp', False): return
+        if getattr(self, 'is_calculating_kp', False): 
+            print("[DEBUG - HOURLY TRIGGER] Blocked: An hourly calculation is already running!")
+            return
+            
         self.is_calculating_kp = True
         
         if btn: 
@@ -2223,6 +2756,8 @@ class DataLoggerMainWindow(QMainWindow):
         self.update_status("Processing 'Manual KP Log'...")
         
         src_key = self.config.get("hourly_log_txt_source_key", "Main TXT")
+        print(f"[DEBUG - HOURLY TRIGGER] Gathering data from: {src_key}")
+        
         kp_col_name, line_col_name, event_col_name, dt_col_name = "KP", "Runline", "Event", "UTC Date-Time"
         for cfg in self.config.get("all_txt_mappings", {}).get(src_key, []):
             if cfg.get("field") == "KP" and not cfg.get("skip"): kp_col_name = cfg.get("column_name", "KP")
@@ -2236,8 +2771,10 @@ class DataLoggerMainWindow(QMainWindow):
             current_kp = float(txt_data.get(kp_col_name))
             current_line = txt_data.get(line_col_name)
             if current_line is None: raise ValueError()
+            print(f"[DEBUG - HOURLY TRIGGER] Captured Live Data -> KP: {current_kp}, Line: {current_line}")
         except Exception:
             msg = f"KP Log skipped: Failed to extract valid KP or Line Name from '{src_key}'."
+            print(f"[DEBUG - HOURLY TRIGGER] FAILED: {msg}")
             self.update_status(msg)
             self.is_calculating_kp = False
             if btn: 
@@ -2246,7 +2783,7 @@ class DataLoggerMainWindow(QMainWindow):
                 QMessageBox.warning(self, "Missing Source Data", f"Cannot perform Manual KP Log.\n\n{msg}\n\nPlease ensure your text data folder has valid files and your mapping is correct.")
             return
 
-        # --- PYSIDE6 THREADING (Uses the safe HourlyCalcWorker class) ---
+        print("[DEBUG - HOURLY TRIGGER] Starting background QThread...")
         thread = QThread()
         worker = HourlyCalcWorker(
             excel_path, event_col_name, kp_col_name, line_col_name, dt_col_name,
@@ -2267,10 +2804,12 @@ class DataLoggerMainWindow(QMainWindow):
         thread.start()
 
     def _on_calc_finished(self, success, event_text, new_kp, new_line, new_time):
+        print(f"[DEBUG - HOURLY TRIGGER] Background calculation returned. Success: {success}")
         self.is_calculating_kp = False
         btn = getattr(self, '_current_manual_btn', None)
         if success:
             self._cached_last_hourly_kp, self._cached_last_hourly_line, self._cached_last_hourly_time = new_kp, new_line, new_time
+            print("[DEBUG - HOURLY TRIGGER] Passing generated text to LogWorker...")
             self._perform_log_action("Hourly KP Log", event_text, btn, self.config.get('hourly_log_txt_source_key', 'Main TXT'))
         else:
             if btn: 
@@ -2345,13 +2884,71 @@ class DataLoggerMainWindow(QMainWindow):
         return max(candidate_files, key=lambda item: item[0])[1] if candidate_files else None
 
     def closeEvent(self, event):
-        self.monitor_manager.stop_monitoring()
-        if self.sqlite_manager: self.sqlite_manager.close()
-        if hasattr(self, 'udp_worker') and self.udp_worker: self.udp_worker.stop()
-        if hasattr(self, 'udp_thread') and self.udp_thread: self.udp_thread.quit(); self.udp_thread.wait(1000)
+        print("\n[SYSTEM] Shutting down application...")
+        
+        # 1. Stop Folder Monitoring
+        if hasattr(self, 'monitor_manager') and self.monitor_manager:
+            try: self.monitor_manager.stop_monitoring()
+            except Exception: pass
+            
+        # 2. Close SQLite Connection
+        if hasattr(self, 'sqlite_manager') and self.sqlite_manager:
+            try: self.sqlite_manager.close()
+            except Exception: pass
+            
+        # 3. Stop UDP Listener
+        if hasattr(self, 'udp_worker') and self.udp_worker:
+            try: self.udp_worker.stop()
+            except Exception: pass
+            
+        if hasattr(self, 'udp_thread') and self.udp_thread:
+            try:
+                self.udp_thread.quit()
+                self.udp_thread.wait(200) # Wait max 200ms instead of 1000ms
+            except Exception: pass
+
+        # 4. Clean up any stuck background worker threads
         for thread, worker in getattr(self, '_active_threads', []):
-            if thread.isRunning(): thread.quit(); thread.wait(1000)
+            try:
+                if thread.isRunning(): 
+                    thread.quit()
+                    thread.wait(200) # Wait max 200ms, then force close anyway
+            except Exception: pass
+            
+        print("[SYSTEM] Safe to close.")
         event.accept()
+
+class DebugDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Application Debug Console")
+        self.resize(800, 450)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+        
+        layout = QVBoxLayout(self)
+        self.text_browser = QTextBrowser()
+        # Matrix-style console look
+        self.text_browser.setStyleSheet("background-color: #1e1e1e; color: #00ff00; font-family: Consolas, monospace; font-size: 13px; padding: 10px;")
+        layout.addWidget(self.text_browser)
+        
+        # Connect live output and pre-fill history
+        if 'console_logger' in globals():
+            self.text_browser.insertPlainText("".join(console_logger.history))
+            self.text_browser.moveCursor(QTextCursor.MoveOperation.End)
+            console_logger.written.connect(self.append_text)
+            
+        btn_close = QPushButton("Close Console")
+        btn_close.setStyleSheet("QPushButton { border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; padding: 8px 20px; font-weight: bold; background-color: #333333; color: white; } QPushButton:hover { background-color: #555555; }")
+        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close.clicked.connect(self.accept)
+        layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
+        
+    def append_text(self, text):
+        # Auto-scroll to bottom when new text arrives
+        self.text_browser.moveCursor(QTextCursor.MoveOperation.End)
+        self.text_browser.insertPlainText(text)
+        self.text_browser.moveCursor(QTextCursor.MoveOperation.End)
+
 class HelpDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -2436,29 +3033,69 @@ class HelpDialog(QDialog):
         layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
 
 # =====================================================================
-# LAUNCH APP
+# INTERCEPTOR & LAUNCH APP
 # =====================================================================
-if __name__ == "__main__":
+
+# =====================================================================
+# INTERCEPTOR & LAUNCH APP
+# =====================================================================
+
+class ConsoleLogger(QObject):
+    """Intercepts terminal print() statements and errors, sending them to the GUI."""
+    written = Signal(str)
     
+    def __init__(self):
+        super().__init__()
+        self.history = []
+        # Use sys.__stdout__ which is the true original console, bypassing PyInstaller wrappers
+        self.original_stdout = sys.__stdout__
+        self.original_stderr = sys.__stderr__
+        
+    def write(self, text):
+        # 1. Hyper-safe check: Only write if the terminal exists AND has a write function
+        if self.original_stdout and hasattr(self.original_stdout, 'write'):
+            try:
+                self.original_stdout.write(text)
+            except Exception:
+                pass
+                
+        # 2. Add to our GUI Debug history
+        self.history.append(text)
+        
+        # Keep memory clean (limit to last 5000 lines)
+        if len(self.history) > 5000: 
+            self.history.pop(0)
+            
+        # 3. Emit to the live UI safely
+        self.written.emit(text)
+        
+    def flush(self):
+        if self.original_stdout and hasattr(self.original_stdout, 'flush'):
+            try:
+                self.original_stdout.flush()
+            except Exception:
+                pass
+
+if __name__ == "__main__":
     try:
         import ctypes
-        # Tell Windows this is a distinct App, not just generic "Python"
         myappid = f"Online Logger {APP_VERSION}"
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    except Exception:
-        pass
+    except Exception: pass
 
     app = QApplication(sys.argv)
     
-    # Load the logo using the PyInstaller path finder
+    # --- ACTIVATE PRINT INTERCEPTOR ---
+    global console_logger
+    console_logger = ConsoleLogger()
+    sys.stdout = console_logger
+    sys.stderr = console_logger
+    
     app_icon = QIcon(resource_path("Logo.ico"))
     app.setWindowIcon(app_icon)
-    
     app.setStyle("Fusion") 
+    
     window = DataLoggerMainWindow()
-    
-    # Redundancy: Also set the icon on the main window itself
     window.setWindowIcon(app_icon)
-    
     window.show()
     sys.exit(app.exec())
