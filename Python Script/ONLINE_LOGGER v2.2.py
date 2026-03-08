@@ -1924,11 +1924,14 @@ class SettingsDialog(QDialog):
             new_static = [{"field": ref['field'].text().strip(), "description": ref['desc'].text().strip(), "column_name": ref['cell'].text().strip(), "skip": False} for ref in getattr(self, 'static_input_refs', []) if ref['field'].text().strip()]
             c.set('static_field_configs', new_static)
             
+            old_f_paths = c.get('folder_paths', {})
+            old_f_exts = c.get('file_extensions', {})
+            old_f_skips = c.get('folder_skips', {})
+
             f_paths, f_cols, f_exts, f_skips, f_logx, f_logext = {}, {}, {}, {}, {}, {}
             for refs in getattr(self, 'folder_input_refs', []):
                 name = refs['name'].text().strip()
                 path = refs['path'].text().strip()
-                # Save the folder as long as it has a name. It's okay if the path is left blank!
                 if name:
                     f_paths[name] = path
                     f_cols[name] = refs['col'].text().strip() or name
@@ -1936,7 +1939,16 @@ class SettingsDialog(QDialog):
                     f_skips[name] = refs['skip'].isChecked()
                     f_logx[name] = refs['log_x'].isChecked()
                     f_logext[name] = refs['log_ext'].isChecked()
+            
+            # --- Check if any monitoring-related parameters actually changed! ---
+            self.folders_changed = (f_paths != old_f_paths) or (f_exts != old_f_exts) or (f_skips != old_f_skips)
+            
             c.set('folder_paths', f_paths)
+            c.set('folder_columns', f_cols)
+            c.set('file_extensions', f_exts)
+            c.set('folder_skips', f_skips)
+            c.set('folder_log_x_instead', f_logx)
+            c.set('folder_log_ext_vars', f_logext)
             c.set('_folders_initialized', True) 
             c.set('folder_columns', f_cols)
             c.set('file_extensions', f_exts)
@@ -1969,8 +1981,14 @@ class SettingsDialog(QDialog):
                 c.set('udp_payload_idle', self.edit_udp_idle.text().strip() or "IDLE")
                 if hasattr(self.gui, 'restart_udp_listener'): 
                     self.gui.restart_udp_listener()
+            
+            #  Tell the Folder Monitor to update its paths!
+            #  Tell the Folder Monitor to update ONLY if a path/setting was altered!
+            if getattr(self, 'folders_changed', False) and hasattr(self.gui, 'restart_monitoring'):
+                self.gui.restart_monitoring()
                 
             success, msg = c.save()
+
             if not success:
                 QMessageBox.critical(self, "Save Error", f"Failed to save settings file:\n{msg}")
                 return False
@@ -2392,6 +2410,15 @@ class DataLoggerMainWindow(QMainWindow):
             self.btn_toggle_monitor.setStyleSheet("")
             QMessageBox.warning(self, "Monitor Failed", msg)
             self.update_status("Monitor failed to start.")
+
+    def restart_monitoring(self):
+        """Safely restarts the folder monitor if settings change while it is LIVE."""
+        if getattr(self, 'monitor_manager', None) and self.monitor_manager.is_monitoring:
+            self.update_status("Rebooting folder monitors with new paths...")
+            self.toggle_monitoring() # Stop it immediately
+            
+            # Wait half a second to let the old thread completely die, then turn it back on
+            QTimer.singleShot(500, self.toggle_monitoring)
 
     def toggle_sqlite_mirroring(self, checked):
         self.config.set("sqlite_enabled", checked)

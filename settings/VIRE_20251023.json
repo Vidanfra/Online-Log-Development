@@ -551,64 +551,28 @@
         }
     ],
     "folder_paths": {
-        "Main TXT File": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_VIRE_NEW",
-        "Naviscan": "Y:/600061_CNOOC/GEAD",
-        "Qinsy DB": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/Database",
-        "SVP": "J:/CNO_600061/03_RAW_DATA/02_VIRE_WROV/03_SVP/CTD_Log",
-        "TXT Source 2": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_WROV_NEW",
-        "TXT Source 3": "S:/QPS PROJECTS/600061_CNOOC_Inspection_2025_ED50_UTM30/LogFiles/Online_Log_OBSROV_NEW",
-        "grgergrg": "",
-        "NewFolder": ""
+        "Qinsy DB": "S:/QPS PROJECTS/600084_SSENT_LT374/Database",
+        "SVP": "T:/SSE_600084/LT374/03_RAW_DATA/01_VIRE/08_SVP_or_CTD/CTD_Logs"
     },
     "folder_columns": {
-        "Main TXT File": "Main_TXT_File",
-        "Naviscan": "SBD Files",
-        "Qinsy DB": "S-Files",
-        "SVP": "Notes",
-        "TXT Source 2": "TXT_Source_2",
-        "TXT Source 3": "TXT_Set3_File",
-        "grgergrg": "grgergrg",
-        "NewFolder": "NewFolder"
+        "Qinsy DB": "Qinsy DB",
+        "SVP": "SVP"
     },
     "file_extensions": {
-        "Main TXT File": "txt",
-        "Naviscan": "SBD",
         "Qinsy DB": "db",
-        "SVP": "csv",
-        "TXT Source 2": "txt",
-        "TXT Source 3": "txt",
-        "grgergrg": "",
-        "NewFolder": ""
+        "SVP": "csv"
     },
     "folder_skips": {
-        "Main TXT File": false,
-        "Naviscan": true,
         "Qinsy DB": false,
-        "SVP": false,
-        "TXT Source 2": false,
-        "TXT Source 3": false,
-        "grgergrg": false,
-        "NewFolder": false
+        "SVP": false
     },
     "folder_log_x_instead": {
-        "Main TXT File": false,
-        "Naviscan": false,
         "Qinsy DB": false,
-        "SVP": false,
-        "TXT Source 2": false,
-        "TXT Source 3": false,
-        "grgergrg": false,
-        "NewFolder": false
+        "SVP": false
     },
     "folder_log_ext_vars": {
-        "Main TXT File": false,
-        "Naviscan": false,
         "Qinsy DB": false,
-        "SVP": false,
-        "TXT Source 2": false,
-        "TXT Source 3": false,
-        "grgergrg": false,
-        "NewFolder": false
+        "SVP": false
     },
     "udp_trigger_enabled": true,
     "udp_trigger_port": 7999,
