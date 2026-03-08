@@ -47,14 +47,46 @@ def resource_path(relative_path):
 # GLOBAL EXCEPTION HANDLER
 # =====================================================================
 def global_exception_handler(exc_type, exc_value, exc_traceback):
-    """Catches fatal errors and displays them in a GUI popup before crashing."""
+    """Catches fatal errors, saves history to disk, and displays a GUI popup."""
     traceback.print_exception(exc_type, exc_value, exc_traceback)
-    msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    traceback_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+    
+    # 1. Gather recent console history
+    recent_history = ""
+    full_history = ""
+    if 'console_logger' in globals():
+        full_history = "".join(console_logger.history)
+        recent_history = "".join(console_logger.history[-50:]) # Show last 50 lines in the UI
+        
+    full_msg = f"--- LAST SYSTEM MESSAGES ---\n{recent_history}\n\n--- FATAL CRASH ---\n{traceback_msg}"
+    
+    # 2. Automatically dump a permanent crash log to the hard drive
+    try:
+        log_path = os.path.join(os.getcwd(), "crash_log.txt")
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(f"CRASH DATE: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("="*60 + "\n")
+            f.write(full_history)
+            f.write("\n" + "="*60 + "\n")
+            f.write("FATAL TRACEBACK:\n")
+            f.write(traceback_msg)
+    except Exception:
+        pass
+
+    # 3. Show the UI Popup (Forced to the absolute front)
     box = QMessageBox()
+    # -Force the crash window to sit on top of everything else
+    box.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True) 
+    
     box.setIcon(QMessageBox.Icon.Critical)
     box.setWindowTitle("Critical Application Error")
-    box.setText("An unexpected error occurred!")
-    box.setDetailedText(msg)
+    box.setText("The application encountered a fatal error and must close.\n\nA complete diagnostic log has been saved to 'crash_log.txt' in the application folder.")
+    box.setDetailedText(full_msg)
+    box.setStyleSheet("QTextEdit { min-width: 600px; min-height: 300px; font-family: monospace; font-size: 12px; }")
+    
+    # Bring window to focus
+    box.raise_()
+    box.activateWindow()
     box.exec()
 
 sys.excepthook = global_exception_handler
@@ -141,7 +173,7 @@ class ConfigManager:
                     loaded = json.load(f)
                     self.settings.update(loaded)
                     
-                    # FIX: Only apply legacy migration if the new dictionary DOES NOT exist yet
+                    # Only apply legacy migration if the new dictionary DOES NOT exist yet
                     if "txt_folder_paths" not in loaded and "txt_folder_path" in loaded:
                         self.settings["txt_folder_paths"]["Main TXT"] = loaded.get("txt_folder_path", "")
                         self.settings["txt_folder_paths"]["TXT Source 2"] = loaded.get("txt_folder_path_set2", "")
@@ -180,7 +212,7 @@ class ExcelLogger:
 
             wb = xw.Book(self.log_file_path)
             
-            # --- FIX: Safely read static cells on the isolated background thread ---
+            # --- Safely read static cells on the isolated background thread ---
             if static_configs:
                 for config in static_configs:
                     excel_col_key = config.get("field", "").strip()
@@ -521,7 +553,7 @@ class UdpListenerWorker(QObject):
     
     def __init__(self, port, payload_rec="RECORDING", payload_idle="IDLE"):
         super().__init__()
-        # FIX: Start with current_state as None instead of "IDLE"
+        #  Start with current_state as None instead of "IDLE"
         self.port, self.running, self.sock, self.current_state = port, True, None, None
         self.payload_rec = payload_rec.upper()
         self.payload_idle = payload_idle.upper()
@@ -1764,14 +1796,23 @@ class SettingsDialog(QDialog):
     def add_folder_row(self, name="", path="", col="", ext="", skip=False, log_x=False, log_ext=False):
         card = QFrame(); card.setObjectName("Card"); card_layout = QVBoxLayout(card); card_layout.setContentsMargins(0,0,0,0); card_layout.setSpacing(0)
         header_widget = QFrame(); header_lay = QHBoxLayout(header_widget); header_lay.setContentsMargins(10, 8, 10, 8)
+
         btn_toggle = QPushButton("▶"); btn_toggle.setFixedSize(32, 32); btn_toggle.setCheckable(True); btn_toggle.setStyleSheet("QPushButton { border: none; font-size: 16px; color: palette(text); background: transparent; } QPushButton:hover { color: #0078d4; background-color: rgba(128, 128, 128, 0.15); border-radius: 16px; }")
-        edit_name = QLineEdit(name); edit_name.setPlaceholderText("Folder Alias..."); edit_name.setMinimumWidth(160)
+        edit_name = QLineEdit(name); edit_name.setPlaceholderText("Folder Name..."); edit_name.setMinimumWidth(160)
         edit_col = QLineEdit(col); edit_col.setPlaceholderText("Target Column..."); edit_col.setMinimumWidth(160)
         btn_del = QPushButton("Remove"); btn_del.setStyleSheet("QPushButton { color: #FF6B6B; border: 1px solid #FF6B6B; background: transparent; padding: 4px 12px; border-radius: 4px; font-weight: bold; } QPushButton:hover { background-color: rgba(255, 107, 107, 0.15); }")
-        header_lay.addWidget(btn_toggle); header_lay.addWidget(QLabel("<b>Alias:</b>")); header_lay.addWidget(edit_name); header_lay.addSpacing(20); header_lay.addWidget(QLabel("<b>Excel Column:</b>")); header_lay.addWidget(edit_col); header_lay.addStretch(); header_lay.addWidget(btn_del); card_layout.addWidget(header_widget)
+        header_lay.addWidget(btn_toggle); header_lay.addWidget(QLabel("<b>Name:</b>")); header_lay.addWidget(edit_name); header_lay.addSpacing(20); header_lay.addWidget(QLabel("<b>Excel Column:</b>")); header_lay.addWidget(edit_col); header_lay.addStretch(); header_lay.addWidget(btn_del); card_layout.addWidget(header_widget)
+
         content_widget = QWidget(); content_layout = QVBoxLayout(content_widget); content_layout.setContentsMargins(45, 15, 15, 15); content_layout.setSpacing(12)
-        path_lay = QHBoxLayout(); edit_path = QLineEdit(path); btn_browse = QPushButton("Browse..."); btn_browse.clicked.connect(lambda checked=False, e=edit_path: self.browse_folder(e))
+        path_lay = QHBoxLayout(); edit_path = QLineEdit(path)
+        
+        btn_browse = QPushButton("Browse...")
+        btn_browse.setStyleSheet("QPushButton { background-color: rgba(128, 128, 128, 0.05); color: palette(text); border: 1px solid rgba(128, 128, 128, 0.3); border-radius: 4px; padding: 6px 12px; font-weight: bold; } QPushButton:hover { background-color: rgba(0, 120, 212, 0.1); border-color: #0078D4; color: #0078D4; }")
+        btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_browse.clicked.connect(lambda checked=False, e=edit_path: self.browse_folder(e))
+        
         path_lay.addWidget(QLabel("<b>Directory Path:</b>")); path_lay.addWidget(edit_path); path_lay.addWidget(btn_browse); content_layout.addLayout(path_lay)
+        
         target_lay = QHBoxLayout(); edit_ext = QLineEdit(ext); edit_ext.setFixedWidth(100); target_lay.addWidget(QLabel("<b>File Ext Filter:</b>")); target_lay.addWidget(edit_ext); target_lay.addStretch(); content_layout.addLayout(target_lay)
         chk_group = QFrame(); chk_group.setStyleSheet("QFrame { border-top: 1px solid rgba(128,128,128,0.2); margin-top: 5px; padding-top: 10px; }"); chk_lay = QHBoxLayout(chk_group); chk_lay.setContentsMargins(0, 0, 0, 0)
         chk_skip = QCheckBox("Skip Monitoring"); chk_skip.setChecked(skip); chk_skip.setStyleSheet("color: #FF6B6B; font-weight: bold;")
@@ -1827,12 +1868,20 @@ class SettingsDialog(QDialog):
                 for config in c.get('static_field_configs', []): self.add_static_card(config.get("field", ""), config.get("description", ""), config.get("column_name", ""))
             if hasattr(self, 'folders_layout'):
                 for refs in getattr(self, 'folder_input_refs', [])[:]: self._remove_folder_card(refs)
+                
                 f_paths = c.get('folder_paths', {})
-                all_folders = set(DEFAULT_MONITORED_FOLDERS).union(f_paths.keys())
+                # Only inject defaults if this is a brand new project, otherwise use EXACTLY what is saved
+                if not f_paths and not c.get('_folders_initialized', False):
+                    all_folders = list(DEFAULT_MONITORED_FOLDERS)
+                    c.set('_folders_initialized', True)
+                else:
+                    all_folders = list(f_paths.keys())
+                    
                 f_cols = c.get('folder_columns', {}); f_exts = c.get('file_extensions', {}); f_skips = c.get('folder_skips', {})
                 f_logx = c.get('folder_log_x_instead', {}); f_logext = c.get('folder_log_ext_vars', {})
-                for name in sorted(all_folders):
+                for name in all_folders:
                     self.add_folder_row(name, f_paths.get(name, ""), f_cols.get(name, name.replace(" ", "_")), f_exts.get(name, ""), f_skips.get(name, False), f_logx.get(name, False), f_logext.get(name, False))
+
             if hasattr(self, 'codes_table'):
                 self.codes_table.setRowCount(0)
                 for code, desc in c.get('event_codes', {}).items(): self.add_event_code_row(code, desc)
@@ -1877,8 +1926,10 @@ class SettingsDialog(QDialog):
             
             f_paths, f_cols, f_exts, f_skips, f_logx, f_logext = {}, {}, {}, {}, {}, {}
             for refs in getattr(self, 'folder_input_refs', []):
-                name, path = refs['name'].text().strip(), refs['path'].text().strip()
-                if name and path:
+                name = refs['name'].text().strip()
+                path = refs['path'].text().strip()
+                # Save the folder as long as it has a name. It's okay if the path is left blank!
+                if name:
                     f_paths[name] = path
                     f_cols[name] = refs['col'].text().strip() or name
                     f_exts[name] = refs['ext'].text().strip()
@@ -1886,6 +1937,7 @@ class SettingsDialog(QDialog):
                     f_logx[name] = refs['log_x'].isChecked()
                     f_logext[name] = refs['log_ext'].isChecked()
             c.set('folder_paths', f_paths)
+            c.set('_folders_initialized', True) 
             c.set('folder_columns', f_cols)
             c.set('file_extensions', f_exts)
             c.set('folder_skips', f_skips)
@@ -2619,7 +2671,7 @@ class DataLoggerMainWindow(QMainWindow):
 
             bg, _ = self._get_color_tuple(event_type)
             
-            # 2. PySide6 Threading - FIX: No Lambda!
+            # 2. PySide6 Threading 
             logger = ExcelLogger(self.config.get("log_file_path"), self.sqlite_manager)
             thread = QThread()
             
@@ -2904,7 +2956,8 @@ class DataLoggerMainWindow(QMainWindow):
         if hasattr(self, 'udp_thread') and self.udp_thread:
             try:
                 self.udp_thread.quit()
-                self.udp_thread.wait(200) # Wait max 200ms instead of 1000ms
+                # 600ms because the UDP network check takes 500ms to cycle!
+                self.udp_thread.wait(600) 
             except Exception: pass
 
         # 4. Clean up any stuck background worker threads
@@ -2912,7 +2965,8 @@ class DataLoggerMainWindow(QMainWindow):
             try:
                 if thread.isRunning(): 
                     thread.quit()
-                    thread.wait(200) # Wait max 200ms, then force close anyway
+                    # Give Excel writers a little more time to cleanly detach
+                    thread.wait(600) 
             except Exception: pass
             
         print("[SYSTEM] Safe to close.")
@@ -2937,17 +2991,35 @@ class DebugDialog(QDialog):
             self.text_browser.moveCursor(QTextCursor.MoveOperation.End)
             console_logger.written.connect(self.append_text)
             
+        bot_lay = QHBoxLayout()
+        
+        # --- NEW: Force Crash Button ---
+        btn_crash = QPushButton("☢️ Force Test Crash")
+        btn_crash.setStyleSheet("QPushButton { border: 1px solid #FF6B6B; border-radius: 6px; padding: 8px 20px; font-weight: bold; background-color: rgba(255, 107, 107, 0.1); color: #FF6B6B; } QPushButton:hover { background-color: rgba(255, 107, 107, 0.3); }")
+        btn_crash.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_crash.clicked.connect(self.trigger_fake_crash)
+        bot_lay.addWidget(btn_crash)
+        
+        bot_lay.addStretch()
+        
         btn_close = QPushButton("Close Console")
         btn_close.setStyleSheet("QPushButton { border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; padding: 8px 20px; font-weight: bold; background-color: #333333; color: white; } QPushButton:hover { background-color: #555555; }")
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close, alignment=Qt.AlignmentFlag.AlignRight)
+        bot_lay.addWidget(btn_close)
+        
+        layout.addLayout(bot_lay)
         
     def append_text(self, text):
         # Auto-scroll to bottom when new text arrives
         self.text_browser.moveCursor(QTextCursor.MoveOperation.End)
         self.text_browser.insertPlainText(text)
         self.text_browser.moveCursor(QTextCursor.MoveOperation.End)
+
+    def trigger_fake_crash(self):
+        print("\n[DEBUG] User triggered a fake crash to test the exception handler!")
+        # This will instantly halt the thread and send it to the global_exception_handler
+        raise RuntimeError("This is a deliberately triggered test crash from the Debug console.")
 
 class HelpDialog(QDialog):
     def __init__(self, parent=None):

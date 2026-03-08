@@ -1,0 +1,16 @@
+CRASH DATE: 2026-03-08 07:32:51
+============================================================
+[SYSTEM] Next Midnight 'New Day' log scheduled in 16.45 hours.
+
+[DEBUG] User triggered a fake crash to test the exception handler!
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\Online Log devlopment\Online-Log-Development\Python Script\ONLINE_LOGGER v2.2.py", line 3020, in trigger_fake_crash
+    raise RuntimeError("This is a deliberately triggered test crash from the Debug console.")
+RuntimeError: This is a deliberately triggered test crash from the Debug console.
+
+============================================================
+FATAL TRACEBACK:
+Traceback (most recent call last):
+  File "C:\Users\Administrator\Desktop\Online Log devlopment\Online-Log-Development\Python Script\ONLINE_LOGGER v2.2.py", line 3020, in trigger_fake_crash
+    raise RuntimeError("This is a deliberately triggered test crash from the Debug console.")
+RuntimeError: This is a deliberately triggered test crash from the Debug console.
